@@ -134,6 +134,9 @@ Passos obrigatórios:
    Para produção use `UPLOAD_DRIVER=s3` com `S3_BUCKET`, `S3_ACCESS_KEY_ID`,
    `S3_SECRET_ACCESS_KEY` (+ `S3_ENDPOINT`/`S3_REGION` para MinIO/Supabase/R2 e
    `S3_PUBLIC_URL` para CDN). O bucket precisa de leitura pública.
+   Supabase Storage: `S3_ENDPOINT=https://<ref>.storage.supabase.co/storage/v1/s3`,
+   `S3_PUBLIC_URL=https://<ref>.storage.supabase.co/storage/v1/object/public/<bucket>`
+   (bucket público + policies de leitura; chaves em Settings → API Keys → S3).
 
 ## Estrutura
 
