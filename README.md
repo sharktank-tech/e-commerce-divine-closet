@@ -130,8 +130,10 @@ Passos obrigatórios:
 3. **Variáveis de ambiente** (Settings → Environment Variables):
    `DATABASE_URL`, `JWT_SECRET` (segredo forte), `NEXT_PUBLIC_APP_URL`,
    `UPLOAD_DRIVER`, `EMAIL_DRIVER` (+ `SMTP_*`), `PAYMENT_DRIVER`.
-4. **Uploads:** `UPLOAD_DRIVER=local` não persiste na Vercel (filesystem efêmero) —
-   imagens de produto/banner exigem S3 (`UPLOAD_DRIVER=s3`, a integrar — ver checklist).
+4. **Uploads:** `UPLOAD_DRIVER=local` não persiste na Vercel (filesystem efêmero).
+   Para produção use `UPLOAD_DRIVER=s3` com `S3_BUCKET`, `S3_ACCESS_KEY_ID`,
+   `S3_SECRET_ACCESS_KEY` (+ `S3_ENDPOINT`/`S3_REGION` para MinIO/Supabase/R2 e
+   `S3_PUBLIC_URL` para CDN). O bucket precisa de leitura pública.
 
 ## Estrutura
 
