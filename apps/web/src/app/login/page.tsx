@@ -73,6 +73,12 @@ function LoginForm() {
           <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
         )}
 
+        <div className="text-right">
+          <Link href="/recuperar" className="text-xs text-ink-mute hover:text-ink underline">
+            Esqueci a senha
+          </Link>
+        </div>
+
         <Button type="submit" className="w-full" size="lg" disabled={loading}>
           {loading ? "Entrando..." : "Entrar"}
         </Button>

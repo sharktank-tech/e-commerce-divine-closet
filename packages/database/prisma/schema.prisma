@@ -54,18 +54,20 @@ enum BannerStatus {
 }
 
 model User {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email        String    @unique
-  password     String
-  name         String
-  phone        String?
-  role         Role      @default(CLIENT)
-  active       Boolean   @default(true)
-  provider     String?   // null = credencial; estrutura p/ login social (desativado)
-  socialId     String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                String    @unique
+  password             String
+  name                 String
+  phone                String?
+  role                 Role      @default(CLIENT)
+  active               Boolean   @default(true)
+  provider             String? // null = credencial; estrutura p/ login social (desativado)
+  socialId             String?
+  passwordResetToken   String?   @unique
+  passwordResetExpires DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
 
   addresses Address[]
   orders    Order[]
@@ -78,10 +80,10 @@ model User {
 }
 
 model Address {
-  id           String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String? @db.Uuid
-  user         User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label        String  @default("Principal")
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String?  @db.Uuid
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label        String   @default("Principal")
   street       String
   number       String
   complement   String?
@@ -89,10 +91,10 @@ model Address {
   city         String
   state        String
   zipCode      String
-  country      String  @default("BR")
-  isDefault    Boolean @default(false)
+  country      String   @default("BR")
+  isDefault    Boolean  @default(false)
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
 
   orders Order[]
 }
@@ -102,7 +104,7 @@ model Category {
   name        String         @unique
   slug        String         @unique
   description String?
-  parentId    String? @db.Uuid
+  parentId    String?        @db.Uuid
   parent      Category?      @relation("CategoryTree", fields: [parentId], references: [id])
   children    Category[]     @relation("CategoryTree")
   status      CategoryStatus @default(ACTIVE)
@@ -127,16 +129,16 @@ model Product {
   images       String[]
   sizes        String[]
   colors       String[]
-  categoryId   String @db.Uuid
+  categoryId   String    @db.Uuid
   category     Category  @relation(fields: [categoryId], references: [id])
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
-  orderItems OrderItem[]
-  reviews    Review[]
-  cartItems  CartItem[]
-  variations ProductVariation[]
+  orderItems   OrderItem[]
+  reviews      Review[]
+  cartItems    CartItem[]
+  variations   ProductVariation[]
   wishlistedBy WishlistItem[]
 
   @@index([categoryId])
@@ -146,7 +148,7 @@ model Product {
 
 model ProductVariation {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  productId String @db.Uuid
+  productId String   @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   size      String
   color     String?
@@ -160,9 +162,9 @@ model ProductVariation {
 
 model WishlistItem {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String @db.Uuid
+  userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId String @db.Uuid
+  productId String   @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
@@ -177,22 +179,22 @@ model Setting {
 }
 
 model Cart {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId         String?   @unique @db.Uuid
-  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  guestId        String?   @unique
-  couponCode     String?
-  updatedAt      DateTime  @updatedAt
-  createdAt      DateTime  @default(now())
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?  @unique @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestId    String?  @unique
+  couponCode String?
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
 
   items CartItem[]
 }
 
 model CartItem {
   id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  cartId    String @db.Uuid
+  cartId    String  @db.Uuid
   cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  productId String @db.Uuid
+  productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   quantity  Int     @default(1)
   size      String?
@@ -202,30 +204,30 @@ model CartItem {
 }
 
 model Order {
-  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  number        String         @unique
-  userId        String? @db.Uuid
-  user          User?          @relation(fields: [userId], references: [id])
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  number        String        @unique
+  userId        String?       @db.Uuid
+  user          User?         @relation(fields: [userId], references: [id])
   guestEmail    String?
   guestName     String?
-  addressId     String? @db.Uuid
-  address       Address?       @relation(fields: [addressId], references: [id])
-  status        OrderStatus    @default(PENDING)
-  paymentStatus PaymentStatus  @default(PENDING)
-  paymentMethod PaymentMethod  @default(CARD)
+  addressId     String?       @db.Uuid
+  address       Address?      @relation(fields: [addressId], references: [id])
+  status        OrderStatus   @default(PENDING)
+  paymentStatus PaymentStatus @default(PENDING)
+  paymentMethod PaymentMethod @default(CARD)
   paymentId     String?
   couponCode    String?
-  subtotal      Decimal        @db.Decimal(10, 2)
-  shipping      Decimal        @default(0) @db.Decimal(10, 2)
-  discount      Decimal        @default(0) @db.Decimal(10, 2)
-  total         Decimal        @db.Decimal(10, 2)
+  subtotal      Decimal       @db.Decimal(10, 2)
+  shipping      Decimal       @default(0) @db.Decimal(10, 2)
+  discount      Decimal       @default(0) @db.Decimal(10, 2)
+  total         Decimal       @db.Decimal(10, 2)
   notes         String?
   trackingCode  String?
   utmSource     String?
   utmMedium     String?
   utmCampaign   String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
   deletedAt     DateTime?
 
   items OrderItem[]
@@ -237,9 +239,9 @@ model Order {
 
 model OrderItem {
   id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId     String @db.Uuid
+  orderId     String  @db.Uuid
   order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId   String @db.Uuid
+  productId   String  @db.Uuid
   product     Product @relation(fields: [productId], references: [id])
   productName String
   productSlug String
@@ -252,33 +254,33 @@ model OrderItem {
 }
 
 model Review {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId String @db.Uuid
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String    @db.Uuid
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   rating    Int
   comment   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   @@unique([userId, productId])
 }
 
 model Coupon {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code        String      @unique
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String     @unique
   type        CouponType
-  value       Decimal     @db.Decimal(10, 2)
-  minSubtotal Decimal?    @db.Decimal(10, 2)
+  value       Decimal    @db.Decimal(10, 2)
+  minSubtotal Decimal?   @db.Decimal(10, 2)
   maxUses     Int?
-  usedCount   Int         @default(0)
-  active      Boolean     @default(true)
-  startsAt    DateTime    @default(now())
+  usedCount   Int        @default(0)
+  active      Boolean    @default(true)
+  startsAt    DateTime   @default(now())
   endsAt      DateTime?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
 }
 

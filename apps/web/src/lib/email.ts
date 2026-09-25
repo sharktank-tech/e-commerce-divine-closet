@@ -80,8 +80,8 @@ export const emails = {
     subject: `Pedido ${number} pago com sucesso`,
     text: `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
   }),
-  passwordReset: (token: string) => ({
+  passwordReset: (link: string) => ({
     subject: "Redefinir senha - Divine Closet",
-    text: `Use o link para redefinir sua senha: ${process.env.NEXT_PUBLIC_APP_URL}/reset?token=${token}`,
+    text: `Recebemos um pedido de redefinição de senha. Use o link abaixo (válido por 1 hora):\n\n${link}\n\nSe não foi você, ignore este e-mail.`,
   }),
 };
