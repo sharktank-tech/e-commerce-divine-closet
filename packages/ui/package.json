@@ -1,0 +1,8 @@
+{
+  "name": "@divine/ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Theme tokens e componentes compartilhados",
+  "main": "src/theme.ts",
+  "types": "src/theme.ts"
+}

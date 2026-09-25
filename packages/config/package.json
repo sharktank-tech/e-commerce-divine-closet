@@ -1,0 +1,8 @@
+{
+  "name": "@divine/config",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Configurações e defaults centralizados (TODO-CLIENTE)",
+  "main": "src/defaults.ts",
+  "types": "src/defaults.ts"
+}
