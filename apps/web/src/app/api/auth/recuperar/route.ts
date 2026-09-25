@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
         data: { passwordResetToken: token, passwordResetExpires: expires },
       });
 
-      const link = `${req.nextUrl.origin}/redefinir?token=${token}`;
+      // base do link: domínio oficial via env, com fallback para a origem do request
+      const base = (process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin).replace(/\/$/, "");
+      const link = `${base}/redefinir?token=${token}`;
       try {
         await sendEmail({ to: user.email, ...emails.passwordReset(link) });
       } catch (err) {

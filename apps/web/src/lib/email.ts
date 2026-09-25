@@ -82,6 +82,41 @@ export const emails = {
   }),
   passwordReset: (link: string) => ({
     subject: "Redefinir senha - Divine Closet",
-    text: `Recebemos um pedido de redefinição de senha. Use o link abaixo (válido por 1 hora):\n\n${link}\n\nSe não foi você, ignore este e-mail.`,
+    text: [
+      "Olá!",
+      "",
+      "Recebemos um pedido de redefinição de senha da sua conta Divine Closet.",
+      "Copie e cole o link abaixo no navegador (válido por 1 hora):",
+      link,
+      "",
+      "Se não foi você, ignore este e-mail — sua senha permanece a mesma.",
+    ].join("\n"),
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
+  <div style="background:#1F3864;padding:24px 32px;text-align:center">
+    <span style="font-family:Georgia,serif;font-size:24px;font-weight:bold;color:#ffffff">Divine Closet</span>
+  </div>
+  <div style="padding:32px;background:#ffffff">
+    <h1 style="font-size:20px;color:#1F3864;margin:0 0 16px">Redefinição de senha</h1>
+    <p style="font-size:14px;line-height:1.6;margin:0 0 16px">
+      Olá! Recebemos um pedido de redefinição de senha da sua conta.
+      Clique no botão abaixo para criar uma nova senha (válido por 1 hora):
+    </p>
+    <div style="text-align:center;margin:28px 0">
+      <a href="${link}" style="display:inline-block;background:#1F3864;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;padding:14px 36px;border-radius:8px">Clique aqui</a>
+    </div>
+    <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:0 0 8px">
+      Se o botão não funcionar, copie e cole este link no navegador:
+    </p>
+    <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:0;word-break:break-all">
+      <a href="${link}" style="color:#B08D57">${link}</a>
+    </p>
+    <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:16px 0 0">
+      Se não foi você, ignore este e-mail — sua senha permanece a mesma.
+    </p>
+  </div>
+  <div style="background:#f3f4f6;padding:16px 32px;text-align:center;font-size:11px;color:#9ca3af">
+    Divine Closet — Moda que eleva o seu dia
+  </div>
+</div>`,
   }),
 };
