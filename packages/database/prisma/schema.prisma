@@ -54,7 +54,7 @@ enum BannerStatus {
 }
 
 model User {
-  id           String    @id @default(cuid())
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email        String    @unique
   password     String
   name         String
@@ -78,8 +78,8 @@ model User {
 }
 
 model Address {
-  id           String  @id @default(cuid())
-  userId       String?
+  id           String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String? @db.Uuid
   user         User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
   label        String  @default("Principal")
   street       String
@@ -98,11 +98,11 @@ model Address {
 }
 
 model Category {
-  id          String         @id @default(cuid())
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name        String         @unique
   slug        String         @unique
   description String?
-  parentId    String?
+  parentId    String? @db.Uuid
   parent      Category?      @relation("CategoryTree", fields: [parentId], references: [id])
   children    Category[]     @relation("CategoryTree")
   status      CategoryStatus @default(ACTIVE)
@@ -114,7 +114,7 @@ model Category {
 }
 
 model Product {
-  id           String    @id @default(cuid())
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name         String
   slug         String    @unique
   description  String
@@ -127,7 +127,7 @@ model Product {
   images       String[]
   sizes        String[]
   colors       String[]
-  categoryId   String
+  categoryId   String @db.Uuid
   category     Category  @relation(fields: [categoryId], references: [id])
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -145,8 +145,8 @@ model Product {
 }
 
 model ProductVariation {
-  id        String   @id @default(cuid())
-  productId String
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId String @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   size      String
   color     String?
@@ -159,10 +159,10 @@ model ProductVariation {
 }
 
 model WishlistItem {
-  id        String   @id @default(cuid())
-  userId    String
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId String
+  productId String @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
@@ -177,8 +177,8 @@ model Setting {
 }
 
 model Cart {
-  id             String    @id @default(cuid())
-  userId         String?   @unique
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String?   @unique @db.Uuid
   user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   guestId        String?   @unique
   couponCode     String?
@@ -189,10 +189,10 @@ model Cart {
 }
 
 model CartItem {
-  id        String  @id @default(cuid())
-  cartId    String
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cartId    String @db.Uuid
   cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  productId String
+  productId String @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   quantity  Int     @default(1)
   size      String?
@@ -202,13 +202,13 @@ model CartItem {
 }
 
 model Order {
-  id            String         @id @default(cuid())
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   number        String         @unique
-  userId        String?
+  userId        String? @db.Uuid
   user          User?          @relation(fields: [userId], references: [id])
   guestEmail    String?
   guestName     String?
-  addressId     String?
+  addressId     String? @db.Uuid
   address       Address?       @relation(fields: [addressId], references: [id])
   status        OrderStatus    @default(PENDING)
   paymentStatus PaymentStatus  @default(PENDING)
@@ -236,10 +236,10 @@ model Order {
 }
 
 model OrderItem {
-  id          String  @id @default(cuid())
-  orderId     String
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String @db.Uuid
   order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId   String
+  productId   String @db.Uuid
   product     Product @relation(fields: [productId], references: [id])
   productName String
   productSlug String
@@ -252,10 +252,10 @@ model OrderItem {
 }
 
 model Review {
-  id        String   @id @default(cuid())
-  userId    String
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId String
+  productId String @db.Uuid
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   rating    Int
   comment   String
@@ -267,7 +267,7 @@ model Review {
 }
 
 model Coupon {
-  id          String      @id @default(cuid())
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   code        String      @unique
   type        CouponType
   value       Decimal     @db.Decimal(10, 2)
@@ -283,7 +283,7 @@ model Coupon {
 }
 
 model Banner {
-  id        String       @id @default(cuid())
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   title     String
   subtitle  String?
   imageUrl  String
@@ -296,7 +296,7 @@ model Banner {
 }
 
 model AuditLog {
-  id        String   @id @default(cuid())
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId    String?
   action    String
   entity    String
