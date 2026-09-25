@@ -18,7 +18,8 @@
     "prisma:deploy": "prisma migrate deploy --schema packages/database/prisma/schema.prisma",
     "db:seed": "tsx packages/database/prisma/seed.ts",
     "db:reset": "prisma migrate reset --force --schema packages/database/prisma/schema.prisma",
-    "db:studio": "prisma studio --schema packages/database/prisma/schema.prisma"
+    "db:studio": "prisma studio --schema packages/database/prisma/schema.prisma",
+    "postinstall": "prisma generate --schema packages/database/prisma/schema.prisma"
   },
   "prisma": {
     "seed": "tsx packages/database/prisma/seed.ts"

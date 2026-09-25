@@ -107,6 +107,32 @@ npm run db:studio      # Prisma Studio
 npm run db:reset       # reset + seed
 ```
 
+## Deploy na Vercel
+
+Configurações do projeto no dashboard:
+
+- **Root Directory:** `apps/web`
+- **Framework Preset:** Next.js (detectado via `apps/web/package.json`)
+- **Build Command / Output:** padrão (`npm run build` → `.next`)
+- **Install:** padrão — o `package-lock.json` da raiz registra os workspaces e o
+  `postinstall` gera o Prisma Client (`packages/database/prisma/schema.prisma`)
+
+Passos obrigatórios:
+
+1. **Banco gerenciado** (Neon, Supabase ou Vercel Postgres) — o `localhost` do `.env`
+   não existe na Vercel. Use a URL com pool de conexões (`?pgbouncer=true`).
+2. **Migrations em produção** — rode uma vez da sua máquina, apontando para o banco
+   de produção:
+   ```bash
+   DATABASE_URL="<url-producao>" npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+   ```
+   Não rode `db:seed` em produção (criaria admin/cliente de exemplo).
+3. **Variáveis de ambiente** (Settings → Environment Variables):
+   `DATABASE_URL`, `JWT_SECRET` (segredo forte), `NEXT_PUBLIC_APP_URL`,
+   `UPLOAD_DRIVER`, `EMAIL_DRIVER` (+ `SMTP_*`), `PAYMENT_DRIVER`.
+4. **Uploads:** `UPLOAD_DRIVER=local` não persiste na Vercel (filesystem efêmero) —
+   imagens de produto/banner exigem S3 (`UPLOAD_DRIVER=s3`, a integrar — ver checklist).
+
 ## Estrutura
 
 ```
