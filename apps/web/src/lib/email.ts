@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer";
+
 type SendEmailInput = {
   to: string;
   subject: string;
@@ -6,8 +8,9 @@ type SendEmailInput = {
 };
 
 /**
- * Mock de e-mail transacional: em dev apenas loga no console.
- * TODO-CLIENTE: SMTP / provedor de e-mail real (Resend, SES, etc.)
+ * E-mail transacional.
+ * - EMAIL_DRIVER=mock → apenas loga no console (dev)
+ * - EMAIL_DRIVER=smtp → envio real via SMTP (Zoho Mail em produção)
  */
 export async function sendEmail(input: SendEmailInput): Promise<void> {
   const driver = process.env.EMAIL_DRIVER || "mock";
@@ -23,7 +26,40 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     return;
   }
 
-  // Integração SMTP real pode ser adicionada aqui (nodemailer, resend, etc.)
+  if (driver === "smtp") {
+    const host = process.env.SMTP_HOST;
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    if (!host || !user || !pass) {
+      throw new Error(
+        "SMTP não configurado (defina SMTP_HOST, SMTP_USER e SMTP_PASS)."
+      );
+    }
+
+    const port = Number(process.env.SMTP_PORT || 587);
+    // porta 465 = TLS direto; demais (587) = STARTTLS
+    const secure =
+      process.env.SMTP_SECURE != null
+        ? process.env.SMTP_SECURE === "true"
+        : port === 465;
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+    });
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || user,
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+    });
+    return;
+  }
+
   throw new Error(`Driver de e-mail não suportado: ${driver}`);
 }
 
