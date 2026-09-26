@@ -59,7 +59,7 @@ export function Header() {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2.5">
           <img
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Divine Closet"
             className="h-10 w-10 rounded-full object-cover ring-2 ring-primary-200"
           />

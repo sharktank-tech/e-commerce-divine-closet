@@ -89,7 +89,11 @@ export default async function HomePage() {
           <div className="relative">
             <div className="aspect-[4/5] overflow-hidden rounded-3xl bg-white/10 shadow-2xl">
               <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-                <span className="font-display text-6xl font-bold text-white/70">DC</span>
+                <img
+                  src="/logo.png"
+                  alt="Divine Closet"
+                  className="h-44 w-44 rounded-full object-cover shadow-2xl ring-4 ring-white/20"
+                />
                 <p className="max-w-xs text-sm text-primary-100">
                   Sua próxima peça favorita está aqui.
                 </p>

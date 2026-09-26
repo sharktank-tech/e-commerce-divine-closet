@@ -7,7 +7,7 @@ export function Footer() {
         <div className="md:col-span-2">
           <p className="flex items-center gap-2.5 font-display text-xl font-bold text-white">
             <img
-              src="/logo.jpeg"
+              src="/logo.png"
               alt="Divine Closet"
               className="h-9 w-9 rounded-full object-cover ring-2 ring-white/20"
             />
