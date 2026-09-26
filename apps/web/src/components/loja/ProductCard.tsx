@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatBRL, toNumber } from "@/lib/utils";
+import { ProductSlideshow } from "./ProductSlideshow";
 
 type Product = {
   id: string;
@@ -14,7 +15,6 @@ type Product = {
 };
 
 export function ProductCard({ product }: { product: Product }) {
-  const img = product.images[0];
   const priceNum = Number(product.price);
   const compareNum = product.comparePrice != null ? Number(product.comparePrice) : null;
   const onSale = compareNum != null && compareNum > priceNum;
@@ -25,20 +25,7 @@ export function ProductCard({ product }: { product: Product }) {
       className="group flex flex-col overflow-hidden rounded-xl border border-ink/10 bg-white transition-shadow hover:shadow-lg"
     >
       <div className="relative aspect-[3/4] overflow-hidden bg-primary-100">
-        {img ? (
-          <img
-            src={img}
-            alt={product.name}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-primary-400">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-              <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4H6z" />
-              <path d="M3 6h18" />
-            </svg>
-          </div>
-        )}
+        <ProductSlideshow images={product.images} name={product.name} />
 
         {onSale && (
           <span className="absolute left-3 top-3 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white">

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { AddToCart } from "@/components/loja/AddToCart";
 import { ProductCard } from "@/components/loja/ProductCard";
+import { ProductSlideshow } from "@/components/loja/ProductSlideshow";
 import { FreteEstimator } from "@/components/loja/FreteEstimator";
 import { WishlistButton } from "@/components/loja/WishlistButton";
 import { shipping, features } from "@/config/defaults";
@@ -98,27 +99,8 @@ export default async function ProdutoDetalhePage({
       <div className="grid gap-10 lg:grid-cols-2">
         <div className="space-y-3">
           <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-ink/10 bg-primary-100">
-            {product.images[0] ? (
-              <img
-                src={product.images[0]}
-                alt={product.name}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-primary-400">
-                <span className="font-display text-6xl">DC</span>
-              </div>
-            )}
+            <ProductSlideshow images={product.images} name={product.name} intervalMs={1500} />
           </div>
-          {product.images.length > 1 && (
-            <div className="grid grid-cols-4 gap-3">
-              {product.images.slice(1, 5).map((img, i) => (
-                <div key={i} className="aspect-square overflow-hidden rounded-lg border border-ink/10 bg-primary-100">
-                  <img src={img} alt="" className="h-full w-full object-cover" />
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <div>

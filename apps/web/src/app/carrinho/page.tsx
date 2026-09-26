@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
+import { ProductSlideshow } from "@/components/loja/ProductSlideshow";
 import { formatBRL } from "@/lib/utils";
 import { shipping as shippingConfig } from "@/config/defaults";
 
@@ -102,15 +103,7 @@ export default function CarrinhoPage() {
                 href={`/produtos/${item.product.slug}`}
                 className="h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-primary-100"
               >
-                {item.product.images[0] ? (
-                  <img
-                    src={item.product.images[0]}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-primary-400 text-xs">DC</div>
-                )}
+                <ProductSlideshow images={item.product.images} name="" />
               </Link>
 
               <div className="flex flex-1 flex-col">
