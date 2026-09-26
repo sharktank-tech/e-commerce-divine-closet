@@ -71,7 +71,7 @@ export default async function HomePage() {
               <Button
                 href="/produtos"
                 size="lg"
-                className="bg-white text-[#290582] hover:bg-primary-100"
+                className="bg-white font-semibold text-[#290582] hover:bg-primary-100"
               >
                 Explorar coleção
               </Button>
