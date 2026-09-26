@@ -112,6 +112,14 @@ export async function saveUpload(file: File): Promise<UploadResult> {
     throw new Error(`Driver de upload não suportado: ${driver} (use "local" ou "s3").`);
   }
 
+  // Vercel/serverless têm filesystem somente leitura: o driver local
+  // quebraria com EROFS — falha cedo com mensagem acionável.
+  if (process.env.VERCEL === "1") {
+    throw new Error(
+      "Upload local indisponível neste ambiente (disco somente leitura). Configure UPLOAD_DRIVER=s3 com as credenciais do bucket."
+    );
+  }
+
   const dir = uploadsDir();
   await mkdir(dir, { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());
