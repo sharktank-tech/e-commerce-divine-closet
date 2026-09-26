@@ -63,22 +63,22 @@ export const features = {
 
 export const stockAlertThreshold = 5;
 
-/** Textos institucionais placeholder. */
+/** Textos institucionais (rascunho — aguardando redação final do cliente). */
 export const institutional = {
   about:
-    "[TEXTO PENDENTE DO CLIENTE] A Divine Closet nasceu para valorizar a mulher contemporânea com peças selecionadas, caimento impecável e atendimento de qualidade.",
+    "A Divine Closet nasceu para valorizar a mulher contemporânea com peças selecionadas, caimento impecável e atendimento de qualidade.",
   exchangePolicy:
-    "[TEXTO PENDENTE DO CLIENTE] Trocas e devoluções em até 30 dias após o recebimento, com produto sem sinais de uso.",
+    "Trocas e devoluções em até 30 dias após o recebimento, com produto sem sinais de uso.",
   privacy:
-    "[TEXTO PENDENTE DO CLIENTE] Política de privacidade e tratamento de dados pessoais (LGPD).",
+    "Política de privacidade e tratamento de dados pessoais (LGPD).",
   faq: [
     {
       q: "Qual o prazo de entrega?",
-      a: "[TEXTO PENDENTE DO CLIENTE] Prazo padrão de 5 a 10 dias úteis após a confirmação do pagamento.",
+      a: "Prazo padrão de 5 a 10 dias úteis após a confirmação do pagamento.",
     },
     {
       q: "Como faço para trocar uma peça?",
-      a: "[TEXTO PENDENTE DO CLIENTE] Solicite a troca em até 30 dias pelo e-mail de atendimento.",
+      a: "Solicite a troca em até 30 dias pelo e-mail de atendimento.",
     },
     {
       q: "Quais formas de pagamento são aceitas?",
@@ -86,9 +86,9 @@ export const institutional = {
     },
   ],
   contact: {
-    email: "contato@divinecloset.com",
+    email: "contato@divinecloset.com.br",
     phone: "(11) 3000-0000",
     whatsapp: "(11) 99999-0000",
-    address: "[TEXTO PENDENTE DO CLIENTE] Rua Exemplo, 100 — São Paulo/SP",
+    address: "Rua Exemplo, 100 — São Paulo/SP",
   },
 };
