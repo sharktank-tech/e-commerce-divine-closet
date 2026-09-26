@@ -78,7 +78,7 @@ function SalesChart({ series, demo }: { series: Dash["salesSeries"]; demo: boole
           strokeLinecap="round"
         />
         {pts.map((p, i) => (
-          <circle key={i} cx={p[0]} cy={p[1]} r="3" fill="#1F3864" />
+          <circle key={i} cx={p[0]} cy={p[1]} r="3" fill="#9E2BBA" />
         ))}
       </svg>
       <div className="mt-1 flex justify-between text-[10px] text-ink-mute">

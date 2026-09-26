@@ -92,17 +92,17 @@ export const emails = {
       "Se não foi você, ignore este e-mail — sua senha permanece a mesma.",
     ].join("\n"),
     html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
-  <div style="background:#1F3864;padding:24px 32px;text-align:center">
+  <div style="background:#9E2BBA;padding:24px 32px;text-align:center">
     <span style="font-family:Georgia,serif;font-size:24px;font-weight:bold;color:#ffffff">Divine Closet</span>
   </div>
   <div style="padding:32px;background:#ffffff">
-    <h1 style="font-size:20px;color:#1F3864;margin:0 0 16px">Redefinição de senha</h1>
+    <h1 style="font-size:20px;color:#9E2BBA;margin:0 0 16px">Redefinição de senha</h1>
     <p style="font-size:14px;line-height:1.6;margin:0 0 16px">
       Olá! Recebemos um pedido de redefinição de senha da sua conta.
       Clique no botão abaixo para criar uma nova senha (válido por 1 hora):
     </p>
     <div style="text-align:center;margin:28px 0">
-      <a href="${link}" style="display:inline-block;background:#1F3864;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;padding:14px 36px;border-radius:8px">Clique aqui</a>
+      <a href="${link}" style="display:inline-block;background:#9E2BBA;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;padding:14px 36px;border-radius:8px">Clique aqui</a>
     </div>
     <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:0 0 8px">
       Se o botão não funcionar, copie e cole este link no navegador:

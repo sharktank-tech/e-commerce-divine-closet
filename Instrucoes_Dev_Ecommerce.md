@@ -166,7 +166,7 @@ Cada entidade deve ter `createdAt`/`updatedAt` e soft delete (`deletedAt`) para 
 
 ## 7. Design e Identidade Visual
 
-- Usar como padrão temporário: cor primária `#1F3864`, cor de destaque `#B08D57`, fonte `Inter` ou `Calibri`
+- Usar como padrão temporário: cor primária `#9E2BBA`, cor de destaque `#B08D57`, fonte `Inter` ou `Calibri`
 - Assim que o cliente fornecer manual de marca/logotipo (conforme checklist já enviado), substituir tokens de cor, fonte e logotipo no arquivo central de tema (`/packages/ui/theme.ts`), sem necessidade de alterar componentes individualmente
 
 ---
