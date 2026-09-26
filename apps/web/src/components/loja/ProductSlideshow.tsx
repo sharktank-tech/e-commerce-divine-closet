@@ -45,7 +45,11 @@ export function ProductSlideshow({ images, name, className, intervalMs = 1200 }:
   }
 
   return (
-    <div className="relative h-full w-full" onMouseEnter={start} onMouseLeave={stop}>
+    <div
+      className="relative h-full w-full overflow-hidden"
+      onMouseEnter={start}
+      onMouseLeave={stop}
+    >
       {images.map((src, i) => (
         <img
           key={`${src}-${i}`}
@@ -53,9 +57,10 @@ export function ProductSlideshow({ images, name, className, intervalMs = 1200 }:
           alt={i === 0 ? name : ""}
           aria-hidden={i !== 0}
           loading={i === 0 ? undefined : "lazy"}
-          className={`${className || "h-full w-full object-cover"} absolute inset-0 transition-opacity duration-500 ${
-            i === index ? "opacity-100" : "opacity-0"
+          className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-in-out ${
+            className || ""
           }`}
+          style={{ transform: `translateX(${(i - index) * 100}%)` }}
         />
       ))}
       {images.length > 1 && (
