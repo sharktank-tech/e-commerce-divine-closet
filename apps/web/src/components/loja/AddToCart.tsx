@@ -86,7 +86,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [] }: 
                   title={out ? "Sem estoque nesta combinação" : undefined}
                   className={`min-w-11 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                     size === s
-                      ? "border-ink bg-ink text-divine-50"
+                      ? "border-ink bg-ink text-primary-50"
                       : out
                         ? "cursor-not-allowed border-ink/10 bg-ink/5 text-ink-mute/50 line-through"
                         : "border-ink/15 bg-white text-ink hover:border-ink/40"
@@ -116,7 +116,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [] }: 
                   title={out ? "Sem estoque nesta combinação" : undefined}
                   className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                     color === c
-                      ? "border-ink bg-ink text-divine-50"
+                      ? "border-ink bg-ink text-primary-50"
                       : out
                         ? "cursor-not-allowed border-ink/10 bg-ink/5 text-ink-mute/50 line-through"
                         : "border-ink/15 bg-white text-ink hover:border-ink/40"

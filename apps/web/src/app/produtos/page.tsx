@@ -162,7 +162,7 @@ export default async function ProdutosPage({
           </label>
           <button
             type="submit"
-            className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-divine-50"
+            className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50"
           >
             Filtrar
           </button>
@@ -173,7 +173,7 @@ export default async function ProdutosPage({
         <Link
           href={hrefWith({ categoria: null, page: null })}
           className={`rounded-full px-3.5 py-1.5 text-xs font-medium ${
-            !categoria ? "bg-ink text-divine-50" : "bg-white text-ink-soft border border-ink/10"
+            !categoria ? "bg-ink text-primary-50" : "bg-white text-ink-soft border border-ink/10"
           }`}
         >
           Todas
@@ -184,7 +184,7 @@ export default async function ProdutosPage({
             href={hrefWith({ categoria: c.slug, page: null })}
             className={`rounded-full px-3.5 py-1.5 text-xs font-medium ${
               categoria === c.slug
-                ? "bg-ink text-divine-50"
+                ? "bg-ink text-primary-50"
                 : "bg-white text-ink-soft border border-ink/10"
             }`}
           >
@@ -201,7 +201,7 @@ export default async function ProdutosPage({
         <div className="mt-16 text-center">
           <p className="font-display text-xl text-ink">Nenhum produto encontrado</p>
           <p className="mt-2 text-sm text-ink-mute">Tente outra busca ou remova os filtros.</p>
-          <Link href="/produtos" className="mt-4 inline-block text-sm font-semibold text-divine-700 underline">
+          <Link href="/produtos" className="mt-4 inline-block text-sm font-semibold text-primary-700 underline">
             Ver todos os produtos
           </Link>
         </div>
@@ -221,7 +221,7 @@ export default async function ProdutosPage({
               href={hrefWith({ page: String(n) })}
               className={`h-9 w-9 rounded-full text-sm ${
                 n === page
-                  ? "bg-ink text-divine-50"
+                  ? "bg-ink text-primary-50"
                   : "bg-white text-ink-soft border border-ink/10"
               } flex items-center justify-center`}
             >

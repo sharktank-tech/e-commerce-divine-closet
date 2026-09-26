@@ -40,7 +40,7 @@ export function Input({
   maxLength,
 }: Props) {
   const base = cn(
-    "w-full rounded-lg border border-ink/15 bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-mute/60 outline-none transition-colors focus:border-ink/50 disabled:bg-divine-50",
+    "w-full rounded-lg border border-ink/15 bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-mute/60 outline-none transition-colors focus:border-ink/50 disabled:bg-primary-50",
     error && "border-red-400",
     className
   );

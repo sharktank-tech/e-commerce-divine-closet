@@ -39,7 +39,7 @@ export function FreteEstimator({ subtotal }: { subtotal: number }) {
   }
 
   return (
-    <div className="rounded-xl border border-ink/10 bg-divine-50 p-4">
+    <div className="rounded-xl border border-ink/10 bg-primary-50 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">
         Calcular frete (CEP)
       </p>
@@ -57,7 +57,7 @@ export function FreteEstimator({ subtotal }: { subtotal: number }) {
         <button
           type="submit"
           disabled={loading || cep.replace(/\D/g, "").length !== 8}
-          className="rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-divine-50 disabled:opacity-50"
+          className="rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-primary-50 disabled:opacity-50"
         >
           {loading ? "..." : "Calcular"}
         </button>

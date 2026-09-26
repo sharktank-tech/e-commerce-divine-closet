@@ -150,7 +150,7 @@ export default function AdminBannersPage() {
         )}
         {items.map((b) => (
           <div key={b.id} className="flex items-center gap-4 rounded-xl border border-ink/10 bg-white p-4">
-            <div className="h-14 w-24 shrink-0 overflow-hidden rounded-lg bg-divine-100">
+            <div className="h-14 w-24 shrink-0 overflow-hidden rounded-lg bg-primary-100">
               {b.imageUrl && <img src={b.imageUrl} alt="" className="h-full w-full object-cover" />}
             </div>
             <div className="min-w-0 flex-1">
@@ -172,7 +172,7 @@ export default function AdminBannersPage() {
                     position: String(b.position),
                   });
                 }}
-                className="font-semibold text-divine-700 hover:underline"
+                className="font-semibold text-primary-700 hover:underline"
               >
                 Editar
               </button>

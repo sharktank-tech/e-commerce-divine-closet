@@ -55,10 +55,10 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-ink/10 bg-divine-50/90 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <Link href="/" className="font-display text-xl font-bold tracking-tight text-ink">
-          Divine<span className="text-divine-600">Closet</span>
+          Divine<span className="text-primary-700">Closet</span>
         </Link>
 
         <nav className="hidden items-center gap-6 md:flex">
@@ -88,7 +88,7 @@ export function Header() {
               <path d="M16 10a4 4 0 01-8 0" />
             </svg>
             {cartCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-divine-600 px-1 text-[10px] font-bold text-white">
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-700 px-1 text-[10px] font-bold text-white">
                 {cartCount}
               </span>
             )}
@@ -112,7 +112,7 @@ export function Header() {
           ) : (
             <Link
               href="/login"
-              className="hidden rounded-full bg-ink px-4 py-2 text-xs font-semibold text-divine-50 hover:bg-ink-soft sm:inline-flex"
+              className="hidden rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50 hover:bg-ink-soft sm:inline-flex"
             >
               Entrar
             </Link>

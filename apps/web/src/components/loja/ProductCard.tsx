@@ -24,7 +24,7 @@ export function ProductCard({ product }: { product: Product }) {
       href={`/produtos/${product.slug}`}
       className="group flex flex-col overflow-hidden rounded-xl border border-ink/10 bg-white transition-shadow hover:shadow-lg"
     >
-      <div className="relative aspect-[3/4] overflow-hidden bg-divine-100">
+      <div className="relative aspect-[3/4] overflow-hidden bg-primary-100">
         {img ? (
           <img
             src={img}
@@ -32,7 +32,7 @@ export function ProductCard({ product }: { product: Product }) {
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-divine-400">
+          <div className="flex h-full items-center justify-center text-primary-400">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
               <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4H6z" />
               <path d="M3 6h18" />
@@ -54,7 +54,7 @@ export function ProductCard({ product }: { product: Product }) {
 
       <div className="flex flex-1 flex-col gap-1 p-4">
         {product.category && (
-          <span className="text-[11px] uppercase tracking-wider text-divine-600">
+          <span className="text-[11px] uppercase tracking-wider text-primary-700">
             {product.category.name}
           </span>
         )}

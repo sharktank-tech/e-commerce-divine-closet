@@ -45,15 +45,15 @@ export default async function HomePage() {
 
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-divine-100 via-divine-50 to-white">
+      <section className="relative overflow-hidden bg-gradient-to-br from-primary-100 via-primary-50 to-white">
         <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-16 sm:px-6 md:grid-cols-2 md:py-24">
           <div>
-            <span className="inline-block rounded-full border border-divine-300 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-widest text-divine-700">
+            <span className="inline-block rounded-full border border-primary-300 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-widest text-primary-700">
               Nova coleção
             </span>
             <h1 className="mt-5 font-display text-4xl font-bold leading-tight text-ink sm:text-5xl lg:text-6xl">
               Vista-se de
-              <span className="text-divine-600"> formas divinas</span>
+              <span className="text-primary-700"> formas divinas</span>
             </h1>
             <p className="mt-5 max-w-md text-base leading-relaxed text-ink-mute sm:text-lg">
               Peças exclusivas, caimento impecável e curadoria de moda para
@@ -70,10 +70,10 @@ export default async function HomePage() {
           </div>
 
           <div className="relative">
-            <div className="aspect-[4/5] overflow-hidden rounded-3xl bg-divine-200 shadow-2xl">
+            <div className="aspect-[4/5] overflow-hidden rounded-3xl bg-primary-200 shadow-2xl">
               <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-                <span className="font-display text-6xl font-bold text-divine-500/80">DC</span>
-                <p className="max-w-xs text-sm text-divine-700">
+                <span className="font-display text-6xl font-bold text-primary-500/80">DC</span>
+                <p className="max-w-xs text-sm text-primary-700">
                   Sua próxima peça favorita está aqui.
                 </p>
               </div>
@@ -98,9 +98,9 @@ export default async function HomePage() {
               <Link
                 key={c.id}
                 href={`/produtos?categoria=${c.slug}`}
-                className="group rounded-xl border border-ink/10 bg-white p-5 text-center transition-all hover:border-divine-400 hover:shadow-md"
+                className="group rounded-xl border border-ink/10 bg-white p-5 text-center transition-all hover:border-primary-400 hover:shadow-md"
               >
-                <p className="font-medium text-ink group-hover:text-divine-700">{c.name}</p>
+                <p className="font-medium text-ink group-hover:text-primary-700">{c.name}</p>
               </Link>
             ))}
           </div>
@@ -114,7 +114,7 @@ export default async function HomePage() {
               <h2 className="font-display text-2xl font-bold text-ink">Destaques da semana</h2>
               <p className="mt-1 text-sm text-ink-mute">As peças mais desejadas agora.</p>
             </div>
-            <Link href="/produtos" className="text-sm font-semibold text-divine-700 hover:underline">
+            <Link href="/produtos" className="text-sm font-semibold text-primary-700 hover:underline">
               Ver todas →
             </Link>
           </div>
@@ -126,7 +126,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      <section className="bg-ink py-14 text-divine-50">
+      <section className="bg-ink py-14 text-primary-50">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:grid-cols-3 sm:px-6">
           {[
             { t: "Entrega nacional", d: "Envio para todo o Brasil com código de rastreio." },
@@ -135,7 +135,7 @@ export default async function HomePage() {
           ].map((f) => (
             <div key={f.t} className="text-center sm:text-left">
               <p className="font-semibold">{f.t}</p>
-              <p className="mt-1 text-sm text-divine-200">{f.d}</p>
+              <p className="mt-1 text-sm text-primary-200">{f.d}</p>
             </div>
           ))}
         </div>
@@ -144,7 +144,7 @@ export default async function HomePage() {
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
         <div className="flex items-end justify-between">
           <h2 className="font-display text-2xl font-bold text-ink">Chegaram agora</h2>
-          <Link href="/produtos" className="text-sm font-semibold text-divine-700 hover:underline">
+          <Link href="/produtos" className="text-sm font-semibold text-primary-700 hover:underline">
             Catálogo completo →
           </Link>
         </div>

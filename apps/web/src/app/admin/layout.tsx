@@ -31,11 +31,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex min-h-screen bg-divine-100/50">
-      <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-ink/10 bg-ink text-divine-50">
+    <div className="flex min-h-screen bg-primary-100/50">
+      <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-ink/10 bg-ink text-primary-50">
         <div className="border-b border-white/10 px-6 py-5">
           <Link href="/admin" className="font-display text-lg font-bold">
-            Divine<span className="text-divine-400">Admin</span>
+            Divine<span className="text-primary-400">Admin</span>
           </Link>
         </div>
 
@@ -52,8 +52,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
                   active
-                    ? "bg-divine-600 font-semibold text-white"
-                    : "text-divine-100/70 hover:bg-white/5 hover:text-white"
+                    ? "bg-primary-700 font-semibold text-white"
+                    : "text-primary-100/70 hover:bg-white/5 hover:text-white"
                 )}
               >
                 <span className="w-4 text-center">{l.icon}</span>
@@ -66,13 +66,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="space-y-1 border-t border-white/10 px-3 py-4">
           <Link
             href="/"
-            className="block rounded-lg px-3 py-2 text-sm text-divine-100/60 hover:text-white"
+            className="block rounded-lg px-3 py-2 text-sm text-primary-100/60 hover:text-white"
           >
             ↗ Ver loja
           </Link>
           <button
             onClick={logout}
-            className="w-full rounded-lg px-3 py-2 text-left text-sm text-divine-100/60 hover:text-white"
+            className="w-full rounded-lg px-3 py-2 text-left text-sm text-primary-100/60 hover:text-white"
           >
             Sair
           </button>

@@ -6,7 +6,7 @@ export function Footer() {
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
           <p className="font-display text-xl font-bold text-ink">
-            Divine<span className="text-divine-600">Closet</span>
+            Divine<span className="text-primary-700">Closet</span>
           </p>
           <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-mute">
             Moda que eleva o seu dia a dia. Peças selecionadas com cuidado,

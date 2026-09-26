@@ -138,7 +138,7 @@ export default function AdminProdutosPage() {
       <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-divine-50">
+            <thead className="bg-primary-50">
               <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
                 <th className="px-4 py-3">Produto</th>
                 <th className="px-4 py-3">Categoria</th>
@@ -164,10 +164,10 @@ export default function AdminProdutosPage() {
                 </tr>
               )}
               {filtered.map((p) => (
-                <tr key={p.id} className="border-b border-ink/5 last:border-0 hover:bg-divine-50/50">
+                <tr key={p.id} className="border-b border-ink/5 last:border-0 hover:bg-primary-50/50">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-divine-100">
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-primary-100">
                         {p.images[0] ? (
                           <img src={p.images[0]} alt="" className="h-full w-full object-cover" />
                         ) : null}
@@ -212,7 +212,7 @@ export default function AdminProdutosPage() {
                       </Link>
                       <Link
                         href={`/admin/produtos/${p.id}`}
-                        className="font-semibold text-divine-700 hover:underline"
+                        className="font-semibold text-primary-700 hover:underline"
                       >
                         Editar
                       </Link>

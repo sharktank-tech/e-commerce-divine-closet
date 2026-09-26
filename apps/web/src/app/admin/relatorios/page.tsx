@@ -106,7 +106,7 @@ export default function AdminRelatoriosPage() {
       <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-divine-50">
+            <thead className="bg-primary-50">
               <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
                 {headers.map((h) => (
                   <th key={h} className="whitespace-nowrap px-4 py-3">{h}</th>

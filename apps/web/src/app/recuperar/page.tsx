@@ -51,7 +51,7 @@ export default function RecuperarPage() {
           </p>
           <Link
             href="/login"
-            className="mt-5 inline-block font-semibold text-divine-700 hover:underline"
+            className="mt-5 inline-block font-semibold text-primary-700 hover:underline"
           >
             Voltar ao login
           </Link>
@@ -77,7 +77,7 @@ export default function RecuperarPage() {
           </Button>
 
           <p className="text-center text-sm text-ink-mute">
-            <Link href="/login" className="font-semibold text-divine-700 hover:underline">
+            <Link href="/login" className="font-semibold text-primary-700 hover:underline">
               Voltar ao login
             </Link>
           </p>

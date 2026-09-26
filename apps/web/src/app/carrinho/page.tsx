@@ -100,7 +100,7 @@ export default function CarrinhoPage() {
             >
               <Link
                 href={`/produtos/${item.product.slug}`}
-                className="h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-divine-100"
+                className="h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-primary-100"
               >
                 {item.product.images[0] ? (
                   <img
@@ -109,7 +109,7 @@ export default function CarrinhoPage() {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-divine-400 text-xs">DC</div>
+                  <div className="flex h-full items-center justify-center text-primary-400 text-xs">DC</div>
                 )}
               </Link>
 

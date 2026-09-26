@@ -215,7 +215,7 @@ export default function EditarProdutoPage({
             </p>
             <button
               type="button"
-              className="text-xs font-semibold text-divine-700 hover:underline"
+              className="text-xs font-semibold text-primary-700 hover:underline"
               onClick={() =>
                 setVariations((vs) => [...vs, { size: "", color: "", stock: "0", sku: "" }])
               }
@@ -294,7 +294,7 @@ export default function EditarProdutoPage({
                 </button>
               </div>
             ))}
-            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink/20 text-xs text-ink-mute hover:border-divine-400">
+            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink/20 text-xs text-ink-mute hover:border-primary-400">
               {uploading ? "..." : "+ Enviar"}
               <input
                 type="file"

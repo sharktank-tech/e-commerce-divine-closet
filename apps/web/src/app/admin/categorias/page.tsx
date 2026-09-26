@@ -113,7 +113,7 @@ export default function AdminCategoriasPage() {
 
       <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
         <table className="w-full text-sm">
-          <thead className="bg-divine-50">
+          <thead className="bg-primary-50">
             <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
               <th className="px-4 py-3">Categoria</th>
               <th className="px-4 py-3">Produtos</th>
@@ -154,7 +154,7 @@ export default function AdminCategoriasPage() {
                         setName(c.name);
                         setDescription(c.description || "");
                       }}
-                      className="font-semibold text-divine-700 hover:underline"
+                      className="font-semibold text-primary-700 hover:underline"
                     >
                       Editar
                     </button>

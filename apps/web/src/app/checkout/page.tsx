@@ -219,7 +219,7 @@ export default function CheckoutPage() {
             key={label}
             className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 font-semibold ${
               i === step
-                ? "bg-ink text-divine-50"
+                ? "bg-ink text-primary-50"
                 : i < step
                   ? "bg-emerald-100 text-emerald-800"
                   : "bg-white text-ink-mute border border-ink/10"
@@ -364,7 +364,7 @@ export default function CheckoutPage() {
                       onClick={() => setMethod(id)}
                       className={`rounded-lg border px-3 py-2.5 text-sm font-semibold ${
                         method === id
-                          ? "border-ink bg-ink text-divine-50"
+                          ? "border-ink bg-ink text-primary-50"
                           : "border-ink/15 bg-white text-ink-soft"
                       }`}
                     >
@@ -397,14 +397,14 @@ export default function CheckoutPage() {
                 )}
 
                 {method === "pix" && (
-                  <div className="mt-4 rounded-lg bg-divine-50 p-4 text-sm text-ink-soft">
+                  <div className="mt-4 rounded-lg bg-primary-50 p-4 text-sm text-ink-soft">
                     O QR Code Pix será gerado após a confirmação (sandbox: aprovação
                     automática, sem transação real).
                   </div>
                 )}
 
                 {method === "boleto" && (
-                  <div className="mt-4 rounded-lg bg-divine-50 p-4 text-sm text-ink-soft">
+                  <div className="mt-4 rounded-lg bg-primary-50 p-4 text-sm text-ink-soft">
                     O boleto será enviado por e-mail após a confirmação (sandbox:
                     aprovação automática, sem emissão real).
                   </div>

@@ -56,7 +56,7 @@ export default function AdminPedidosPage() {
       <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-divine-50">
+            <thead className="bg-primary-50">
               <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
                 <th className="px-4 py-3">Pedido</th>
                 <th className="px-4 py-3">Cliente</th>
@@ -83,7 +83,7 @@ export default function AdminPedidosPage() {
                 </tr>
               )}
               {items.map((o) => (
-                <tr key={o.id} className="border-b border-ink/5 last:border-0 hover:bg-divine-50/50">
+                <tr key={o.id} className="border-b border-ink/5 last:border-0 hover:bg-primary-50/50">
                   <td className="px-4 py-3">
                     <Link href={`/admin/pedidos/${o.id}`} className="font-medium text-ink hover:underline">
                       {o.number}

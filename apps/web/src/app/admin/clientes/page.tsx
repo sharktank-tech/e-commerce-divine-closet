@@ -79,7 +79,7 @@ export default function AdminClientesPage() {
             onClick={() => setSegment(s.id)}
             className={`rounded-full px-4 py-1.5 text-xs font-semibold ${
               segment === s.id
-                ? "bg-ink text-divine-50"
+                ? "bg-ink text-primary-50"
                 : "border border-ink/10 bg-white text-ink-soft"
             }`}
           >
@@ -91,7 +91,7 @@ export default function AdminClientesPage() {
       <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-divine-50">
+            <thead className="bg-primary-50">
               <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
                 <th className="px-4 py-3">Cliente</th>
                 <th className="px-4 py-3">Segmento</th>
@@ -118,7 +118,7 @@ export default function AdminClientesPage() {
                 </tr>
               )}
               {filtered.map((c) => (
-                <tr key={c.id} className="border-b border-ink/5 last:border-0 hover:bg-divine-50/50">
+                <tr key={c.id} className="border-b border-ink/5 last:border-0 hover:bg-primary-50/50">
                   <td className="px-4 py-3">
                     <p className="font-medium text-ink">{c.name}</p>
                     <p className="text-xs text-ink-mute">{c.email}</p>

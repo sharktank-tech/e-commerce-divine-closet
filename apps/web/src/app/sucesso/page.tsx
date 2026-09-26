@@ -24,7 +24,7 @@ export default async function SucessoPage({
       </p>
       {pedido && (
         <p className="mt-6 inline-block rounded-lg bg-white px-5 py-3 text-sm font-semibold text-ink shadow-sm">
-          Nº do pedido: <span className="text-divine-700">{pedido}</span>
+          Nº do pedido: <span className="text-primary-700">{pedido}</span>
         </p>
       )}
       <div className="mt-8 flex flex-wrap justify-center gap-3">

@@ -23,7 +23,7 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
   const b = banners[index];
 
   const content = (
-    <div className="relative aspect-[16/6] w-full overflow-hidden rounded-2xl bg-divine-100">
+    <div className="relative aspect-[16/6] w-full overflow-hidden rounded-2xl bg-primary-100">
       <img src={b.imageUrl} alt={b.title} className="h-full w-full object-cover" />
       <div className="absolute inset-0 bg-gradient-to-r from-ink/60 via-ink/20 to-transparent" />
       <div className="absolute inset-y-0 left-0 flex max-w-md flex-col justify-center gap-2 p-8">

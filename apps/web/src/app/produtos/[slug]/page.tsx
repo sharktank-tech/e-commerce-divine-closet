@@ -97,7 +97,7 @@ export default async function ProdutoDetalhePage({
 
       <div className="grid gap-10 lg:grid-cols-2">
         <div className="space-y-3">
-          <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-ink/10 bg-divine-100">
+          <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-ink/10 bg-primary-100">
             {product.images[0] ? (
               <img
                 src={product.images[0]}
@@ -105,7 +105,7 @@ export default async function ProdutoDetalhePage({
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-divine-400">
+              <div className="flex h-full items-center justify-center text-primary-400">
                 <span className="font-display text-6xl">DC</span>
               </div>
             )}
@@ -113,7 +113,7 @@ export default async function ProdutoDetalhePage({
           {product.images.length > 1 && (
             <div className="grid grid-cols-4 gap-3">
               {product.images.slice(1, 5).map((img, i) => (
-                <div key={i} className="aspect-square overflow-hidden rounded-lg border border-ink/10 bg-divine-100">
+                <div key={i} className="aspect-square overflow-hidden rounded-lg border border-ink/10 bg-primary-100">
                   <img src={img} alt="" className="h-full w-full object-cover" />
                 </div>
               ))}
@@ -122,7 +122,7 @@ export default async function ProdutoDetalhePage({
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-divine-600">
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary-700">
             {product.category.name}
           </p>
           <h1 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">

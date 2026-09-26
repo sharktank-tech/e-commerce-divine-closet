@@ -54,7 +54,7 @@ function RedefinirForm() {
         </p>
         <Link
           href="/recuperar"
-          className="mt-5 inline-block font-semibold text-divine-700 hover:underline"
+          className="mt-5 inline-block font-semibold text-primary-700 hover:underline"
         >
           Solicitar novo link
         </Link>

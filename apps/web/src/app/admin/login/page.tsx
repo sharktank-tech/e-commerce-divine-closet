@@ -42,7 +42,7 @@ function AdminLoginForm() {
     <div className="flex min-h-screen items-center justify-center bg-ink px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl">
         <p className="text-center font-display text-2xl font-bold text-ink">
-          Divine<span className="text-divine-600">Closet</span>
+          Divine<span className="text-primary-700">Closet</span>
         </p>
         <p className="mt-1 text-center text-xs uppercase tracking-widest text-ink-mute">
           Painel administrativo

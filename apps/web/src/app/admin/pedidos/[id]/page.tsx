@@ -197,7 +197,7 @@ export default function AdminPedidoDetalhePage({
                   onClick={() => updateStatus(s)}
                   className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 ${
                     s === order.status
-                      ? "bg-ink text-divine-50"
+                      ? "bg-ink text-primary-50"
                       : "border border-ink/15 bg-white text-ink-soft hover:border-ink/40"
                   }`}
                 >
@@ -244,7 +244,7 @@ export default function AdminPedidoDetalhePage({
               <p className="text-ink-mute">{order.user?.email || order.guestEmail || "—"}</p>
               {order.user?.phone && <p className="text-ink-mute">{order.user.phone}</p>}
               {!order.user && (order.guestName || order.guestEmail) && (
-                <span className="inline-block rounded-full bg-divine-100 px-2 py-0.5 text-[10px] font-bold uppercase text-divine-700">
+                <span className="inline-block rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary-700">
                   Convidado
                 </span>
               )}

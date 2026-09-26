@@ -195,7 +195,7 @@ export default function AdminDashboard() {
         <div className="rounded-xl border border-ink/10 bg-white p-5">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-ink">Estoque baixo</h2>
-            <Link href="/admin/produtos" className="text-xs font-semibold text-divine-700 hover:underline">
+            <Link href="/admin/produtos" className="text-xs font-semibold text-primary-700 hover:underline">
               Gerenciar →
             </Link>
           </div>
@@ -241,7 +241,7 @@ export default function AdminDashboard() {
       <div className="rounded-xl border border-ink/10 bg-white p-5">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-ink">Pedidos recentes</h2>
-            <Link href="/admin/pedidos" className="text-xs font-semibold text-divine-700 hover:underline">
+            <Link href="/admin/pedidos" className="text-xs font-semibold text-primary-700 hover:underline">
               Ver todos →
             </Link>
           </div>
