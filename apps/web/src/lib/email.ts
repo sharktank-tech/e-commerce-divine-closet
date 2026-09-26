@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 type SendEmailInput = {
   to: string;
@@ -9,8 +10,9 @@ type SendEmailInput = {
 
 /**
  * E-mail transacional.
- * - EMAIL_DRIVER=mock → apenas loga no console (dev)
- * - EMAIL_DRIVER=smtp → envio real via SMTP (Zoho Mail em produção)
+ * - EMAIL_DRIVER=mock   → apenas loga no console (dev sem credenciais)
+ * - EMAIL_DRIVER=smtp   → envio via SMTP (Zoho Mail; bloqueado a partir da Vercel)
+ * - EMAIL_DRIVER=resend → envio via API Resend (produção; funciona de qualquer IP)
  */
 export async function sendEmail(input: SendEmailInput): Promise<void> {
   const driver = process.env.EMAIL_DRIVER || "mock";
@@ -57,6 +59,27 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       text: input.text,
       html: input.html,
     });
+    return;
+  }
+
+  if (driver === "resend") {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      throw new Error("Resend não configurado (defina RESEND_API_KEY).");
+    }
+
+    const resend = new Resend(apiKey);
+    const base = {
+      from: process.env.EMAIL_FROM || "Divine Closet <no-reply@divinecloset.com.br>",
+      to: input.to,
+      subject: input.subject,
+    };
+    const { error } = input.html
+      ? await resend.emails.send({ ...base, html: input.html })
+      : await resend.emails.send({ ...base, text: input.text ?? "" });
+    if (error) {
+      throw new Error(`Resend: ${error.message}`);
+    }
     return;
   }
 
