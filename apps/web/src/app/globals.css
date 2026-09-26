@@ -10,7 +10,7 @@
 }
 
 body {
-  @apply bg-[#faf8fd] text-ink antialiased;
+  @apply bg-[#f4eafb] text-ink antialiased;
 }
 
 ::selection {

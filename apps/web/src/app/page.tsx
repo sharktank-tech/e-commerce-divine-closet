@@ -45,8 +45,16 @@ export default async function HomePage() {
 
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-primary-100 via-primary-50 to-white">
-        <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-16 sm:px-6 md:grid-cols-2 md:py-24">
+      <section className="relative overflow-hidden bg-gradient-to-br from-primary-200 via-primary-100 to-primary-50">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary-300/40 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-primary-400/30 blur-3xl"
+        />
+        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-4 py-16 sm:px-6 md:grid-cols-2 md:py-24">
           <div>
             <span className="inline-block rounded-full border border-primary-300 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-widest text-primary-700">
               Nova coleção
