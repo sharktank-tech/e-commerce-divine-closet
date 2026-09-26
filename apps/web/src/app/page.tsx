@@ -45,43 +45,52 @@ export default async function HomePage() {
 
   return (
     <div>
-      <section className="relative overflow-hidden bg-gradient-to-br from-primary-200 via-primary-100 to-primary-50">
+      <section className="relative overflow-hidden bg-[#290582]">
         <div
           aria-hidden
-          className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary-300/40 blur-3xl"
+          className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary-400/30 blur-3xl"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-primary-400/30 blur-3xl"
+          className="pointer-events-none absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-accent-400/20 blur-3xl"
         />
         <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-4 py-16 sm:px-6 md:grid-cols-2 md:py-24">
           <div>
-            <span className="inline-block rounded-full border border-primary-300 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-widest text-primary-700">
+            <span className="inline-block rounded-full border border-white/30 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-white">
               Nova coleção
             </span>
-            <h1 className="mt-5 font-display text-4xl font-bold leading-tight text-ink sm:text-5xl lg:text-6xl">
+            <h1 className="mt-5 font-display text-4xl font-bold leading-tight text-white sm:text-5xl lg:text-6xl">
               Vista-se de
-              <span className="text-primary-700"> formas divinas</span>
+              <span className="text-accent-300"> formas divinas</span>
             </h1>
-            <p className="mt-5 max-w-md text-base leading-relaxed text-ink-mute sm:text-lg">
+            <p className="mt-5 max-w-md text-base leading-relaxed text-primary-100 sm:text-lg">
               Peças exclusivas, caimento impecável e curadoria de moda para
               mulheres que brilham no dia a dia e nas ocasiões especiais.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/produtos" size="lg">
+              <Button
+                href="/produtos"
+                size="lg"
+                className="bg-white text-[#290582] hover:bg-primary-100"
+              >
                 Explorar coleção
               </Button>
-              <Button href="/produtos?sort=price_asc" variant="outline" size="lg">
+              <Button
+                href="/produtos?sort=price_asc"
+                variant="outline"
+                size="lg"
+                className="border-white/40 text-white hover:border-white hover:bg-white/10"
+              >
                 Ver ofertas
               </Button>
             </div>
           </div>
 
           <div className="relative">
-            <div className="aspect-[4/5] overflow-hidden rounded-3xl bg-primary-200 shadow-2xl">
+            <div className="aspect-[4/5] overflow-hidden rounded-3xl bg-white/10 shadow-2xl">
               <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-                <span className="font-display text-6xl font-bold text-primary-500/80">DC</span>
-                <p className="max-w-xs text-sm text-primary-700">
+                <span className="font-display text-6xl font-bold text-white/70">DC</span>
+                <p className="max-w-xs text-sm text-primary-100">
                   Sua próxima peça favorita está aqui.
                 </p>
               </div>
