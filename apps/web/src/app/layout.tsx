@@ -13,8 +13,8 @@ export const metadata: Metadata = {
   description:
     "Loja de moda online com vestidos, conjuntos e acessórios selecionados. Entrega para todo o Brasil.",
   icons: {
-    icon: [{ url: "/favicon.png", sizes: "64x64", type: "image/png" }],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    icon: [{ url: "/favicon.png?v=2", sizes: "64x64", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png?v=2", sizes: "180x180", type: "image/png" }],
   },
 };
 
