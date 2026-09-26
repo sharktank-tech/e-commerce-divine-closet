@@ -5,8 +5,15 @@ export function Footer() {
     <footer className="bg-primary-950 text-white">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
-          <p className="font-display text-xl font-bold text-white">
-            Divine<span className="text-accent-300">Closet</span>
+          <p className="flex items-center gap-2.5 font-display text-xl font-bold text-white">
+            <img
+              src="/logo.jpeg"
+              alt="Divine Closet"
+              className="h-9 w-9 rounded-full object-cover ring-2 ring-white/20"
+            />
+            <span>
+              Divine<span className="text-accent-300">Closet</span>
+            </span>
           </p>
           <p className="mt-3 max-w-sm text-sm leading-relaxed text-primary-200">
             Moda que eleva o seu dia a dia. Peças selecionadas com cuidado,

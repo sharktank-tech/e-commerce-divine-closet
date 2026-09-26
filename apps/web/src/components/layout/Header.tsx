@@ -57,8 +57,15 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-        <Link href="/" className="font-display text-xl font-bold tracking-tight text-ink">
-          Divine<span className="text-primary-700">Closet</span>
+        <Link href="/" className="flex items-center gap-2.5">
+          <img
+            src="/logo.jpeg"
+            alt="Divine Closet"
+            className="h-10 w-10 rounded-full object-cover ring-2 ring-primary-200"
+          />
+          <span className="font-display text-xl font-bold tracking-tight text-ink">
+            Divine<span className="text-primary-700">Closet</span>
+          </span>
         </Link>
 
         <nav className="hidden items-center gap-6 md:flex">
