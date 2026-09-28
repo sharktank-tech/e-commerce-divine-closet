@@ -8,6 +8,7 @@ import { FreteEstimator } from "@/components/loja/FreteEstimator";
 import { WishlistButton } from "@/components/loja/WishlistButton";
 import { shipping, features } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
+import { estadoEstoque, textoEstoque } from "@/lib/estoque";
 import type { Metadata } from "next";
 
 export const revalidate = 60;
@@ -137,10 +138,12 @@ export default async function ProdutoDetalhePage({
           </div>
 
           <div className="mt-3 text-sm">
-            {product.stock > 0 ? (
-              <span className="text-emerald-700">✓ Em estoque ({product.stock} un.)</span>
-            ) : (
+            {estadoEstoque(product.stock) === "esgotado" ? (
               <span className="text-red-600">Esgotado</span>
+            ) : estadoEstoque(product.stock) === "baixo" ? (
+              <span className="font-semibold text-amber-700">{textoEstoque(product.stock)}</span>
+            ) : (
+              <span className="text-emerald-700">✓ Em estoque</span>
             )}
           </div>
 

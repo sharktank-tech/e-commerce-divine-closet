@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCart } from "./CartProvider";
 import { Button } from "@/components/ui/Button";
 import { ordenarTamanhos } from "@/lib/tamanhos";
+import { textoEstoque } from "@/lib/estoque";
 
 type Variation = { size: string; color: string | null; stock: number };
 
@@ -220,7 +221,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [] }: 
             {soldOut
               ? "Esgotado nesta combinação."
               : size || color
-                ? `${comboStock} unidade(s) disponível(is) nesta combinação`
+                ? textoEstoque(comboStock)
                 : "Selecione as opções para ver o estoque"}
           </p>
         )}

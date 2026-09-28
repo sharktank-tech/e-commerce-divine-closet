@@ -9,7 +9,8 @@ type Product = {
   price: string | number | { toString(): string } | null;
   comparePrice?: string | number | { toString(): string } | null;
   images: string[];
-  stock: number;
+  stock?: number;
+  estadoEstoque?: "esgotado" | "baixo" | "disponivel";
   featured?: boolean;
   category?: { name: string; slug: string };
 };
@@ -35,7 +36,7 @@ export function ProductCard({ product }: { product: Product }) {
             -{salePct}%
           </span>
         )}
-        {product.stock === 0 && (
+        {(product.estadoEstoque === "esgotado" || product.stock === 0) && (
           <span className="absolute inset-0 flex items-center justify-center bg-white/70 text-sm font-semibold text-ink">
             Esgotado
           </span>

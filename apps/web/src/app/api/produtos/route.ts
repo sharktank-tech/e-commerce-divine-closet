@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { estadoEstoque } from "@/lib/estoque";
 
 export async function GET(req: NextRequest) {
   try {
@@ -65,8 +66,20 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
+    // Estado de estoque em vez do número exato: a quantidade só vai
+    // junto quando baixa (urgência); o servidor valida os limites.
+    const shaped = items.map((p) => {
+      const estado = estadoEstoque(p.stock);
+      const { stock, ...rest } = p;
+      return {
+        ...rest,
+        estadoEstoque: estado,
+        ...(estado === "baixo" ? { stock } : {}),
+      };
+    });
+
     return NextResponse.json({
-      items,
+      items: shaped,
       total,
       page,
       pageSize,
