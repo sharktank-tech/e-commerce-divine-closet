@@ -4,6 +4,9 @@ Tudo aqui depende de decisão, conteúdo ou credencial do dono. Nada é placehol
 
 ## 🔴 Alta — catálogo e vendas
 
+### Guia de medidas (Tarefa 9)
+Estrutura pronta (admin → Medidas): criar tabelas por modelagem e vincular a produtos ou categorias. Sem tabela vinculada, o link "Guia de medidas" fica oculto na loja. Prioridade: 1 tabela "Feminino adulto" (busto/cintura/quadril) como fallback das categorias principais.
+
 ### Conteúdo dos produtos (Tarefa 8)
 Os 19 produtos ativos estão sem composição, medidas, dados de modelo e descrição própria (só têm o texto genérico do mock). Completar em admin → Produtos → editar cada um:
 - Composição do tecido, instruções de lavagem, comprimento, caimento, ocasião

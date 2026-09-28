@@ -14,6 +14,7 @@ type Category = { id: string; name: string };
 export default function NovoProdutoPage() {
   const router = useRouter();
   const [categories, setCategories] = useState<Category[]>([]);
+  const [sizeTables, setSizeTables] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -32,6 +33,7 @@ export default function NovoProdutoPage() {
     colors: "",
     images: [] as string[],
     ...emptyProductContent,
+    tabelaMedidasId: "",
   });
 
   useEffect(() => {
@@ -41,6 +43,10 @@ export default function NovoProdutoPage() {
         setCategories(d.items || []);
         if (d.items?.[0]) setForm((f) => ({ ...f, categoryId: d.items[0].id }));
       });
+    fetch("/api/admin/tabelas-medidas")
+      .then((r) => r.json())
+      .then((d) => setSizeTables(d.items || []))
+      .catch(() => {});
   }, []);
 
   const upload = useCallback(async (file: File) => {
@@ -90,6 +96,7 @@ export default function NovoProdutoPage() {
           ocasiao: form.ocasiao || null,
           metaTitle: form.metaTitle || null,
           metaDescription: form.metaDescription || null,
+          tabelaMedidasId: form.tabelaMedidasId || null,
         }),
       });
       const data = await res.json();
@@ -148,6 +155,21 @@ export default function NovoProdutoPage() {
           </label>
           <Input label="Tamanhos (vírgula)" placeholder="P, M, G, GG" value={form.sizes} onChange={(v) => setForm({ ...form, sizes: v })} />
           <Input label="Cores (vírgula)" placeholder="Preto, Branco, Dourado" value={form.colors} onChange={(v) => setForm({ ...form, colors: v })} />
+          <label className="block space-y-1.5 sm:col-span-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-ink-mute">Guia de medidas</span>
+            <select
+              value={form.tabelaMedidasId}
+              onChange={(e) => setForm({ ...form, tabelaMedidasId: e.target.value })}
+              className="w-full rounded-lg border border-ink/15 bg-white px-4 py-2.5 text-sm outline-none focus:border-ink/50"
+            >
+              <option value="">Nenhum (oculta o link na loja)</option>
+              {sizeTables.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="flex flex-wrap gap-6 border-t border-ink/10 pt-4">

@@ -27,6 +27,7 @@ type Form = {
   sizes: string;
   colors: string;
   images: string[];
+  tabelaMedidasId: string;
 } & ProductContent;
 
 export default function EditarProdutoPage({
@@ -37,6 +38,7 @@ export default function EditarProdutoPage({
   const { id } = use(params);
   const router = useRouter();
   const [categories, setCategories] = useState<Category[]>([]);
+  const [sizeTables, setSizeTables] = useState<{ id: string; name: string }[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [variations, setVariations] = useState<Variation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,10 +47,15 @@ export default function EditarProdutoPage({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetch("/api/categorias"), fetch(`/api/admin/produtos/${id}`)]).then(
-      async ([catsRes, prodRes]) => {
+    Promise.all([
+      fetch("/api/categorias"),
+      fetch(`/api/admin/produtos/${id}`),
+      fetch("/api/admin/tabelas-medidas").then((r) => r.json()).catch(() => ({ items: [] })),
+    ]).then(
+      async ([catsRes, prodRes, tablesRes]) => {
         const cats = await catsRes.json();
         setCategories(cats.items || []);
+        setSizeTables(tablesRes.items || []);
         if (!prodRes.ok) {
           setError("Produto não encontrado");
           return;
@@ -77,6 +84,7 @@ export default function EditarProdutoPage({
           ocasiao: p.ocasiao || "",
           metaTitle: p.metaTitle || "",
           metaDescription: p.metaDescription || "",
+          tabelaMedidasId: p.tabelaMedidasId || "",
         });
         setVariations(
           (p.variations || []).map(
@@ -147,6 +155,7 @@ export default function EditarProdutoPage({
           ocasiao: form.ocasiao || null,
           metaTitle: form.metaTitle || null,
           metaDescription: form.metaDescription || null,
+          tabelaMedidasId: form.tabelaMedidasId || null,
           variations: variations.map((v) => ({
             size: v.size.trim(),
             color: v.color.trim() || null,
@@ -229,6 +238,21 @@ export default function EditarProdutoPage({
           </label>
           <Input label="Tamanhos (vírgula)" value={form.sizes} onChange={(v) => setForm({ ...form, sizes: v })} />
           <Input label="Cores (vírgula)" value={form.colors} onChange={(v) => setForm({ ...form, colors: v })} />
+          <label className="block space-y-1.5 sm:col-span-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-ink-mute">Guia de medidas</span>
+            <select
+              value={form.tabelaMedidasId}
+              onChange={(e) => setForm({ ...form, tabelaMedidasId: e.target.value })}
+              className="w-full rounded-lg border border-ink/15 bg-white px-4 py-2.5 text-sm outline-none focus:border-ink/50"
+            >
+              <option value="">Nenhum (usa o da categoria ou oculta)</option>
+              {sizeTables.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="border-t border-ink/10 pt-4">

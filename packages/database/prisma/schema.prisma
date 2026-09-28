@@ -112,6 +112,8 @@ model Category {
   showInMenu  Boolean        @default(true)
   showInHome  Boolean        @default(true)
   image       String?
+  sizeTableId String?        @db.Uuid
+  sizeTable   SizeTable?     @relation("CategoriaMedidas", fields: [sizeTableId], references: [id])
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   deletedAt   DateTime?
@@ -120,9 +122,9 @@ model Category {
 }
 
 model Product {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name              String
-  slug              String    @unique
+  slug              String     @unique
   description       String
   composicao        String?
   instrucoesLavagem String?
@@ -133,20 +135,22 @@ model Product {
   ocasiao           String?
   metaTitle         String?
   metaDescription   String?
-  price             Decimal   @db.Decimal(10, 2)
-  comparePrice      Decimal?  @db.Decimal(10, 2)
-  discountPercent   Int       @default(0)
-  sku               String?   @unique
-  stock             Int       @default(0)
-  isActive          Boolean   @default(true)
-  featured          Boolean   @default(false)
+  price             Decimal    @db.Decimal(10, 2)
+  comparePrice      Decimal?   @db.Decimal(10, 2)
+  discountPercent   Int        @default(0)
+  sku               String?    @unique
+  stock             Int        @default(0)
+  isActive          Boolean    @default(true)
+  featured          Boolean    @default(false)
   images            String[]
   sizes             String[]
   colors            String[]
-  categoryId        String    @db.Uuid
-  category          Category  @relation(fields: [categoryId], references: [id])
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  categoryId        String     @db.Uuid
+  category          Category   @relation(fields: [categoryId], references: [id])
+  tabelaMedidasId   String?    @db.Uuid
+  tabelaMedidas     SizeTable? @relation("ProdutoMedidas", fields: [tabelaMedidasId], references: [id])
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
   deletedAt         DateTime?
 
   orderItems   OrderItem[]
@@ -328,4 +332,18 @@ model SlugRedirect {
   oldSlug   String   @id
   newSlug   String
   createdAt DateTime @default(now())
+}
+
+model SizeTable {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  unit      String   @default("cm")
+  columns   Json     @default("[]")
+  rows      Json     @default("[]")
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products   Product[]  @relation("ProdutoMedidas")
+  categories Category[] @relation("CategoriaMedidas")
 }

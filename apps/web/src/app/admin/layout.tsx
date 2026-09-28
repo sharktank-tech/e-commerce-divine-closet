@@ -8,6 +8,7 @@ const links = [
   { href: "/admin", label: "Dashboard", icon: "▦" },
   { href: "/admin/produtos", label: "Produtos", icon: "◈" },
   { href: "/admin/categorias", label: "Categorias", icon: "⊞" },
+  { href: "/admin/tabelas-medidas", label: "Medidas", icon: "📏" },
   { href: "/admin/pedidos", label: "Pedidos", icon: "◉" },
   { href: "/admin/clientes", label: "Clientes", icon: "◎" },
   { href: "/admin/cupons", label: "Cupons", icon: "%" },

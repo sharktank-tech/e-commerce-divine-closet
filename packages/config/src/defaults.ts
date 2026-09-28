@@ -63,6 +63,10 @@ export const features = {
 
 export const stockAlertThreshold = 5;
 
+/** Nota padrão do guia de medidas (editável por tabela no admin). */
+export const medidaNotaPadrao =
+  "Medidas do corpo, em cm. Em caso de dúvida entre dois tamanhos, escolha o maior.";
+
 /** Textos institucionais (rascunho — aguardando redação final do cliente). */
 export const institutional = {
   about:

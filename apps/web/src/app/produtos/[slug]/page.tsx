@@ -9,6 +9,7 @@ import { WishlistButton } from "@/components/loja/WishlistButton";
 import { shipping, features, institutional } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
 import { estadoEstoque, textoEstoque } from "@/lib/estoque";
+import { resolveSizeTable } from "@/lib/medidas";
 import type { Metadata } from "next";
 
 export const revalidate = 60;
@@ -17,7 +18,11 @@ async function getProduct(slug: string) {
   try {
     return await prisma.product.findFirst({
       where: { slug, deletedAt: null },
-      include: { category: true, variations: true },
+      include: {
+        category: { include: { sizeTable: true } },
+        variations: true,
+        tabelaMedidas: true,
+      },
     });
   } catch {
     return null;
@@ -225,6 +230,10 @@ export default async function ProdutoDetalhePage({
               color: v.color,
               stock: v.stock,
             }))}
+            sizeTable={resolveSizeTable(
+              product.tabelaMedidas,
+              product.category?.sizeTable ?? null
+            )}
           />
 
           <div className="mt-6">

@@ -20,6 +20,7 @@ function productPartial() {
     sizes: z.array(z.string()).optional(),
     colors: z.array(z.string()).optional(),
     categoryId: z.string().min(1).optional(),
+    tabelaMedidasId: z.string().nullish(),
     composicao: z.string().nullish(),
     instrucoesLavagem: z.string().nullish(),
     comprimento: z.string().nullish(),

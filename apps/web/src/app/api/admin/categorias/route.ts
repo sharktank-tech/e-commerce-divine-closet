@@ -51,6 +51,7 @@ const createSchema = z.object({
   showInMenu: z.boolean().optional(),
   showInHome: z.boolean().optional(),
   image: z.string().nullish(),
+  sizeTableId: z.string().nullish(),
 });
 
 export async function POST(req: NextRequest) {
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
         showInMenu: parsed.data.showInMenu ?? true,
         showInHome: parsed.data.showInHome ?? true,
         image: parsed.data.image || null,
+        sizeTableId: parsed.data.sizeTableId || null,
       },
     });
 

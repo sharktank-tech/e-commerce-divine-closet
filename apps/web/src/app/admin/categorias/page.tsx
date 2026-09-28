@@ -16,6 +16,7 @@ type Category = {
   showInMenu: boolean;
   showInHome: boolean;
   image?: string | null;
+  sizeTableId?: string | null;
   _count?: { products: number };
 };
 
@@ -27,12 +28,18 @@ export default function AdminCategoriasPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [display, setDisplay] = useState(emptyForm);
+  const [sizeTableId, setSizeTableId] = useState("");
+  const [sizeTables, setSizeTables] = useState<{ id: string; name: string }[]>([]);
   const [msg, setMsg] = useState("");
   const [editing, setEditing] = useState<Category | null>(null);
 
   async function load() {
     const res = await fetch("/api/admin/categorias");
     if (res.ok) setItems((await res.json()).items || []);
+    fetch("/api/admin/tabelas-medidas")
+      .then((r) => r.json())
+      .then((d) => setSizeTables(d.items || []))
+      .catch(() => {});
     setLoading(false);
   }
 
@@ -48,14 +55,15 @@ export default function AdminCategoriasPage() {
       {
         method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          description: description || null,
-          menuOrder: Number(display.menuOrder) || 0,
-          showInMenu: display.showInMenu,
-          showInHome: display.showInHome,
-          image: display.image || null,
-        }),
+      body: JSON.stringify({
+        name,
+        description: description || null,
+        menuOrder: Number(display.menuOrder) || 0,
+        showInMenu: display.showInMenu,
+        showInHome: display.showInHome,
+        image: display.image || null,
+        sizeTableId: sizeTableId || null,
+      }),
       }
     );
     const data = await res.json();
@@ -66,6 +74,7 @@ export default function AdminCategoriasPage() {
     setName("");
     setDescription("");
     setDisplay(emptyForm);
+    setSizeTableId("");
     setEditing(null);
     setMsg(editing ? "Categoria atualizada." : "Categoria criada.");
     load();
@@ -119,6 +128,23 @@ export default function AdminCategoriasPage() {
               placeholder="https://..."
             />
           </div>
+          <label className="block space-y-1.5 sm:col-span-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-ink-mute">
+              Guia de medidas (fallback da categoria)
+            </span>
+            <select
+              value={sizeTableId}
+              onChange={(e) => setSizeTableId(e.target.value)}
+              className="w-full rounded-lg border border-ink/15 bg-white px-4 py-2.5 text-sm outline-none focus:border-ink/50"
+            >
+              <option value="">Nenhum</option>
+              {sizeTables.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="mt-3 flex flex-wrap gap-5 text-sm">
           <label className="flex items-center gap-2">
@@ -151,6 +177,7 @@ export default function AdminCategoriasPage() {
                 setName("");
                 setDescription("");
                 setDisplay(emptyForm);
+                setSizeTableId("");
               }}
             >
               Cancelar
@@ -213,6 +240,7 @@ export default function AdminCategoriasPage() {
                           showInHome: c.showInHome !== false,
                           image: c.image || "",
                         });
+                        setSizeTableId((c as { sizeTableId?: string }).sizeTableId || "");
                       }}
                       className="font-semibold text-primary-700 hover:underline"
                     >

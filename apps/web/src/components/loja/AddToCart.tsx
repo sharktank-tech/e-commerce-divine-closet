@@ -6,6 +6,8 @@ import { useCart } from "./CartProvider";
 import { Button } from "@/components/ui/Button";
 import { ordenarTamanhos } from "@/lib/tamanhos";
 import { textoEstoque } from "@/lib/estoque";
+import { GuiaMedidas } from "./GuiaMedidas";
+import type { SizeTableData } from "@/lib/medidas";
 
 type Variation = { size: string; color: string | null; stock: number };
 
@@ -15,9 +17,10 @@ type Props = {
   sizes: string[];
   colors: string[];
   variations?: Variation[];
+  sizeTable?: SizeTableData | null;
 };
 
-export function AddToCart({ productId, stock, sizes, colors, variations = [] }: Props) {
+export function AddToCart({ productId, stock, sizes, colors, variations = [], sizeTable }: Props) {
   const [size, setSize] = useState<string>("");
   const [color, setColor] = useState<string>("");
   const [qty, setQty] = useState(1);
@@ -133,9 +136,12 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [] }: 
     <div className="mt-8 space-y-4">
       {sizeList.length > 0 && (
         <div ref={sizeRef} className={`scroll-mt-24 rounded-xl ${missing === "size" ? "ring-2 ring-red-500 ring-offset-2" : ""}`}>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-mute">
-            Tamanho {size && <span className="text-ink">({size})</span>}
-          </p>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-mute">
+              Tamanho {size && <span className="text-ink">({size})</span>}
+            </p>
+            {sizeTable && <GuiaMedidas table={sizeTable} selectedSize={size} />}
+          </div>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Tamanhos">
             {sizeList.map((s) => {
               const out = availFor(s, color || undefined) <= 0;

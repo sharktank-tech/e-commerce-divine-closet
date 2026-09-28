@@ -15,6 +15,7 @@ const patchSchema = z.object({
   showInMenu: z.boolean().optional(),
   showInHome: z.boolean().optional(),
   image: z.string().nullish(),
+  sizeTableId: z.string().nullish(),
 });
 
 export async function PATCH(req: NextRequest, { params }: Params) {
