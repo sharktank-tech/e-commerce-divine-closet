@@ -29,8 +29,9 @@ export function nonEmpty(cats: NavCategory[]): NavCategory[] {
  * Menu principal: Novidades + categorias (showInMenu) + Ofertas.
  * "Calças e Shorts" aparece como item único combinado quando AMBAS têm
  * produtos; se só uma tem, ela aparece individualmente.
+ * "Ofertas" só aparece quando há ao menos 1 produto com desconto real.
  */
-export function buildMenu(all: NavCategory[]): MenuItem[] {
+export function buildMenu(all: NavCategory[], offersCount = 0): MenuItem[] {
   const cats = nonEmpty(all).filter((c) => c.showInMenu);
   const bySlug = new Map(cats.map((c) => [c.slug, c]));
   const hasCalcas = bySlug.has("calcas");
@@ -54,11 +55,10 @@ export function buildMenu(all: NavCategory[]): MenuItem[] {
     (a, b) => a.order - b.order || a.label.localeCompare(b.label, "pt-BR")
   );
 
-  return [
-    { label: "Novidades", href: "/produtos" },
-    ...entries.map(({ label, href }) => ({ label, href })),
-    { label: "Ofertas", href: "/ofertas" },
-  ];
+  const items: MenuItem[] = [{ label: "Novidades", href: "/produtos" }];
+  for (const e of entries) items.push({ label: e.label, href: e.href });
+  if (offersCount > 0) items.push({ label: "Ofertas", href: "/ofertas" });
+  return items;
 }
 
 /** Cards "Compre por categoria" da home. */

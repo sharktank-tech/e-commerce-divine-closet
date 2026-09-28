@@ -9,7 +9,7 @@ export const revalidate = 60;
 
 async function getData() {
   try {
-    const [featured, latest, categories, count, banners] = await Promise.all([
+    const [featured, latest, categories, count, banners, offersCount] = await Promise.all([
       prisma.product.findMany({
         where: { isActive: true, featured: true, deletedAt: null },
         include: { category: true },
@@ -39,15 +39,18 @@ async function getData() {
         orderBy: { position: "asc" },
         take: 5,
       }),
+      prisma.product.count({
+        where: { isActive: true, deletedAt: null, discountPercent: { gt: 0 }, stock: { gt: 0 } },
+      }),
     ]);
-    return { featured, latest, categories, count, banners, error: false };
+    return { featured, latest, categories, count, banners, offersCount, error: false };
   } catch {
-    return { featured: [], latest: [], categories: [], count: 0, banners: [], error: true };
+    return { featured: [], latest: [], categories: [], count: 0, banners: [], offersCount: 0, error: true };
   }
 }
 
 export default async function HomePage() {
-  const { featured, latest, categories, banners, error } = await getData();
+  const { featured, latest, categories, banners, offersCount, error } = await getData();
 
   return (
     <div>
@@ -81,14 +84,16 @@ export default async function HomePage() {
               >
                 Explorar coleção
               </Button>
-              <Button
-                href="/produtos?sort=price_asc"
-                variant="outline"
-                size="lg"
-                className="border-white/40 text-white hover:border-white hover:bg-white/10"
-              >
-                Ver ofertas
-              </Button>
+              {offersCount > 0 && (
+                <Button
+                  href="/ofertas"
+                  variant="outline"
+                  size="lg"
+                  className="border-white/40 text-white hover:border-white hover:bg-white/10"
+                >
+                  Ver ofertas
+                </Button>
+              )}
             </div>
           </div>
 

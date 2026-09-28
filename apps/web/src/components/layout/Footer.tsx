@@ -4,16 +4,21 @@ import { buildMenu } from "@/lib/categorias";
 
 async function getMenuLinks() {
   try {
-    const cats = await prisma.category.findMany({
-      where: { status: "ACTIVE", deletedAt: null },
-      orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
-      include: {
-        products: {
-          where: { isActive: true, deletedAt: null, stock: { gt: 0 } },
-          select: { id: true },
+    const [cats, offers] = await Promise.all([
+      prisma.category.findMany({
+        where: { status: "ACTIVE", deletedAt: null },
+        orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
+        include: {
+          products: {
+            where: { isActive: true, deletedAt: null, stock: { gt: 0 } },
+            select: { id: true },
+          },
         },
-      },
-    });
+      }),
+      prisma.product.count({
+        where: { isActive: true, deletedAt: null, discountPercent: { gt: 0 } },
+      }),
+    ]);
     return buildMenu(
       cats.map((c) => ({
         id: c.id,
@@ -24,7 +29,8 @@ async function getMenuLinks() {
         showInMenu: c.showInMenu,
         showInHome: c.showInHome,
         availableCount: c.products.length,
-      }))
+      })),
+      offers
     ).filter((m) => m.href.startsWith("/categoria/")).slice(0, 6);
   } catch {
     return [];
@@ -60,7 +66,7 @@ export async function Footer() {
             {catLinks.map((c) => (
               <li key={c.href}><Link href={c.href} className="hover:text-white">{c.label}</Link></li>
             ))}
-            <li><Link href="/produtos?sort=price_asc" className="hover:text-white">Ofertas</Link></li>
+            <li><Link href="/ofertas" className="hover:text-white">Ofertas</Link></li>
             <li><Link href="/carrinho" className="hover:text-white">Carrinho</Link></li>
           </ul>
         </div>

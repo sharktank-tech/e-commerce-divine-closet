@@ -18,6 +18,9 @@ export function ProductCard({ product }: { product: Product }) {
   const priceNum = Number(product.price);
   const compareNum = product.comparePrice != null ? Number(product.comparePrice) : null;
   const onSale = compareNum != null && compareNum > priceNum;
+  const salePct = onSale
+    ? Math.round(((compareNum - priceNum) / compareNum) * 100)
+    : 0;
 
   return (
     <Link
@@ -29,7 +32,7 @@ export function ProductCard({ product }: { product: Product }) {
 
         {onSale && (
           <span className="absolute left-3 top-3 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase text-white">
-            Oferta
+            -{salePct}%
           </span>
         )}
         {product.stock === 0 && (

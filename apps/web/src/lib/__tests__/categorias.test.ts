@@ -28,10 +28,13 @@ describe("nonEmpty", () => {
 
 describe("buildMenu", () => {
   it("monta Novidades + categorias + Ofertas, sem vazias", () => {
-    const menu = buildMenu([
-      cat({ slug: "vestidos", name: "Vestidos" }),
-      cat({ slug: "saias", name: "Saias", availableCount: 0 }),
-    ]);
+    const menu = buildMenu(
+      [
+        cat({ slug: "vestidos", name: "Vestidos" }),
+        cat({ slug: "saias", name: "Saias", availableCount: 0 }),
+      ],
+      2
+    );
     expect(menu).toEqual([
       { label: "Novidades", href: "/produtos" },
       { label: "Vestidos", href: "/categoria/vestidos" },
@@ -39,12 +42,20 @@ describe("buildMenu", () => {
     ]);
   });
 
+  it("oculta Ofertas quando não há desconto real", () => {
+    const menu = buildMenu([cat({ slug: "vestidos", name: "Vestidos" })], 0);
+    expect(menu.map((m) => m.label)).toEqual(["Novidades", "Vestidos"]);
+  });
+
   it("combina Calças e Shorts em item único quando ambas têm produtos", () => {
-    const menu = buildMenu([
-      cat({ slug: "blusas", name: "Blusas" }),
-      cat({ slug: "calcas", name: "Calças" }),
-      cat({ slug: "shorts", name: "Shorts" }),
-    ]);
+    const menu = buildMenu(
+      [
+        cat({ slug: "blusas", name: "Blusas" }),
+        cat({ slug: "calcas", name: "Calças" }),
+        cat({ slug: "shorts", name: "Shorts" }),
+      ],
+      1
+    );
     expect(menu).toEqual([
       { label: "Novidades", href: "/produtos" },
       { label: "Blusas", href: "/categoria/blusas" },
@@ -54,19 +65,25 @@ describe("buildMenu", () => {
   });
 
   it("mostra individual quando só uma das duas tem produtos", () => {
-    const menu = buildMenu([
-      cat({ slug: "calcas", name: "Calças" }),
-      cat({ slug: "shorts", name: "Shorts", availableCount: 0 }),
-    ]);
+    const menu = buildMenu(
+      [
+        cat({ slug: "calcas", name: "Calças" }),
+        cat({ slug: "shorts", name: "Shorts", availableCount: 0 }),
+      ],
+      5
+    );
     expect(menu.map((m) => m.label)).toEqual(["Novidades", "Calças", "Ofertas"]);
   });
 
   it("respeita showInMenu=false e menuOrder", () => {
-    const menu = buildMenu([
-      cat({ slug: "a", name: "A", menuOrder: 5 }),
-      cat({ slug: "b", name: "B", menuOrder: 1 }),
-      cat({ slug: "c", name: "C", showInMenu: false }),
-    ]);
+    const menu = buildMenu(
+      [
+        cat({ slug: "a", name: "A", menuOrder: 5 }),
+        cat({ slug: "b", name: "B", menuOrder: 1 }),
+        cat({ slug: "c", name: "C", showInMenu: false }),
+      ],
+      5
+    );
     expect(menu.map((m) => m.label)).toEqual(["Novidades", "B", "A", "Ofertas"]);
   });
 });

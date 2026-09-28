@@ -55,6 +55,7 @@ export default async function CategoriaPage({
         precoMin: Number(str(sp.preco_min)) || 0,
         precoMax: Number(str(sp.preco_max)) || 0,
         soEstoque: str(sp.estoque) === "1",
+        soOferta: str(sp.oferta) === "1",
       }}
     />
   );

@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     const precoMin = Number(searchParams.get("preco_min") || 0);
     const precoMax = Number(searchParams.get("preco_max") || 0);
     const soEstoque = searchParams.get("estoque") === "1";
+    const soOferta = searchParams.get("oferta") === "1";
 
     const price: { gte?: number; lte?: number } = {};
     if (precoMin > 0) price.gte = precoMin;
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
       ...(categorySlugs.length > 0 ? { category: { slug: { in: categorySlugs } } } : {}),
       ...(Object.keys(price).length ? { price } : {}),
       ...(soEstoque ? { stock: { gt: 0 } } : {}),
+      ...(soOferta ? { discountPercent: { gt: 0 } } : {}),
     };
 
     const orderBy =
@@ -44,7 +46,9 @@ export async function GET(req: NextRequest) {
         ? { price: "asc" as const }
         : sort === "price_desc"
           ? { price: "desc" as const }
-          : sort === "sales"
+          : sort === "desconto"
+            ? { discountPercent: "desc" as const }
+            : sort === "sales"
             ? { orderItems: { _count: "desc" as const } }
             : sort === "name"
               ? { name: "asc" as const }

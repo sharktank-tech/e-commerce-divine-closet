@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
+import { discountPercent } from "@/lib/precos";
 
 const updateSchema = productPartial();
 
@@ -62,6 +63,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
 
     const { variations, ...rest } = parsed.data;
+
+    // mantém discountPercent sincronizado ao trocar preço/de
+    if (rest.price !== undefined || rest.comparePrice !== undefined) {
+      const current = await prisma.product.findUnique({ where: { id } });
+      if (!current) {
+        return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
+      }
+      const price = rest.price ?? Number(current.price);
+      const compare =
+        rest.comparePrice !== undefined ? rest.comparePrice : current.comparePrice != null ? Number(current.comparePrice) : null;
+      (rest as Record<string, unknown>).discountPercent = discountPercent(price, compare);
+    }
 
     const product = await prisma.$transaction(async (tx) => {
       await tx.product.update({ where: { id }, data: rest });

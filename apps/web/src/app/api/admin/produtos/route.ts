@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
+import { discountPercent } from "@/lib/precos";
 
 const variationSchema = z.array(
   z.object({
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
         description: data.description,
         price: data.price,
         comparePrice: data.comparePrice ?? null,
+        discountPercent: discountPercent(data.price, data.comparePrice ?? null),
         sku: data.sku || null,
         stock: variations.length > 0 ? variationStock : data.stock,
         isActive: data.isActive,

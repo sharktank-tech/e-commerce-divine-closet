@@ -10,22 +10,26 @@ export type CatalogFilters = {
   precoMin: number;
   precoMax: number;
   soEstoque: boolean;
+  soOferta: boolean;
 };
 
 type Props = {
   initial: CatalogFilters;
-  /** base dos links de paginação/filtros: "/produtos" ou "/categoria/<slug>" */
+  /** base dos links de paginação/filtros: "/produtos", "/categoria/<slug>" ou "/ofertas" */
   basePath: string;
   /** categoria fixada pela rota (não editável pelo form) */
   lockedCategoria?: string;
   /** título override (ex.: nome da categoria) */
   title?: string;
+  /** textos do estado vazio (padrão genérico) */
+  emptyTitle?: string;
+  emptyHint?: string;
 };
 
 const PAGE_SIZE = 12;
 
-export async function Catalogo({ initial, basePath, lockedCategoria, title }: Props) {
-  const { q, categoria, sort, page, precoMin, precoMax, soEstoque } = initial;
+export async function Catalogo({ initial, basePath, lockedCategoria, title, emptyTitle, emptyHint }: Props) {
+  const { q, categoria, sort, page, precoMin, precoMax, soEstoque, soOferta } = initial;
   // múltiplas categorias separadas por vírgula (item "Calças e Shorts" do menu)
   const categorySlugs = categoria
     .split(",")
@@ -61,6 +65,7 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title }: Pr
     ...(categorySlugs.length > 0 ? { category: { slug: { in: categorySlugs } } } : {}),
     ...(Object.keys(price).length ? { price } : {}),
     ...(soEstoque ? { stock: { gt: 0 } } : {}),
+    ...(soOferta ? { discountPercent: { gt: 0 } } : {}),
     deletedAt: null,
   };
 
@@ -69,9 +74,11 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title }: Pr
       ? { price: "asc" as const }
       : sort === "price_desc"
         ? { price: "desc" as const }
-        : sort === "sales"
-          ? { orderItems: { _count: "desc" as const } }
-          : { createdAt: "desc" as const };
+        : sort === "desconto"
+          ? { discountPercent: "desc" as const }
+          : sort === "sales"
+            ? { orderItems: { _count: "desc" as const } }
+            : { createdAt: "desc" as const };
 
   let items: unknown[] = [];
   let total = 0;
@@ -152,6 +159,7 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title }: Pr
             className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
           >
             <option value="recent">Lançamentos</option>
+            <option value="desconto">Maior desconto</option>
             <option value="sales">Mais vendidos</option>
             <option value="price_asc">Menor preço</option>
             <option value="price_desc">Maior preço</option>
@@ -199,8 +207,12 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title }: Pr
         </div>
       ) : items.length === 0 ? (
         <div className="mt-16 text-center">
-          <p className="font-display text-xl text-ink">Nenhum produto encontrado</p>
-          <p className="mt-2 text-sm text-ink-mute">Tente outra busca ou remova os filtros.</p>
+          <p className="font-display text-xl text-ink">
+            {emptyTitle || "Nenhum produto encontrado"}
+          </p>
+          <p className="mt-2 text-sm text-ink-mute">
+            {emptyHint || "Tente outra busca ou remova os filtros."}
+          </p>
           <Link href="/produtos" className="mt-4 inline-block text-sm font-semibold text-primary-700 underline">
             Ver todos os produtos
           </Link>

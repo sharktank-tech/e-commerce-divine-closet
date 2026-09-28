@@ -25,9 +25,10 @@ export function Header() {
 
   async function load() {
     try {
-      const [meRes, catRes] = await Promise.all([
+      const [meRes, catRes, offersRes] = await Promise.all([
         fetch("/api/auth/me"),
         fetch("/api/categorias"),
+        fetch("/api/produtos?oferta=1&pageSize=1"),
       ]);
       if (meRes.ok) {
         const data = await meRes.json();
@@ -38,6 +39,7 @@ export function Header() {
       if (catRes.ok) {
         const data = await catRes.json();
         const items = Array.isArray(data.items) ? data.items : [];
+        const offers = offersRes.ok ? (await offersRes.json()).total || 0 : 0;
         setNav([
           ...buildMenu(
             items.map((c: Record<string, unknown>) => ({
@@ -51,7 +53,8 @@ export function Header() {
               availableCount: Number(
                 (c as { availableCount?: unknown }).availableCount ?? 0
               ),
-            }))
+            })),
+            offers
           ),
           { label: "Sobre", href: "/institucional" },
         ]);
