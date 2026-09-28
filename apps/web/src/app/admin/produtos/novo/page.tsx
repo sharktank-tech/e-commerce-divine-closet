@@ -9,6 +9,7 @@ import {
   emptyProductContent,
 } from "@/components/admin/ProductContentFields";
 import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
+import { RelatedPicker } from "@/components/admin/RelatedPicker";
 
 type Category = { id: string; name: string };
 
@@ -34,6 +35,7 @@ export default function NovoProdutoPage() {
     images: [] as string[],
     imageColors: [] as string[],
     imageAlts: [] as string[],
+    relacionados: [] as string[],
     ...emptyProductContent,
     tabelaMedidasId: "",
   });
@@ -93,6 +95,7 @@ export default function NovoProdutoPage() {
           tabelaMedidasId: form.tabelaMedidasId || null,
           imageColors: form.imageColors,
           imageAlts: form.imageAlts,
+          relacionados: form.relacionados,
         }),
       });
       const data = await res.json();
@@ -166,6 +169,15 @@ export default function NovoProdutoPage() {
               ))}
             </select>
           </label>
+        </div>
+
+        <div className="border-t border-ink/10 pt-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">
+            Vinculados manualmente (“Você também pode gostar” primeiro)
+          </p>
+          <div className="mt-3">
+            <RelatedPicker value={form.relacionados} onChange={(ids) => setForm({ ...form, relacionados: ids })} />
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-6 border-t border-ink/10 pt-4">

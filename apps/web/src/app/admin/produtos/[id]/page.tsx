@@ -9,6 +9,7 @@ import {
   type ProductContent,
 } from "@/components/admin/ProductContentFields";
 import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
+import { RelatedPicker } from "@/components/admin/RelatedPicker";
 
 type Category = { id: string; name: string };
 
@@ -29,6 +30,7 @@ type Form = {
   images: string[];
   imageColors: string[];
   imageAlts: string[];
+  relacionados: string[];
   tabelaMedidasId: string;
 } & ProductContent;
 
@@ -78,6 +80,7 @@ export default function EditarProdutoPage({
           images: p.images || [],
           imageColors: p.imageColors || [],
           imageAlts: p.imageAlts || [],
+          relacionados: p.relacionados || [],
           composicao: p.composicao || "",
           instrucoesLavagem: p.instrucoesLavagem || "",
           comprimento: p.comprimento || "",
@@ -141,6 +144,7 @@ export default function EditarProdutoPage({
           images: form.images,
           imageColors: form.imageColors,
           imageAlts: form.imageAlts,
+          relacionados: form.relacionados,
           sizes: form.sizes.split(",").map((s) => s.trim()).filter(Boolean),
           colors: form.colors.split(",").map((s) => s.trim()).filter(Boolean),
           composicao: form.composicao || null,
@@ -302,6 +306,19 @@ export default function EditarProdutoPage({
               <p className="text-xs text-ink-mute">Estoque total: {variationStock} un.</p>
             </div>
           )}
+        </div>
+
+        <div className="border-t border-ink/10 pt-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">
+            Vinculados manualmente (“Você também pode gostar” primeiro)
+          </p>
+          <div className="mt-3">
+            <RelatedPicker
+              value={form.relacionados}
+              excludeId={id}
+              onChange={(ids) => setForm({ ...form, relacionados: ids })}
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-6 border-t border-ink/10 pt-4">

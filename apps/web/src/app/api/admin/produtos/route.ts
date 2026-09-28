@@ -42,6 +42,7 @@ const productSchema = z.object({
   ocasiao: z.string().nullish(),
   metaTitle: z.string().nullish(),
   metaDescription: z.string().nullish(),
+  relacionados: z.array(z.string()).default([]),
 });
 
 export async function GET() {
@@ -90,6 +91,17 @@ export async function POST(req: NextRequest) {
     const variations = data.variations || [];
     const variationStock = variations.reduce((s, v) => s + v.stock, 0);
 
+    // relacionados: mantém só ids existentes e ativos
+    let relacionados: string[] = [];
+    if (data.relacionados.length > 0) {
+      const ids = data.relacionados.filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+      const found = await prisma.product.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+        select: { id: true },
+      });
+      relacionados = found.map((p) => p.id);
+    }
+
     const product = await prisma.product.create({
       data: {
         name: data.name,
@@ -111,6 +123,7 @@ export async function POST(req: NextRequest) {
         colors: data.colors,
         categoryId: data.categoryId,
         tabelaMedidasId: data.tabelaMedidasId || null,
+        relacionados,
         composicao: data.composicao || null,
         instrucoesLavagem: data.instrucoesLavagem || null,
         comprimento: data.comprimento || null,

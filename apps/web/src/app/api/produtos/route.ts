@@ -19,6 +19,13 @@ export async function GET(req: NextRequest) {
     const precoMax = Number(searchParams.get("preco_max") || 0);
     const soEstoque = searchParams.get("estoque") === "1";
     const soOferta = searchParams.get("oferta") === "1";
+    // busca direta por ids (vistos recentemente, picker do admin).
+    // Só UUIDs válidos: evita P2023 com strings arbitrárias.
+    const ids = (searchParams.get("ids") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => /^[0-9a-f-]{36}$/i.test(s))
+      .slice(0, 24);
 
     const price: { gte?: number; lte?: number } = {};
     if (precoMin > 0) price.gte = precoMin;
@@ -27,6 +34,7 @@ export async function GET(req: NextRequest) {
     const where = {
       isActive: true,
       deletedAt: null,
+      ...(ids.length > 0 ? { id: { in: ids } } : {}),
       ...(q
         ? {
             OR: [

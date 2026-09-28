@@ -24,6 +24,7 @@ function productPartial() {
     colors: z.array(z.string()).optional(),
     categoryId: z.string().min(1).optional(),
     tabelaMedidasId: z.string().nullish(),
+    relacionados: z.array(z.string()).optional(),
     composicao: z.string().nullish(),
     instrucoesLavagem: z.string().nullish(),
     comprimento: z.string().nullish(),
@@ -76,6 +77,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
 
     const { variations, ...rest } = parsed.data;
+
+    // relacionados: mantém só ids existentes (remove o próprio)
+    if (rest.relacionados !== undefined) {
+      const ids = rest.relacionados.filter(
+        (x) => x !== id && /^[0-9a-f-]{36}$/i.test(x)
+      );
+      const found = await prisma.product.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+        select: { id: true },
+      });
+      (rest as Record<string, unknown>).relacionados = found.map((p) => p.id);
+    }
 
     // mantém imageColors/imageAlts alinhados ao tamanho de images
     if (

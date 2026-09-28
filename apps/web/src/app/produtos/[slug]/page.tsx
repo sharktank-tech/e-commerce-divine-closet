@@ -10,7 +10,9 @@ import { shipping, features, institutional } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
 import { estadoEstoque, textoEstoque } from "@/lib/estoque";
 import { resolveSizeTable } from "@/lib/medidas";
+import { complementosPara } from "@/lib/recomendacoes";
 import { ReviewStarsLine, AvaliacoesSection } from "@/components/loja/ReviewStarsLine";
+import { VistosRecentemente } from "@/components/loja/VistosRecentemente";
 import type { Metadata } from "next";
 
 export const revalidate = 60;
@@ -64,7 +66,7 @@ export default async function ProdutoDetalhePage({
     notFound();
   }
 
-  let related: Array<{
+  type CardProduct = {
     id: string;
     name: string;
     slug: string;
@@ -73,21 +75,75 @@ export default async function ProdutoDetalhePage({
     images: string[];
     stock: number;
     category?: { name: string; slug: string };
-  }> = [];
+  };
+
+  const AVAILABLE = { isActive: true, deletedAt: null, stock: { gt: 0 } } as const;
+  const used = new Set<string>([product.id]);
+  let gostar: CardProduct[] = [];
+  let look: CardProduct[] = [];
 
   try {
-    related = await prisma.product.findMany({
-      where: {
-        categoryId: product.categoryId,
-        id: { not: product.id },
-        isActive: true,
-        deletedAt: null,
-      },
-      include: { category: true },
-      take: 4,
-    });
+    // 1. vinculados manualmente no admin
+    if (product.relacionados.length > 0) {
+      const manual = await prisma.product.findMany({
+        where: { ...AVAILABLE, id: { in: product.relacionados } },
+        include: { category: true },
+      });
+      const order = new Map(product.relacionados.map((id, i) => [id, i]));
+      gostar = manual
+        .filter((p) => p.id !== product.id)
+        .sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99))
+        .slice(0, 8);
+      gostar.forEach((p) => used.add(p.id));
+    }
+
+    // 2. mesma categoria, faixa de preço ±40%, destaques e vendidos primeiro
+    if (gostar.length < 8) {
+      const price = Number(product.price);
+      const sameCat = await prisma.product.findMany({
+        where: {
+          ...AVAILABLE,
+          categoryId: product.categoryId,
+          id: { notIn: [...used] },
+          price: { gte: price * 0.6, lte: price * 1.4 },
+        },
+        include: { category: true },
+        orderBy: [
+          { featured: "desc" },
+          { orderItems: { _count: "desc" } },
+          { createdAt: "desc" },
+        ],
+        take: 8 - gostar.length,
+      });
+      sameCat.forEach((p) => used.add(p.id));
+      gostar = [...gostar, ...sameCat];
+    }
+
+    // 3. mais recentes para completar
+    if (gostar.length < 8) {
+      const recent = await prisma.product.findMany({
+        where: { ...AVAILABLE, id: { notIn: [...used] } },
+        include: { category: true },
+        orderBy: { createdAt: "desc" },
+        take: 8 - gostar.length,
+      });
+      recent.forEach((p) => used.add(p.id));
+      gostar = [...gostar, ...recent];
+    }
+
+    // 4. complete o look: categorias complemento
+    const compSlugs = complementosPara(product.category.slug);
+    if (compSlugs.length > 0) {
+      look = await prisma.product.findMany({
+        where: { ...AVAILABLE, id: { notIn: [...used] }, category: { slug: { in: compSlugs } } },
+        include: { category: true },
+        orderBy: [{ featured: "desc" }, { createdAt: "desc" }],
+        take: 4,
+      });
+    }
   } catch {
-    related = [];
+    gostar = [];
+    look = [];
   }
 
   const onSale =
@@ -266,16 +322,33 @@ export default async function ProdutoDetalhePage({
 
       <AvaliacoesSection productId={product.id} productSlug={product.slug} />
 
-      {related.length > 0 && (
+      {gostar.length > 0 && (
         <section className="mt-16 border-t border-ink/10 pt-10">
           <h2 className="font-display text-2xl font-bold text-ink">Você também pode gostar</h2>
-          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-            {related.map((p) => (
-              <ProductCard key={p.id} product={p} />
+          <div className="mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible md:pb-0">
+            {gostar.map((p) => (
+              <div key={p.id} className="w-[68%] shrink-0 snap-start sm:w-[44%] md:w-auto">
+                <ProductCard product={p} />
+              </div>
             ))}
           </div>
         </section>
       )}
+
+      {look.length > 0 && (
+        <section className="mt-16 border-t border-ink/10 pt-10">
+          <h2 className="font-display text-2xl font-bold text-ink">Complete o look</h2>
+          <div className="mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible md:pb-0">
+            {look.map((p) => (
+              <div key={p.id} className="w-[68%] shrink-0 snap-start sm:w-[44%] md:w-auto">
+                <ProductCard product={p} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <VistosRecentemente currentId={product.id} />
     </div>
   );
 }
