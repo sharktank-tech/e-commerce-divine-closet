@@ -13,6 +13,7 @@
     "start": "next start apps/web",
     "lint": "next lint apps/web",
     "typecheck": "tsc --noEmit -p apps/web/tsconfig.json",
+    "test": "npm run test --workspace @divine-closet/web",
     "prisma:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema packages/database/prisma/schema.prisma",
     "prisma:deploy": "prisma migrate deploy --schema packages/database/prisma/schema.prisma",

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { formatCartCount } from "@/lib/cart";
+import { useCart } from "@/components/loja/CartProvider";
 
 type Session = { name: string; email: string; role: string } | null;
 
@@ -17,26 +19,21 @@ const nav = [
 
 export function Header() {
   const [session, setSession] = useState<Session>(null);
-  const [cartCount, setCartCount] = useState(0);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  // Fonte única da quantidade: contexto do carrinho (atualiza sem reload).
+  const { count: cartCount } = useCart();
+  const badge = formatCartCount(cartCount);
 
   async function load() {
     try {
-      const [meRes, cartRes] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch("/api/carrinho"),
-      ]);
+      const meRes = await fetch("/api/auth/me");
       if (meRes.ok) {
         const data = await meRes.json();
         setSession(data.user);
       } else {
         setSession(null);
-      }
-      if (cartRes.ok) {
-        const cart = await cartRes.json();
-        setCartCount(cart.count || 0);
       }
     } catch {
       // silencioso
@@ -83,20 +80,20 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 sm:gap-3">
           <Link
             href="/carrinho"
-            className="relative rounded-full p-2 text-ink transition-colors hover:bg-ink/5"
-            aria-label="Carrinho"
+            className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-full p-2 text-ink transition-colors hover:bg-ink/5"
+            aria-label={badge ? `Carrinho, ${cartCount} itens` : "Carrinho vazio"}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
               <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4H6z" />
               <path d="M3 6h18" />
               <path d="M16 10a4 4 0 01-8 0" />
             </svg>
-            {cartCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-700 px-1 text-[10px] font-bold text-white">
-                {cartCount}
+            {badge && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-700 px-1 text-[10px] font-bold text-white">
+                {badge}
               </span>
             )}
           </Link>
@@ -107,7 +104,7 @@ export function Header() {
                 href={session.role === "ADMIN" ? "/admin" : "/conta"}
                 className="text-sm font-medium text-ink-soft hover:text-ink"
               >
-                {session.name.split(" ")[0]}
+                Minha conta
               </Link>
               <button
                 onClick={logout}
@@ -117,12 +114,24 @@ export function Header() {
               </button>
             </div>
           ) : (
-            <Link
-              href="/login"
-              className="hidden rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50 hover:bg-ink-soft sm:inline-flex"
-            >
-              Entrar
-            </Link>
+            <>
+              <Link
+                href="/login"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full p-2 text-ink hover:bg-ink/5 sm:hidden"
+                aria-label="Entrar"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21c0-4 3.5-6.5 8-6.5s8 2.5 8 6.5" />
+                </svg>
+              </Link>
+              <Link
+                href="/login"
+                className="hidden rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50 hover:bg-ink-soft sm:inline-flex"
+              >
+                Entrar
+              </Link>
+            </>
           )}
 
           <button
