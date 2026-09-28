@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { AddToCart } from "@/components/loja/AddToCart";
@@ -44,7 +44,18 @@ export default async function ProdutoDetalhePage({
 }) {
   const { slug } = await params;
   const product = await getProduct(slug);
-  if (!product || !product.isActive) notFound();
+  if (!product || !product.isActive) {
+    // slug antigo renomeado? redireciona permanente (308, equivalência SEO ao 301).
+    // NB: permanentRedirect lança exceção interna — ficar FORA do try/catch.
+    let redir = null;
+    try {
+      redir = await prisma.slugRedirect.findUnique({ where: { oldSlug: slug } });
+    } catch {
+      // ignora e cai no 404
+    }
+    if (redir) permanentRedirect(`/produtos/${redir.newSlug}`);
+    notFound();
+  }
 
   let related: Array<{
     id: string;

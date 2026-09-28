@@ -20,6 +20,7 @@
     "db:seed": "tsx packages/database/prisma/seed.ts",
     "db:reset": "prisma migrate reset --force --schema packages/database/prisma/schema.prisma",
     "db:studio": "prisma studio --schema packages/database/prisma/schema.prisma",
+    "audit:slugs": "tsx scripts/audit-slugs.ts",
     "postinstall": "prisma generate --schema packages/database/prisma/schema.prisma"
   },
   "prisma": {

@@ -59,10 +59,19 @@ export async function POST(req: NextRequest) {
     }
 
     const data = parsed.data;
-    let slug = data.slug ? slugify(data.slug) : slugify(data.name);
+    const slug = data.slug ? slugify(data.slug) : slugify(data.name);
 
+    // Colisão de slug: avisa em vez de criar sufixo silencioso (SEO).
+    // Inclui deletados: reutilizar slug de produto apagado exige restaurar ou renomear.
     const slugExists = await prisma.product.findUnique({ where: { slug } });
-    if (slugExists) slug = `${slug}-${Date.now().toString(36)}`;
+    if (slugExists) {
+      return NextResponse.json(
+        {
+          error: `Já existe um produto com o slug "${slug}" (${slugExists.name}). Ajuste o nome ou informe outro slug.`,
+        },
+        { status: 409 }
+      );
+    }
 
     const variations = data.variations || [];
     const variationStock = variations.reduce((s, v) => s + v.stock, 0);

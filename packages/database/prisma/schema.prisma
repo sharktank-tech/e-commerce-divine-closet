@@ -308,3 +308,9 @@ model AuditLog {
 
   @@index([entity, createdAt])
 }
+
+model SlugRedirect {
+  oldSlug   String   @id
+  newSlug   String
+  createdAt DateTime @default(now())
+}
