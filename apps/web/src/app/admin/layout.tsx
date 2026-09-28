@@ -11,6 +11,7 @@ const links = [
   { href: "/admin/tabelas-medidas", label: "Medidas", icon: "📏" },
   { href: "/admin/pedidos", label: "Pedidos", icon: "◉" },
   { href: "/admin/clientes", label: "Clientes", icon: "◎" },
+  { href: "/admin/avaliacoes", label: "Avaliações", icon: "★" },
   { href: "/admin/cupons", label: "Cupons", icon: "%" },
   { href: "/admin/banners", label: "Banners", icon: "▣" },
   { href: "/admin/relatorios", label: "Relatórios", icon: "▤" },

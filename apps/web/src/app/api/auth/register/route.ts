@@ -48,7 +48,10 @@ export async function POST(req: NextRequest) {
     });
 
     const mail = emails.welcome(user.name);
-    await sendEmail({ to: user.email, subject: mail.subject, text: mail.text });
+    // boas-vindas não bloqueiam o cadastro (falha de SMTP não pode dar 500)
+    sendEmail({ to: user.email, subject: mail.subject, text: mail.text }).catch((err) =>
+      console.error("[register:email]", err)
+    );
 
     return NextResponse.json(
       { user: { id: user.id, name: user.name, email: user.email, role: user.role } },

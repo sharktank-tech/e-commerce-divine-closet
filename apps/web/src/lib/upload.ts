@@ -25,14 +25,14 @@ function randomFilename(originalName: string): string {
 }
 
 // Resolve o diretório de uploads considerando o monorepo:
-// cwd pode ser a raiz (npm run dev) ou apps/web.
+// cwd pode ser a raiz (npm run dev) ou apps/web. UPLOAD_DIR relativo
+// é sempre resolvido a partir de apps/web (o que o Next serve).
 function uploadsDir(): string {
-  if (process.env.UPLOAD_DIR) return path.resolve(process.env.UPLOAD_DIR);
   const cwd = process.cwd();
   const appDir = path.join(cwd, "apps", "web");
-  return cwd.endsWith(path.join("apps", "web"))
-    ? path.join(cwd, "public", "uploads")
-    : path.join(appDir, "public", "uploads");
+  const base = cwd.endsWith(path.join("apps", "web")) ? cwd : appDir;
+  if (process.env.UPLOAD_DIR) return path.resolve(base, process.env.UPLOAD_DIR);
+  return path.join(base, "public", "uploads");
 }
 
 type S3Settings = {

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { saveUpload } from "@/lib/upload";
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireAuth("ADMIN");
+    // qualquer usuário autenticado (fotos de avaliação sobem por aqui);
+    // o admin continua podendo tudo. Validação de tipo/tamanho no saveUpload.
+    const session = await getSession(req);
     if (!session) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
 
     const form = await req.formData();

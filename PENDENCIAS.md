@@ -4,6 +4,11 @@ Tudo aqui depende de decisão, conteúdo ou credencial do dono. Nada é placehol
 
 ## 🔴 Alta — catálogo e vendas
 
+### Avaliações (Tarefa 11)
+- Fluxo completo no ar (elegibilidade, moderação, convite pós-compra por e-mail 7 dias após entrega).
+- WhatsApp no convite e nos avisos: sem integração — só e-mail por enquanto.
+- Cron Vercel (`/api/cron/avaliacoes`, diário 12h UTC): exige `CRON_SECRET` igual nos dois lados; no Hobby, verificar limite de execuções.
+
 ### Fotos dos produtos (Tarefa 10)
 - Manter 4–5 fotos por produto (a principal é a primeira; ordem ajustável no admin).
 - Vincular cada foto à sua cor no admin para a galeria pular automaticamente ao trocar de cor.

@@ -251,7 +251,10 @@ model Order {
   updatedAt     DateTime      @updatedAt
   deletedAt     DateTime?
 
-  items OrderItem[]
+  items             OrderItem[]
+  reviews           Review[]
+  reviewRequestedAt DateTime?
+  entregueEm        DateTime?
 
   @@index([userId])
   @@index([status])
@@ -275,18 +278,46 @@ model OrderItem {
 }
 
 model Review {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String    @db.Uuid
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId String    @db.Uuid
-  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  rating    Int
-  comment   String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId       String        @db.Uuid
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderId         String        @db.Uuid
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rating          Int
+  titulo          String?
+  comment         String
+  tamanhoComprado String?
+  caimento        String?
+  alturaCliente   String?
+  status          ReviewStatus  @default(PENDENTE)
+  respostaLoja    String?
+  fotos           ReviewPhoto[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
 
-  @@unique([userId, productId])
+  @@unique([orderId, productId])
+  @@index([productId, status])
+}
+
+model ReviewPhoto {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reviewId  String   @db.Uuid
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  url       String
+  ordem     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reviewId])
+}
+
+enum ReviewStatus {
+  PENDENTE
+  APROVADA
+  REJEITADA
 }
 
 model Coupon {

@@ -279,11 +279,12 @@ export async function POST(req: NextRequest) {
       }
 
       const mail = emails.orderPaid(order.number);
-      await sendEmail({
+      // confirmação por e-mail não bloqueia o pedido
+      sendEmail({
         to: session?.email || guestEmail || "",
         subject: mail.subject,
         text: mail.text,
-      });
+      }).catch((err) => console.error("[pedidos:email]", err));
     } else {
       await prisma.order.update({
         where: { id: order.id },

@@ -103,6 +103,33 @@ export const emails = {
     subject: `Pedido ${number} pago com sucesso`,
     text: `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
   }),
+  reviewRequest: (orderNumber: string, items: { name: string; url: string }[]) => ({
+    subject: `Como foi sua compra ${orderNumber}? Conte pra gente 💫`,
+    text: [
+      "Olá!",
+      "",
+      `Seu pedido ${orderNumber} foi entregue. Que tal avaliar as peças? Sua opinião ajuda outras clientes:`,
+      ...items.map((i) => `• ${i.name}: ${i.url}`),
+      "",
+      "Obrigado por comprar na Divine Closet!",
+    ].join("\n"),
+    html: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
+  <div style="background:#9E2BBA;padding:24px 32px;text-align:center">
+    <span style="font-family:Georgia,serif;font-size:24px;font-weight:bold;color:#ffffff">Divine Closet</span>
+  </div>
+  <div style="padding:32px;background:#ffffff">
+    <h1 style="font-size:20px;color:#9E2BBA;margin:0 0 16px">Como foi sua compra?</h1>
+    <p style="font-size:14px;line-height:1.6;margin:0 0 16px">Seu pedido <strong>${orderNumber}</strong> foi entregue. Avalie as peças e ajude outras clientes:</p>
+    ${items
+      .map(
+        (i) =>
+          `<p style="margin:0 0 12px"><a href="${i.url}" style="display:inline-block;background:#9E2BBA;color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;padding:12px 28px;border-radius:8px">Avaliar: ${i.name}</a></p>`
+      )
+      .join("")}
+    <p style="font-size:12px;color:#6b7280;margin:16px 0 0">Obrigado por comprar na Divine Closet!</p>
+  </div>
+</div>`,
+  }),
   passwordReset: (link: string) => ({
     subject: "Redefinir senha - Divine Closet",
     text: [

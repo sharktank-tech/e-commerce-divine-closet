@@ -64,6 +64,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         ...(parsed.data.trackingCode !== undefined
           ? { trackingCode: parsed.data.trackingCode || null }
           : {}),
+        // marca a entrega (base do convite de avaliação pós-compra)
+        ...(parsed.data.status === "DELIVERED" ? { entregueEm: new Date() } : {}),
       },
       include: {
         items: true,
@@ -72,11 +74,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     });
 
     if (order.user?.email) {
-      await sendEmail({
+      // notificação não bloqueia a atualização do pedido
+      sendEmail({
         to: order.user.email,
         subject: `Pedido ${order.number} atualizado`,
         text: `Seu pedido ${order.number} agora está: ${orderStatusLabel(order.status)}.`,
-      });
+      }).catch((err) => console.error("[admin:pedido:email]", err));
     }
 
     return NextResponse.json({ order });

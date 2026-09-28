@@ -10,6 +10,7 @@ import { shipping, features, institutional } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
 import { estadoEstoque, textoEstoque } from "@/lib/estoque";
 import { resolveSizeTable } from "@/lib/medidas";
+import { ReviewStarsLine, AvaliacoesSection } from "@/components/loja/ReviewStarsLine";
 import type { Metadata } from "next";
 
 export const revalidate = 60;
@@ -135,6 +136,7 @@ export default async function ProdutoDetalhePage({
           <h1 className="mt-2 font-display text-3xl font-bold text-ink sm:text-4xl">
             {product.name}
           </h1>
+          <ReviewStarsLine productId={product.id} />
 
           <div className="mt-4 flex flex-wrap items-baseline gap-3">
             <span className="text-3xl font-bold text-ink">{formatBRL(product.price)}</span>
@@ -261,6 +263,8 @@ export default async function ProdutoDetalhePage({
           </ul>
         </div>
       </div>
+
+      <AvaliacoesSection productId={product.id} productSlug={product.slug} />
 
       {related.length > 0 && (
         <section className="mt-16 border-t border-ink/10 pt-10">
