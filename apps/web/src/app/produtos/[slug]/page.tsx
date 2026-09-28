@@ -6,7 +6,7 @@ import { ProductCard } from "@/components/loja/ProductCard";
 import { ProductSlideshow } from "@/components/loja/ProductSlideshow";
 import { FreteEstimator } from "@/components/loja/FreteEstimator";
 import { WishlistButton } from "@/components/loja/WishlistButton";
-import { shipping, features } from "@/config/defaults";
+import { shipping, features, institutional } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
 import { estadoEstoque, textoEstoque } from "@/lib/estoque";
 import type { Metadata } from "next";
@@ -147,10 +147,72 @@ export default async function ProdutoDetalhePage({
             )}
           </div>
 
-          <div className="mt-6 border-t border-ink/10 pt-6">
-            <p className="whitespace-pre-line text-sm leading-relaxed text-ink-soft">
-              {product.description}
+          {(product.modeloAltura || product.modeloVeste) && (
+            <p className="mt-2 text-xs text-ink-mute">
+              Modelo: {product.modeloAltura || "—"}
+              {product.modeloVeste ? `, veste ${product.modeloVeste}` : ""}
             </p>
+          )}
+
+          <div className="mt-6 space-y-3 border-t border-ink/10 pt-6">
+            <details className="group rounded-xl border border-ink/10 bg-white" open>
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+                Descrição
+              </summary>
+              <div className="border-t border-ink/10 px-4 py-3">
+                <p className="whitespace-pre-line text-sm leading-relaxed text-ink-soft">
+                  {product.description}
+                </p>
+                {(product.comprimento || product.caimento || product.ocasiao) && (
+                  <dl className="mt-3 space-y-1.5 text-sm">
+                    {product.comprimento && (
+                      <div className="flex gap-2">
+                        <dt className="text-ink-mute">Comprimento:</dt>
+                        <dd className="text-ink">{product.comprimento}</dd>
+                      </div>
+                    )}
+                    {product.caimento && (
+                      <div className="flex gap-2">
+                        <dt className="text-ink-mute">Caimento:</dt>
+                        <dd className="text-ink">{product.caimento}</dd>
+                      </div>
+                    )}
+                    {product.ocasiao && (
+                      <div className="flex gap-2">
+                        <dt className="text-ink-mute">Ocasião:</dt>
+                        <dd className="text-ink">{product.ocasiao}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+              </div>
+            </details>
+
+            {(product.composicao || product.instrucoesLavagem) && (
+              <details className="group rounded-xl border border-ink/10 bg-white">
+                <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+                  Composição e cuidados
+                </summary>
+                <div className="space-y-2 border-t border-ink/10 px-4 py-3 text-sm leading-relaxed text-ink-soft">
+                  {product.composicao && (
+                    <p className="whitespace-pre-line">{product.composicao}</p>
+                  )}
+                  {product.instrucoesLavagem && (
+                    <p className="whitespace-pre-line">{product.instrucoesLavagem}</p>
+                  )}
+                </div>
+              </details>
+            )}
+
+            <details className="group rounded-xl border border-ink/10 bg-white">
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+                Envio e trocas
+              </summary>
+              <div className="space-y-2 border-t border-ink/10 px-4 py-3 text-sm leading-relaxed text-ink-soft">
+                <p>Frete grátis em compras acima de {formatBRL(shipping.freeFrom)}.</p>
+                <p className="whitespace-pre-line">{institutional.exchangePolicy}</p>
+              </div>
+            </details>
           </div>
 
           <AddToCart

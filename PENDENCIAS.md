@@ -4,6 +4,13 @@ Tudo aqui depende de decisão, conteúdo ou credencial do dono. Nada é placehol
 
 ## 🔴 Alta — catálogo e vendas
 
+### Conteúdo dos produtos (Tarefa 8)
+Os 19 produtos ativos estão sem composição, medidas, dados de modelo e descrição própria (só têm o texto genérico do mock). Completar em admin → Produtos → editar cada um:
+- Composição do tecido, instruções de lavagem, comprimento, caimento, ocasião
+- Modelo: altura + tamanho que veste (aparece na PDP como "Modelo: 1,75 m, veste M")
+- Descrição própria com 300–600 caracteres; meta title (~60) e meta description (140–160) para SEO
+- Tabela de medidas: estrutura pronta na Tarefa 9 — vincular por produto ou categoria
+
 ### Slugs com sufixo numérico (Tarefa 2)
 Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 - [ ] **Renomear órfãos** (base apagada, slug limpo livre): `conjunto-alicia-2` → `conjunto-alicia`, `conjunto-melissa-2` → `conjunto-melissa`, `vestido-pietra-2` → `vestido-pietra`. Onde: admin → Produtos → editar → campo slug. Criar redirect 301 do slug antigo (tabela `SlugRedirect` ou admin).

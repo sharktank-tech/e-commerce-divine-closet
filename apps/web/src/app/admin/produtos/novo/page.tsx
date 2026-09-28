@@ -4,6 +4,10 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import {
+  ProductContentFields,
+  emptyProductContent,
+} from "@/components/admin/ProductContentFields";
 
 type Category = { id: string; name: string };
 
@@ -27,6 +31,7 @@ export default function NovoProdutoPage() {
     sizes: "",
     colors: "",
     images: [] as string[],
+    ...emptyProductContent,
   });
 
   useEffect(() => {
@@ -76,6 +81,15 @@ export default function NovoProdutoPage() {
           images: form.images,
           sizes: form.sizes.split(",").map((s) => s.trim()).filter(Boolean),
           colors: form.colors.split(",").map((s) => s.trim()).filter(Boolean),
+          composicao: form.composicao || null,
+          instrucoesLavagem: form.instrucoesLavagem || null,
+          comprimento: form.comprimento || null,
+          modeloAltura: form.modeloAltura || null,
+          modeloVeste: form.modeloVeste || null,
+          caimento: form.caimento || null,
+          ocasiao: form.ocasiao || null,
+          metaTitle: form.metaTitle || null,
+          metaDescription: form.metaDescription || null,
         }),
       });
       const data = await res.json();
@@ -154,6 +168,13 @@ export default function NovoProdutoPage() {
             Destaque na home
           </label>
         </div>
+
+        {form && (
+          <ProductContentFields
+            value={form}
+            onChange={(c) => setForm({ ...form, ...c })}
+          />
+        )}
 
         <div className="border-t border-ink/10 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">Imagens</p>

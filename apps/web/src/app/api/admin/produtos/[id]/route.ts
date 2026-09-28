@@ -20,6 +20,15 @@ function productPartial() {
     sizes: z.array(z.string()).optional(),
     colors: z.array(z.string()).optional(),
     categoryId: z.string().min(1).optional(),
+    composicao: z.string().nullish(),
+    instrucoesLavagem: z.string().nullish(),
+    comprimento: z.string().nullish(),
+    modeloAltura: z.string().nullish(),
+    modeloVeste: z.string().nullish(),
+    caimento: z.string().nullish(),
+    ocasiao: z.string().nullish(),
+    metaTitle: z.string().nullish(),
+    metaDescription: z.string().nullish(),
     variations: z
       .array(
         z.object({

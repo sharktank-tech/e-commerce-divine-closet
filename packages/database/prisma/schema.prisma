@@ -120,25 +120,34 @@ model Category {
 }
 
 model Product {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name            String
-  slug            String    @unique
-  description     String
-  price           Decimal   @db.Decimal(10, 2)
-  comparePrice    Decimal?  @db.Decimal(10, 2)
-  discountPercent Int       @default(0)
-  sku             String?   @unique
-  stock           Int       @default(0)
-  isActive        Boolean   @default(true)
-  featured        Boolean   @default(false)
-  images          String[]
-  sizes           String[]
-  colors          String[]
-  categoryId      String    @db.Uuid
-  category        Category  @relation(fields: [categoryId], references: [id])
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  slug              String    @unique
+  description       String
+  composicao        String?
+  instrucoesLavagem String?
+  comprimento       String?
+  modeloAltura      String?
+  modeloVeste       String?
+  caimento          String?
+  ocasiao           String?
+  metaTitle         String?
+  metaDescription   String?
+  price             Decimal   @db.Decimal(10, 2)
+  comparePrice      Decimal?  @db.Decimal(10, 2)
+  discountPercent   Int       @default(0)
+  sku               String?   @unique
+  stock             Int       @default(0)
+  isActive          Boolean   @default(true)
+  featured          Boolean   @default(false)
+  images            String[]
+  sizes             String[]
+  colors            String[]
+  categoryId        String    @db.Uuid
+  category          Category  @relation(fields: [categoryId], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   orderItems   OrderItem[]
   reviews      Review[]

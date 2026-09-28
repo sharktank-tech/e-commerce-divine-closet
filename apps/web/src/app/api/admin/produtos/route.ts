@@ -29,6 +29,15 @@ const productSchema = z.object({
   categoryId: z.string().min(1),
   slug: z.string().optional(),
   variations: variationSchema.optional(),
+  composicao: z.string().nullish(),
+  instrucoesLavagem: z.string().nullish(),
+  comprimento: z.string().nullish(),
+  modeloAltura: z.string().nullish(),
+  modeloVeste: z.string().nullish(),
+  caimento: z.string().nullish(),
+  ocasiao: z.string().nullish(),
+  metaTitle: z.string().nullish(),
+  metaDescription: z.string().nullish(),
 });
 
 export async function GET() {
@@ -93,6 +102,15 @@ export async function POST(req: NextRequest) {
         sizes: data.sizes,
         colors: data.colors,
         categoryId: data.categoryId,
+        composicao: data.composicao || null,
+        instrucoesLavagem: data.instrucoesLavagem || null,
+        comprimento: data.comprimento || null,
+        modeloAltura: data.modeloAltura || null,
+        modeloVeste: data.modeloVeste || null,
+        caimento: data.caimento || null,
+        ocasiao: data.ocasiao || null,
+        metaTitle: data.metaTitle || null,
+        metaDescription: data.metaDescription || null,
         ...(variations.length > 0
           ? {
               variations: {

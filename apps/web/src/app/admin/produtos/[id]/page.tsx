@@ -4,6 +4,11 @@ import { useEffect, useState, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import {
+  ProductContentFields,
+  emptyProductContent,
+  type ProductContent,
+} from "@/components/admin/ProductContentFields";
 
 type Category = { id: string; name: string };
 
@@ -22,7 +27,7 @@ type Form = {
   sizes: string;
   colors: string;
   images: string[];
-};
+} & ProductContent;
 
 export default function EditarProdutoPage({
   params,
@@ -63,6 +68,15 @@ export default function EditarProdutoPage({
           sizes: (p.sizes || []).join(", "),
           colors: (p.colors || []).join(", "),
           images: p.images || [],
+          composicao: p.composicao || "",
+          instrucoesLavagem: p.instrucoesLavagem || "",
+          comprimento: p.comprimento || "",
+          modeloAltura: p.modeloAltura || "",
+          modeloVeste: p.modeloVeste || "",
+          caimento: p.caimento || "",
+          ocasiao: p.ocasiao || "",
+          metaTitle: p.metaTitle || "",
+          metaDescription: p.metaDescription || "",
         });
         setVariations(
           (p.variations || []).map(
@@ -124,6 +138,15 @@ export default function EditarProdutoPage({
           images: form.images,
           sizes: form.sizes.split(",").map((s) => s.trim()).filter(Boolean),
           colors: form.colors.split(",").map((s) => s.trim()).filter(Boolean),
+          composicao: form.composicao || null,
+          instrucoesLavagem: form.instrucoesLavagem || null,
+          comprimento: form.comprimento || null,
+          modeloAltura: form.modeloAltura || null,
+          modeloVeste: form.modeloVeste || null,
+          caimento: form.caimento || null,
+          ocasiao: form.ocasiao || null,
+          metaTitle: form.metaTitle || null,
+          metaDescription: form.metaDescription || null,
           variations: variations.map((v) => ({
             size: v.size.trim(),
             color: v.color.trim() || null,
@@ -278,6 +301,11 @@ export default function EditarProdutoPage({
             Destaque
           </label>
         </div>
+
+        <ProductContentFields
+          value={form}
+          onChange={(c) => setForm({ ...form, ...c })}
+        />
 
         <div className="border-t border-ink/10 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">Imagens</p>
