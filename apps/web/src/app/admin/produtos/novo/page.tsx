@@ -8,6 +8,7 @@ import {
   ProductContentFields,
   emptyProductContent,
 } from "@/components/admin/ProductContentFields";
+import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
 
 type Category = { id: string; name: string };
 
@@ -16,7 +17,6 @@ export default function NovoProdutoPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [sizeTables, setSizeTables] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
   const [form, setForm] = useState({
@@ -32,6 +32,8 @@ export default function NovoProdutoPage() {
     sizes: "",
     colors: "",
     images: [] as string[],
+    imageColors: [] as string[],
+    imageAlts: [] as string[],
     ...emptyProductContent,
     tabelaMedidasId: "",
   });
@@ -49,21 +51,13 @@ export default function NovoProdutoPage() {
       .catch(() => {});
   }, []);
 
-  const upload = useCallback(async (file: File) => {
-    setUploading(true);
-    setError("");
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha no upload");
-      setForm((f) => ({ ...f, images: [...f.images, data.url] }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro no upload");
-    } finally {
-      setUploading(false);
-    }
+  const uploadUrl = useCallback(async (file: File): Promise<string | null> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Falha no upload");
+    return data.url as string;
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -97,6 +91,8 @@ export default function NovoProdutoPage() {
           metaTitle: form.metaTitle || null,
           metaDescription: form.metaDescription || null,
           tabelaMedidasId: form.tabelaMedidasId || null,
+          imageColors: form.imageColors,
+          imageAlts: form.imageAlts,
         }),
       });
       const data = await res.json();
@@ -200,35 +196,18 @@ export default function NovoProdutoPage() {
 
         <div className="border-t border-ink/10 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">Imagens</p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            {form.images.map((img, i) => (
-              <div key={i} className="relative h-24 w-24 overflow-hidden rounded-lg border border-ink/10">
-                <img src={img} alt="" className="h-full w-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setForm({ ...form, images: form.images.filter((_, j) => j !== i) })
-                  }
-                  className="absolute right-1 top-1 rounded-full bg-red-600 px-1.5 text-xs text-white"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink/20 text-xs text-ink-mute hover:border-primary-400">
-              {uploading ? "..." : "+ Enviar"}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) upload(f);
-                }}
-              />
-            </label>
+          <div className="mt-3">
+            <ProductImagesEditor
+              images={form.images}
+              colors={form.imageColors}
+              alts={form.imageAlts}
+              colorOptions={form.colors.split(",").map((s) => s.trim()).filter(Boolean)}
+              onChange={(images, colors, alts) =>
+                setForm({ ...form, images, imageColors: colors, imageAlts: alts })
+              }
+              onUpload={uploadUrl}
+            />
           </div>
-          <p className="mt-2 text-xs text-ink-mute">JPG, PNG, WEBP ou GIF — máx 5MB.</p>
         </div>
 
         {error && (
@@ -236,7 +215,7 @@ export default function NovoProdutoPage() {
         )}
 
         <div className="flex gap-3 border-t border-ink/10 pt-4">
-          <Button type="submit" disabled={loading || uploading}>
+          <Button type="submit" disabled={loading}>
             {loading ? "Salvando..." : "Criar produto"}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>

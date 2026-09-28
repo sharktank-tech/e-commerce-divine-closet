@@ -116,7 +116,15 @@ export default async function ProdutoDetalhePage({
       <div className="grid gap-10 lg:grid-cols-2">
         <div className="space-y-3">
           <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-ink/10 bg-primary-100">
-            <ProductSlideshow images={product.images} name={product.name} intervalMs={1500} />
+            <ProductSlideshow
+              images={product.images}
+              name={product.name}
+              intervalMs={1500}
+              imageColors={product.imageColors}
+              imageAlts={product.imageAlts}
+              thumbs
+              zoomable
+            />
           </div>
         </div>
 

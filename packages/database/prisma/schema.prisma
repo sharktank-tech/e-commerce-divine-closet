@@ -143,6 +143,8 @@ model Product {
   isActive          Boolean    @default(true)
   featured          Boolean    @default(false)
   images            String[]
+  imageColors       String[]   @default([])
+  imageAlts         String[]   @default([])
   sizes             String[]
   colors            String[]
   categoryId        String     @db.Uuid

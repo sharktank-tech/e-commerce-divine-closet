@@ -4,6 +4,11 @@ Tudo aqui depende de decisão, conteúdo ou credencial do dono. Nada é placehol
 
 ## 🔴 Alta — catálogo e vendas
 
+### Fotos dos produtos (Tarefa 10)
+- Manter 4–5 fotos por produto (a principal é a primeira; ordem ajustável no admin).
+- Vincular cada foto à sua cor no admin para a galeria pular automaticamente ao trocar de cor.
+- Vídeo curto na galeria: estrutura não implementada (sem demanda por enquanto).
+
 ### Guia de medidas (Tarefa 9)
 Estrutura pronta (admin → Medidas): criar tabelas por modelagem e vincular a produtos ou categorias. Sem tabela vinculada, o link "Guia de medidas" fica oculto na loja. Prioridade: 1 tabela "Feminino adulto" (busto/cintura/quadril) como fallback das categorias principais.
 

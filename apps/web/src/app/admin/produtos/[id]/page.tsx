@@ -6,9 +6,9 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import {
   ProductContentFields,
-  emptyProductContent,
   type ProductContent,
 } from "@/components/admin/ProductContentFields";
+import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
 
 type Category = { id: string; name: string };
 
@@ -27,6 +27,8 @@ type Form = {
   sizes: string;
   colors: string;
   images: string[];
+  imageColors: string[];
+  imageAlts: string[];
   tabelaMedidasId: string;
 } & ProductContent;
 
@@ -42,7 +44,6 @@ export default function EditarProdutoPage({
   const [form, setForm] = useState<Form | null>(null);
   const [variations, setVariations] = useState<Variation[]>([]);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -75,6 +76,8 @@ export default function EditarProdutoPage({
           sizes: (p.sizes || []).join(", "),
           colors: (p.colors || []).join(", "),
           images: p.images || [],
+          imageColors: p.imageColors || [],
+          imageAlts: p.imageAlts || [],
           composicao: p.composicao || "",
           instrucoesLavagem: p.instrucoesLavagem || "",
           comprimento: p.comprimento || "",
@@ -107,21 +110,13 @@ export default function EditarProdutoPage({
     setVariations((vs) => vs.map((v, j) => (j === i ? { ...v, [key]: value } : v)));
   }
 
-  const upload = useCallback(async (file: File) => {
-    setUploading(true);
-    setError("");
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha no upload");
-      setForm((f) => (f ? { ...f, images: [...f.images, data.url] } : f));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro no upload");
-    } finally {
-      setUploading(false);
-    }
+  const uploadUrl = useCallback(async (file: File): Promise<string | null> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Falha no upload");
+    return data.url as string;
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -144,6 +139,8 @@ export default function EditarProdutoPage({
           isActive: form.isActive,
           featured: form.featured,
           images: form.images,
+          imageColors: form.imageColors,
+          imageAlts: form.imageAlts,
           sizes: form.sizes.split(",").map((s) => s.trim()).filter(Boolean),
           colors: form.colors.split(",").map((s) => s.trim()).filter(Boolean),
           composicao: form.composicao || null,
@@ -333,38 +330,24 @@ export default function EditarProdutoPage({
 
         <div className="border-t border-ink/10 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">Imagens</p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            {form.images.map((img, i) => (
-              <div key={i} className="relative h-24 w-24 overflow-hidden rounded-lg border border-ink/10">
-                <img src={img} alt="" className="h-full w-full object-cover" />
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, images: form.images.filter((_, j) => j !== i) })}
-                  className="absolute right-1 top-1 rounded-full bg-red-600 px-1.5 text-xs text-white"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink/20 text-xs text-ink-mute hover:border-primary-400">
-              {uploading ? "..." : "+ Enviar"}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) upload(f);
-                }}
-              />
-            </label>
+          <div className="mt-3">
+            <ProductImagesEditor
+              images={form.images}
+              colors={form.imageColors}
+              alts={form.imageAlts}
+              colorOptions={form.colors.split(",").map((s) => s.trim()).filter(Boolean)}
+              onChange={(images, colors, alts) =>
+                setForm({ ...form, images, imageColors: colors, imageAlts: alts })
+              }
+              onUpload={uploadUrl}
+            />
           </div>
         </div>
 
         {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
         <div className="flex gap-3 border-t border-ink/10 pt-4">
-          <Button type="submit" disabled={loading || uploading}>
+          <Button type="submit" disabled={loading}>
             {saved ? "✓ Salvo!" : loading ? "Salvando..." : "Salvar alterações"}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.push("/admin/produtos")}>

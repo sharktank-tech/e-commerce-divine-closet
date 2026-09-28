@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { discountPercent } from "@/lib/precos";
+import { normalizeImageMeta } from "@/lib/imagens";
 
 const variationSchema = z.array(
   z.object({
@@ -24,6 +25,8 @@ const productSchema = z.object({
   isActive: z.boolean().default(true),
   featured: z.boolean().default(false),
   images: z.array(z.string()).default([]),
+  imageColors: z.array(z.string()).default([]),
+  imageAlts: z.array(z.string()).default([]),
   sizes: z.array(z.string()).default([]),
   colors: z.array(z.string()).default([]),
   categoryId: z.string().min(1),
@@ -100,6 +103,10 @@ export async function POST(req: NextRequest) {
         isActive: data.isActive,
         featured: data.featured,
         images: data.images,
+        ...(() => {
+          const meta = normalizeImageMeta(data.images, data.imageColors, data.imageAlts);
+          return { imageColors: meta.colors, imageAlts: meta.alts };
+        })(),
         sizes: data.sizes,
         colors: data.colors,
         categoryId: data.categoryId,

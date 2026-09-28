@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { ordenarTamanhos } from "@/lib/tamanhos";
 import { textoEstoque } from "@/lib/estoque";
 import { GuiaMedidas } from "./GuiaMedidas";
+import { COLOR_SELECT_EVENT } from "./ProductSlideshow";
 import type { SizeTableData } from "@/lib/medidas";
 
 type Variation = { size: string; color: string | null; stock: number };
@@ -55,7 +56,10 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
   useEffect(() => {
     if (colorList.length > 0 && !color) {
       const first = colorList.find((c) => availFor(undefined, c) > 0) || "";
-      if (first) setColor(first);
+      if (first) {
+        setColor(first);
+        window.dispatchEvent(new CustomEvent(COLOR_SELECT_EVENT, { detail: first }));
+      }
     }
     if (sizeList.length > 0 && !size) {
       const available = sizeList.filter((s) => availFor(s, color || undefined) > 0);
@@ -126,6 +130,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
   function pickColor(c: string) {
     setColor(c);
     setQty(1);
+    window.dispatchEvent(new CustomEvent(COLOR_SELECT_EVENT, { detail: c }));
     if (missing === "color") {
       setMissing(null);
       setError("");

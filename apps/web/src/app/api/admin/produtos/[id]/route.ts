@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { discountPercent } from "@/lib/precos";
+import { normalizeImageMeta } from "@/lib/imagens";
 
 const updateSchema = productPartial();
 
@@ -17,6 +18,8 @@ function productPartial() {
     isActive: z.boolean().optional(),
     featured: z.boolean().optional(),
     images: z.array(z.string()).optional(),
+    imageColors: z.array(z.string()).optional(),
+    imageAlts: z.array(z.string()).optional(),
     sizes: z.array(z.string()).optional(),
     colors: z.array(z.string()).optional(),
     categoryId: z.string().min(1).optional(),
@@ -73,6 +76,25 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
 
     const { variations, ...rest } = parsed.data;
+
+    // mantém imageColors/imageAlts alinhados ao tamanho de images
+    if (
+      rest.images !== undefined ||
+      rest.imageColors !== undefined ||
+      rest.imageAlts !== undefined
+    ) {
+      const current = await prisma.product.findUnique({ where: { id } });
+      if (!current) {
+        return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
+      }
+      const meta = normalizeImageMeta(
+        rest.images ?? current.images,
+        rest.imageColors ?? current.imageColors,
+        rest.imageAlts ?? current.imageAlts
+      );
+      (rest as Record<string, unknown>).imageColors = meta.colors;
+      (rest as Record<string, unknown>).imageAlts = meta.alts;
+    }
 
     // mantém discountPercent sincronizado ao trocar preço/de
     if (rest.price !== undefined || rest.comparePrice !== undefined) {
