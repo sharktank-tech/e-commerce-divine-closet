@@ -4,24 +4,61 @@ import { ProductCard } from "@/components/loja/ProductCard";
 import { BannerCarousel } from "@/components/loja/BannerCarousel";
 import { Button } from "@/components/ui/Button";
 import { shipping, institutional } from "@/config/defaults";
+import { shouldShow, takeFresh } from "@/lib/home";
 
 export const revalidate = 60;
 
+const AVAILABLE = { isActive: true, deletedAt: null, stock: { gt: 0 } } as const;
+
 async function getData() {
   try {
-    const [featured, latest, categories, count, banners, offersCount] = await Promise.all([
-      prisma.product.findMany({
-        where: { isActive: true, featured: true, deletedAt: null },
-        include: { category: true },
-        take: 4,
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.product.findMany({
-        where: { isActive: true, deletedAt: null },
-        include: { category: true },
+    const used = new Set<string>();
+
+    // 1. Destaques marcados no admin...
+    let destaques = await prisma.product.findMany({
+      where: { ...AVAILABLE, featured: true },
+      include: { category: true },
+      take: 8,
+      orderBy: { createdAt: "desc" },
+    });
+    // ...ou os mais vendidos dos últimos 30 dias como fallback
+    if (destaques.length === 0) {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const top = await prisma.orderItem.groupBy({
+        by: ["productId"],
+        where: { order: { createdAt: { gte: since }, paymentStatus: "PAID" } },
+        _count: { productId: true },
+        orderBy: { _count: { productId: "desc" } },
         take: 8,
-        orderBy: { createdAt: "desc" },
-      }),
+      });
+      const rank = new Map(top.map((t, i) => [t.productId, i]));
+      const prods = await prisma.product.findMany({
+        where: { ...AVAILABLE, id: { in: top.map((t) => t.productId) } },
+        include: { category: true },
+      });
+      destaques = prods.sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
+    }
+    destaques = takeFresh(destaques, used, 8);
+
+    // 2. Novidades: mais recentes, excluindo os já exibidos
+    const recentes = await prisma.product.findMany({
+      where: { ...AVAILABLE, id: { notIn: [...used] } },
+      include: { category: true },
+      take: 8,
+      orderBy: { createdAt: "desc" },
+    });
+    const novidades = takeFresh(recentes, used, 8);
+
+    // 3. Ofertas: maior desconto, excluindo os já exibidos
+    const promos = await prisma.product.findMany({
+      where: { ...AVAILABLE, discountPercent: { gt: 0 }, id: { notIn: [...used] } },
+      include: { category: true },
+      take: 8,
+      orderBy: [{ discountPercent: "desc" }, { createdAt: "desc" }],
+    });
+    const ofertas = takeFresh(promos, used, 8);
+
+    const [categories, count, banners, offersCount] = await Promise.all([
       prisma.category.findMany({
         where: { status: "ACTIVE", deletedAt: null, showInHome: true },
         orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
@@ -43,14 +80,14 @@ async function getData() {
         where: { isActive: true, deletedAt: null, discountPercent: { gt: 0 }, stock: { gt: 0 } },
       }),
     ]);
-    return { featured, latest, categories, count, banners, offersCount, error: false };
+    return { destaques, novidades, ofertas, categories, count, banners, offersCount, error: false };
   } catch {
-    return { featured: [], latest: [], categories: [], count: 0, banners: [], offersCount: 0, error: true };
+    return { destaques: [], novidades: [], ofertas: [], categories: [], count: 0, banners: [], offersCount: 0, error: true };
   }
 }
 
 export default async function HomePage() {
-  const { featured, latest, categories, banners, offersCount, error } = await getData();
+  const { destaques, novidades, ofertas, categories, banners, offersCount, error } = await getData();
 
   return (
     <div>
@@ -157,7 +194,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      {featured.length > 0 && (
+      {shouldShow(destaques) && (
         <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
           <div className="flex items-end justify-between">
             <div>
@@ -169,7 +206,7 @@ export default async function HomePage() {
             </Link>
           </div>
           <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-            {featured.map((p) => (
+            {destaques.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
           </div>
@@ -191,31 +228,50 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-        <div className="flex items-end justify-between">
-          <h2 className="font-display text-2xl font-bold text-ink">Chegaram agora</h2>
-          <Link href="/produtos" className="text-sm font-semibold text-primary-700 hover:underline">
-            Catálogo completo →
-          </Link>
-        </div>
-
-        {error ? (
-          <div className="mt-8 rounded-xl border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
-            Não foi possível conectar ao banco de dados. Suba o Postgres com{" "}
-            <code className="rounded bg-amber-100 px-1.5 py-0.5">docker compose up -d</code>,
-            rode <code className="rounded bg-amber-100 px-1.5 py-0.5">npm run prisma:migrate</code> e{" "}
-            <code className="rounded bg-amber-100 px-1.5 py-0.5">npm run db:seed</code>.
+      {shouldShow(novidades) && (
+        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+          <div className="flex items-end justify-between">
+            <h2 className="font-display text-2xl font-bold text-ink">Chegaram agora</h2>
+            <Link href="/produtos" className="text-sm font-semibold text-primary-700 hover:underline">
+              Catálogo completo →
+            </Link>
           </div>
-        ) : latest.length === 0 ? (
-          <p className="mt-8 text-ink-mute">Nenhum produto cadastrado ainda.</p>
-        ) : (
+
+          {error ? (
+            <div className="mt-8 rounded-xl border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900">
+              Não foi possível conectar ao banco de dados. Suba o Postgres com{" "}
+              <code className="rounded bg-amber-100 px-1.5 py-0.5">docker compose up -d</code>,
+              rode <code className="rounded bg-amber-100 px-1.5 py-0.5">npm run prisma:migrate</code> e{" "}
+              <code className="rounded bg-amber-100 px-1.5 py-0.5">npm run db:seed</code>.
+            </div>
+          ) : (
+            <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+              {novidades.map((p) => (
+                <ProductCard key={p.id} product={p} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {shouldShow(ofertas) && (
+        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="font-display text-2xl font-bold text-ink">Em oferta</h2>
+              <p className="mt-1 text-sm text-ink-mute">Descontos reais por tempo limitado.</p>
+            </div>
+            <Link href="/ofertas" className="text-sm font-semibold text-primary-700 hover:underline">
+              Ver todas →
+            </Link>
+          </div>
           <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
-            {latest.map((p) => (
+            {ofertas.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="border-t border-ink/10 bg-white">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 md:grid-cols-[1.5fr_1fr]">
