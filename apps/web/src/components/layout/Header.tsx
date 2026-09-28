@@ -5,21 +5,18 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatCartCount } from "@/lib/cart";
+import { buildMenu, type MenuItem } from "@/lib/categorias";
 import { useCart } from "@/components/loja/CartProvider";
 
 type Session = { name: string; email: string; role: string } | null;
 
-const nav = [
-  { href: "/produtos", label: "Coleção" },
-  { href: "/produtos?categoria=vestidos", label: "Vestidos" },
-  { href: "/produtos?categoria=conjuntos", label: "Conjuntos" },
-  { href: "/produtos?categoria=acessorios", label: "Acessórios" },
-  { href: "/institucional", label: "Sobre" },
-];
-
 export function Header() {
   const [session, setSession] = useState<Session>(null);
   const [open, setOpen] = useState(false);
+  const [nav, setNav] = useState<MenuItem[]>([
+    { label: "Novidades", href: "/produtos" },
+    { label: "Ofertas", href: "/ofertas" },
+  ]);
   const pathname = usePathname();
   const router = useRouter();
   // Fonte única da quantidade: contexto do carrinho (atualiza sem reload).
@@ -28,15 +25,39 @@ export function Header() {
 
   async function load() {
     try {
-      const meRes = await fetch("/api/auth/me");
+      const [meRes, catRes] = await Promise.all([
+        fetch("/api/auth/me"),
+        fetch("/api/categorias"),
+      ]);
       if (meRes.ok) {
         const data = await meRes.json();
         setSession(data.user);
       } else {
         setSession(null);
       }
+      if (catRes.ok) {
+        const data = await catRes.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        setNav([
+          ...buildMenu(
+            items.map((c: Record<string, unknown>) => ({
+              id: String(c.id),
+              name: String(c.name),
+              slug: String(c.slug),
+              image: (c.image as string | null) ?? null,
+              menuOrder: Number(c.menuOrder ?? 0),
+              showInMenu: c.showInMenu !== false,
+              showInHome: c.showInHome !== false,
+              availableCount: Number(
+                (c as { availableCount?: unknown }).availableCount ?? 0
+              ),
+            }))
+          ),
+          { label: "Sobre", href: "/institucional" },
+        ]);
+      }
     } catch {
-      // silencioso
+      // silencioso (mantém menu fallback)
     }
   }
 

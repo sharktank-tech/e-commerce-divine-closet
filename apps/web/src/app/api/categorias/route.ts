@@ -4,14 +4,26 @@ import { slugify } from "@/lib/utils";
 
 export async function GET() {
   try {
-    const categories = await prisma.category.findMany({
-      where: { deletedAt: null },
-      orderBy: { name: "asc" },
-      include: { _count: { select: { products: true } } },
+    const items = await prisma.category.findMany({
+      where: { status: "ACTIVE", deletedAt: null },
+      orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
+      include: {
+        _count: { select: { products: true } },
+        products: {
+          where: { isActive: true, deletedAt: null, stock: { gt: 0 } },
+          select: { id: true },
+        },
+      },
     });
-    return NextResponse.json({ items: categories });
+    // availableCount = produtos ativos COM estoque (base do menu/home).
+    // _count.products (total) mantido para o admin.
+    const shaped = items.map(({ products, ...c }) => ({
+      ...c,
+      availableCount: products.length,
+    }));
+    return NextResponse.json({ items: shaped });
   } catch (err) {
-    console.error("[categorias]", err);
+    console.error("[admin:categorias:list]", err);
     return NextResponse.json({ error: "Erro ao carregar categorias" }, { status: 500 });
   }
 }

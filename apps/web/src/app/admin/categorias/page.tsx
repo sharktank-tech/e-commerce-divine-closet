@@ -12,14 +12,21 @@ type Category = {
   description?: string | null;
   status: "ACTIVE" | "HIDDEN";
   parentId?: string | null;
+  menuOrder: number;
+  showInMenu: boolean;
+  showInHome: boolean;
+  image?: string | null;
   _count?: { products: number };
 };
+
+const emptyForm = { menuOrder: 0, showInMenu: true, showInHome: true, image: "" };
 
 export default function AdminCategoriasPage() {
   const [items, setItems] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [display, setDisplay] = useState(emptyForm);
   const [msg, setMsg] = useState("");
   const [editing, setEditing] = useState<Category | null>(null);
 
@@ -41,7 +48,14 @@ export default function AdminCategoriasPage() {
       {
         method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description: description || null }),
+        body: JSON.stringify({
+          name,
+          description: description || null,
+          menuOrder: Number(display.menuOrder) || 0,
+          showInMenu: display.showInMenu,
+          showInHome: display.showInHome,
+          image: display.image || null,
+        }),
       }
     );
     const data = await res.json();
@@ -51,6 +65,7 @@ export default function AdminCategoriasPage() {
     }
     setName("");
     setDescription("");
+    setDisplay(emptyForm);
     setEditing(null);
     setMsg(editing ? "Categoria atualizada." : "Categoria criada.");
     load();
@@ -90,6 +105,38 @@ export default function AdminCategoriasPage() {
           <div className="sm:col-span-2">
             <Input label="Descrição" value={description} onChange={setDescription} />
           </div>
+          <Input
+            label="Ordem no menu"
+            type="number"
+            value={String(display.menuOrder)}
+            onChange={(v) => setDisplay((d) => ({ ...d, menuOrder: Number(v) || 0 }))}
+          />
+          <div className="sm:col-span-2">
+            <Input
+              label="Imagem (URL, opcional)"
+              value={display.image}
+              onChange={(v) => setDisplay((d) => ({ ...d, image: v }))}
+              placeholder="https://..."
+            />
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-5 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={display.showInMenu}
+              onChange={(e) => setDisplay((d) => ({ ...d, showInMenu: e.target.checked }))}
+            />
+            Visível no menu
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={display.showInHome}
+              onChange={(e) => setDisplay((d) => ({ ...d, showInHome: e.target.checked }))}
+            />
+            Visível na home
+          </label>
         </div>
         {msg && <p className="mt-2 text-xs text-ink-soft">{msg}</p>}
         <div className="mt-3 flex gap-2">
@@ -103,6 +150,7 @@ export default function AdminCategoriasPage() {
                 setEditing(null);
                 setName("");
                 setDescription("");
+                setDisplay(emptyForm);
               }}
             >
               Cancelar
@@ -114,9 +162,10 @@ export default function AdminCategoriasPage() {
       <div className="overflow-hidden rounded-xl border border-ink/10 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-primary-50">
-            <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
+              <tr className="border-b border-ink/10 text-left text-xs uppercase text-ink-mute">
               <th className="px-4 py-3">Categoria</th>
               <th className="px-4 py-3">Produtos</th>
+              <th className="px-4 py-3">Exibição</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Ações</th>
             </tr>
@@ -124,12 +173,12 @@ export default function AdminCategoriasPage() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-ink-mute">Carregando...</td>
+                <td colSpan={5} className="px-4 py-8 text-center text-ink-mute">Carregando...</td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-ink-mute">
+                <td colSpan={5} className="px-4 py-8 text-center text-ink-mute">
                   Nenhuma categoria.
                 </td>
               </tr>
@@ -141,6 +190,11 @@ export default function AdminCategoriasPage() {
                   <p className="text-xs text-ink-mute">/{c.slug}</p>
                 </td>
                 <td className="px-4 py-3 text-ink-soft">{c._count?.products ?? 0}</td>
+                <td className="px-4 py-3 text-xs text-ink-mute">
+                  #{c.menuOrder ?? 0}
+                  {c.showInMenu === false ? " · fora do menu" : ""}
+                  {c.showInHome === false ? " · fora da home" : ""}
+                </td>
                 <td className="px-4 py-3">
                   <Badge status={c.status === "ACTIVE" ? "ACTIVE" : "HIDDEN"}>
                     {c.status === "ACTIVE" ? "Ativa" : "Oculta"}
@@ -153,6 +207,12 @@ export default function AdminCategoriasPage() {
                         setEditing(c);
                         setName(c.name);
                         setDescription(c.description || "");
+                        setDisplay({
+                          menuOrder: c.menuOrder ?? 0,
+                          showInMenu: c.showInMenu !== false,
+                          showInHome: c.showInHome !== false,
+                          image: c.image || "",
+                        });
                       }}
                       className="font-semibold text-primary-700 hover:underline"
                     >

@@ -23,9 +23,15 @@ async function getData() {
         orderBy: { createdAt: "desc" },
       }),
       prisma.category.findMany({
-        where: { status: "ACTIVE", deletedAt: null },
-        orderBy: { name: "asc" },
-        take: 6,
+        where: { status: "ACTIVE", deletedAt: null, showInHome: true },
+        orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
+        include: {
+          _count: {
+            select: {
+              products: { where: { isActive: true, deletedAt: null, stock: { gt: 0 } } },
+            },
+          },
+        },
       }),
       prisma.product.count({ where: { isActive: true, deletedAt: null } }),
       prisma.banner.findMany({
@@ -115,15 +121,33 @@ export default async function HomePage() {
         <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
           <h2 className="font-display text-2xl font-bold text-ink">Compre por categoria</h2>
           <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            {categories.map((c) => (
-              <Link
-                key={c.id}
-                href={`/produtos?categoria=${c.slug}`}
-                className="group rounded-xl border border-ink/10 bg-white p-5 text-center transition-all hover:border-primary-400 hover:shadow-md"
-              >
-                <p className="font-medium text-ink group-hover:text-primary-700">{c.name}</p>
-              </Link>
-            ))}
+            {categories
+              .filter((c) => (c._count?.products ?? 0) > 0)
+              .map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/categoria/${c.slug}`}
+                  className="group overflow-hidden rounded-xl border border-ink/10 bg-white text-center transition-all hover:border-primary-400 hover:shadow-md"
+                >
+                  {c.image ? (
+                    <div className="aspect-[4/3] overflow-hidden bg-primary-100">
+                      <img
+                        src={c.image}
+                        alt={c.name}
+                        loading="lazy"
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex aspect-[4/3] items-center justify-center bg-gradient-to-br from-primary-200 via-primary-100 to-primary-50">
+                      <span className="font-display text-3xl font-bold text-primary-700">
+                        {c.name.charAt(0)}
+                      </span>
+                    </div>
+                  )}
+                  <p className="p-4 font-medium text-ink group-hover:text-primary-700">{c.name}</p>
+                </Link>
+              ))}
           </div>
         </section>
       )}

@@ -6,6 +6,11 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const q = searchParams.get("q") || "";
     const category = searchParams.get("categoria") || "";
+    // múltiplas categorias separadas por vírgula (ex.: item "Calças e Shorts" do menu)
+    const categorySlugs = category
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     const page = Math.max(1, Number(searchParams.get("page") || 1));
     const pageSize = Math.min(48, Number(searchParams.get("pageSize") || 12));
     const sort = searchParams.get("sort") || "recent";
@@ -29,7 +34,7 @@ export async function GET(req: NextRequest) {
             ],
           }
         : {}),
-      ...(category ? { category: { slug: category } } : {}),
+      ...(categorySlugs.length > 0 ? { category: { slug: { in: categorySlugs } } } : {}),
       ...(Object.keys(price).length ? { price } : {}),
       ...(soEstoque ? { stock: { gt: 0 } } : {}),
     };

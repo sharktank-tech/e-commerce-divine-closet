@@ -47,6 +47,10 @@ const createSchema = z.object({
   name: z.string().min(2),
   description: z.string().nullish(),
   parentId: z.string().nullish(),
+  menuOrder: z.number().int().optional(),
+  showInMenu: z.boolean().optional(),
+  showInHome: z.boolean().optional(),
+  image: z.string().nullish(),
 });
 
 export async function POST(req: NextRequest) {
@@ -75,6 +79,10 @@ export async function POST(req: NextRequest) {
         slug,
         description: parsed.data.description || null,
         parentId: parsed.data.parentId || null,
+        menuOrder: parsed.data.menuOrder ?? 0,
+        showInMenu: parsed.data.showInMenu ?? true,
+        showInHome: parsed.data.showInHome ?? true,
+        image: parsed.data.image || null,
       },
     });
 

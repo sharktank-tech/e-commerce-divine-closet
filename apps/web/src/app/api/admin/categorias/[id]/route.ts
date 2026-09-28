@@ -11,6 +11,10 @@ const patchSchema = z.object({
   description: z.string().nullish(),
   status: z.enum(["ACTIVE", "HIDDEN"]).optional(),
   parentId: z.string().nullish(),
+  menuOrder: z.number().int().optional(),
+  showInMenu: z.boolean().optional(),
+  showInHome: z.boolean().optional(),
+  image: z.string().nullish(),
 });
 
 export async function PATCH(req: NextRequest, { params }: Params) {
