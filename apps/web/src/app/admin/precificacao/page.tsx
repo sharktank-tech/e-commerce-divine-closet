@@ -202,7 +202,7 @@ export default function PrecificacaoPage() {
               onChange={(e) => setConfig({ ...config, rateio_frete: e.target.value })}
               className="w-full rounded-lg border border-ink/15 bg-white px-4 py-2.5 text-sm outline-none"
             >
-              <option value="igual">Igual entre as peças (método dela)</option>
+              <option value="igual">Igual entre as peças</option>
               <option value="proporcional_ao_custo">Proporcional ao custo</option>
             </select>
           </label>
@@ -242,8 +242,7 @@ export default function PrecificacaoPage() {
           />
           <span>
             <strong>Embalagem entra no markup</strong> (ganho de 100% sobre tudo que gastou).
-            Desmarcado: a embalagem é repassada sem lucro.{" "}
-            <span className="text-ink-mute">Confirme com a vendedora.</span>
+            Desmarcado: a embalagem é repassada sem lucro.
           </span>
         </label>
       </section>
