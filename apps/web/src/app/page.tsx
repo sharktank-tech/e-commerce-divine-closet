@@ -3,8 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { ProductCard } from "@/components/loja/ProductCard";
 import { BannerCarousel } from "@/components/loja/BannerCarousel";
 import { Button } from "@/components/ui/Button";
-import { shipping, institutional } from "@/config/defaults";
+import { shipping, institutional, payment } from "@/config/defaults";
 import { shouldShow, takeFresh } from "@/lib/home";
+import { publicProductCardSelect, toPublicCardProduct } from "@/lib/produto-publico";
 
 export const revalidate = 60;
 
@@ -17,7 +18,7 @@ async function getData() {
     // 1. Destaques marcados no admin...
     let destaques = await prisma.product.findMany({
       where: { ...AVAILABLE, featured: true },
-      include: { category: true },
+      select: publicProductCardSelect,
       take: 8,
       orderBy: { createdAt: "desc" },
     });
@@ -34,7 +35,7 @@ async function getData() {
       const rank = new Map(top.map((t, i) => [t.productId, i]));
       const prods = await prisma.product.findMany({
         where: { ...AVAILABLE, id: { in: top.map((t) => t.productId) } },
-        include: { category: true },
+        select: publicProductCardSelect,
       });
       destaques = prods.sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
     }
@@ -43,7 +44,7 @@ async function getData() {
     // 2. Novidades: mais recentes, excluindo os já exibidos
     const recentes = await prisma.product.findMany({
       where: { ...AVAILABLE, id: { notIn: [...used] } },
-      include: { category: true },
+      select: publicProductCardSelect,
       take: 8,
       orderBy: { createdAt: "desc" },
     });
@@ -52,7 +53,7 @@ async function getData() {
     // 3. Ofertas: maior desconto, excluindo os já exibidos
     const promos = await prisma.product.findMany({
       where: { ...AVAILABLE, discountPercent: { gt: 0 }, id: { notIn: [...used] } },
-      include: { category: true },
+      select: publicProductCardSelect,
       take: 8,
       orderBy: [{ discountPercent: "desc" }, { createdAt: "desc" }],
     });
@@ -80,7 +81,16 @@ async function getData() {
         where: { isActive: true, deletedAt: null, discountPercent: { gt: 0 }, stock: { gt: 0 } },
       }),
     ]);
-    return { destaques, novidades, ofertas, categories, count, banners, offersCount, error: false };
+    return {
+      destaques: destaques.map(toPublicCardProduct),
+      novidades: novidades.map(toPublicCardProduct),
+      ofertas: ofertas.map(toPublicCardProduct),
+      categories,
+      count,
+      banners,
+      offersCount,
+      error: false,
+    };
   } catch {
     return { destaques: [], novidades: [], ofertas: [], categories: [], count: 0, banners: [], offersCount: 0, error: true };
   }
@@ -218,7 +228,13 @@ export default async function HomePage() {
           {[
             { t: "Entrega nacional", d: "Envio para todo o Brasil com código de rastreio." },
             { t: "Troca em 30 dias", d: "Não serviu? Troque sem burocracia." },
-            { t: "Pagamento seguro", d: "Ambiente sandbox em desenvolvimento." },
+            {
+              t: "Pagamento seguro",
+              d:
+                payment.driver === "mock"
+                  ? "Ambiente sandbox em desenvolvimento."
+                  : "Cartão, Pix e boleto.",
+            },
           ].map((f) => (
             <div key={f.t} className="text-center sm:text-left">
               <p className="font-semibold">{f.t}</p>

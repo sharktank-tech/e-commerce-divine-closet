@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 export const metadata: Metadata = {
   title: "Sobre nós",
   description: "Conheça a Divine Closet",
+  alternates: { canonical: "/institucional" },
 };
 
 export default function InstitucionalPage() {

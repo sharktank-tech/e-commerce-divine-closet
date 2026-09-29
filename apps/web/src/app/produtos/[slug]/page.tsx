@@ -10,8 +10,10 @@ import { shipping, features, institutional } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
 import { estadoEstoque, textoEstoque } from "@/lib/estoque";
 import { resolveSizeTable } from "@/lib/medidas";
+import { toPublicCardProduct, toPublicVariations, publicProductCardSelect, publicProductDetailSelect } from "@/lib/produto-publico";
+import { absoluteUrl, buildProductDescription, buildProductTitle } from "@/lib/seo";
 import { complementosPara } from "@/lib/recomendacoes";
-import { ReviewStarsLine, AvaliacoesSection } from "@/components/loja/ReviewStarsLine";
+import { ReviewStarsLine, AvaliacoesSection, getReviewSummary } from "@/components/loja/ReviewStarsLine";
 import { VistosRecentemente } from "@/components/loja/VistosRecentemente";
 import type { Metadata } from "next";
 
@@ -21,11 +23,7 @@ async function getProduct(slug: string) {
   try {
     return await prisma.product.findFirst({
       where: { slug, deletedAt: null },
-      include: {
-        category: { include: { sizeTable: true } },
-        variations: true,
-        tabelaMedidas: true,
-      },
+      select: publicProductDetailSelect,
     });
   } catch {
     return null;
@@ -40,9 +38,18 @@ export async function generateMetadata({
   const { slug } = await params;
   const product = await getProduct(slug);
   if (!product) return { title: "Produto não encontrado" };
+  const color = product.colors[0] || null;
+  const category = product.category?.name || null;
+  const title = product.metaTitle || buildProductTitle(product.name, color, category);
+  const description = buildProductDescription(product.metaDescription, product.description);
+  const url = `/produtos/${product.slug}`;
+  const images = product.images.slice(0, 4).map(absoluteUrl);
   return {
-    title: product.name,
-    description: product.description.slice(0, 160),
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, url, images },
+    twitter: { card: "summary_large_image", title, description, images },
   };
 }
 
@@ -87,7 +94,7 @@ export default async function ProdutoDetalhePage({
     if (product.relacionados.length > 0) {
       const manual = await prisma.product.findMany({
         where: { ...AVAILABLE, id: { in: product.relacionados } },
-        include: { category: true },
+        select: publicProductCardSelect,
       });
       const order = new Map(product.relacionados.map((id, i) => [id, i]));
       gostar = manual
@@ -107,7 +114,7 @@ export default async function ProdutoDetalhePage({
           id: { notIn: [...used] },
           price: { gte: price * 0.6, lte: price * 1.4 },
         },
-        include: { category: true },
+        select: publicProductCardSelect,
         orderBy: [
           { featured: "desc" },
           { orderItems: { _count: "desc" } },
@@ -123,7 +130,7 @@ export default async function ProdutoDetalhePage({
     if (gostar.length < 8) {
       const recent = await prisma.product.findMany({
         where: { ...AVAILABLE, id: { notIn: [...used] } },
-        include: { category: true },
+        select: publicProductCardSelect,
         orderBy: { createdAt: "desc" },
         take: 8 - gostar.length,
       });
@@ -136,7 +143,7 @@ export default async function ProdutoDetalhePage({
     if (compSlugs.length > 0) {
       look = await prisma.product.findMany({
         where: { ...AVAILABLE, id: { notIn: [...used] }, category: { slug: { in: compSlugs } } },
-        include: { category: true },
+        select: publicProductCardSelect,
         orderBy: [{ featured: "desc" }, { createdAt: "desc" }],
         take: 4,
       });
@@ -155,9 +162,68 @@ export default async function ProdutoDetalhePage({
           100
       )
     : 0;
+  const estoqueEstado = estadoEstoque(product.stock);
+  const estoqueExato =
+    estoqueEstado === "baixo" || estoqueEstado === "esgotado" ? product.stock : undefined;
+  const gostarPublic = gostar.map(toPublicCardProduct);
+  const lookPublic = look.map(toPublicCardProduct);
+
+  // JSON-LD SSR (rastreador vê sem JS): Product + BreadcrumbList.
+  // aggregateRating só quando há avaliações aprovadas reais.
+  const summary = await getReviewSummary(product.id);
+  const site = (process.env.NEXT_PUBLIC_APP_URL || "https://www.divinecloset.com.br").replace(/\/$/, "");
+  const productLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: buildProductDescription(product.metaDescription, product.description),
+    image: product.images.slice(0, 4).map(absoluteUrl),
+    sku: product.sku || product.slug,
+    brand: { "@type": "Brand", name: "Divine Closet" },
+    ...(summary.total > 0
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: summary.media,
+            reviewCount: summary.total,
+          },
+        }
+      : {}),
+    offers: {
+      "@type": "Offer",
+      url: `${site}/produtos/${product.slug}`,
+      priceCurrency: "BRL",
+      price: Number(product.price).toFixed(2),
+      availability:
+        product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+    },
+  };
+  const breadcrumbLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Início", item: `${site}/` },
+      { "@type": "ListItem", position: 2, name: "Coleção", item: `${site}/produtos` },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: product.category.name,
+        item: `${site}/categoria/${product.category.slug}`,
+      },
+      { "@type": "ListItem", position: 4, name: product.name },
+    ],
+  };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
+      />
       <nav className="mb-6 text-xs text-ink-mute">
         <Link href="/" className="hover:text-ink">Início</Link>
         {" / "}
@@ -288,14 +354,13 @@ export default async function ProdutoDetalhePage({
 
           <AddToCart
             productId={product.id}
-            stock={product.stock}
+            productName={product.name}
+            productPrice={Number(product.price)}
+            stockEstado={estoqueEstado}
+            stock={estoqueExato}
             sizes={product.sizes}
             colors={product.colors}
-            variations={product.variations.map((v) => ({
-              size: v.size,
-              color: v.color,
-              stock: v.stock,
-            }))}
+            variations={toPublicVariations(product.variations)}
             sizeTable={resolveSizeTable(
               product.tabelaMedidas,
               product.category?.sizeTable ?? null
@@ -313,20 +378,33 @@ export default async function ProdutoDetalhePage({
           )}
 
           <ul className="mt-8 space-y-2 border-t border-ink/10 pt-6 text-sm text-ink-mute">
-            <li>• Frete grátis em compras acima de {formatBRL(shipping.freeFrom)}</li>
+            <li>• Frete grátis em compras acima de {formatBRL(shipping.freeFrom)}.</li>
             <li>• Troca ou devolução em até 30 dias</li>
             <li>• Envio com rastreio para todo o Brasil</li>
+            <li>
+              • Dúvidas sobre esta peça?{" "}
+              <a
+                href={`https://wa.me/55${institutional.contact.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(
+                  `Olá! Tenho uma dúvida sobre ${product.name} (${site}/produtos/${product.slug})`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-primary-700 hover:underline"
+              >
+                Fale no WhatsApp
+              </a>
+            </li>
           </ul>
         </div>
       </div>
 
       <AvaliacoesSection productId={product.id} productSlug={product.slug} />
 
-      {gostar.length > 0 && (
+      {gostarPublic.length > 0 && (
         <section className="mt-16 border-t border-ink/10 pt-10">
           <h2 className="font-display text-2xl font-bold text-ink">Você também pode gostar</h2>
           <div className="mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible md:pb-0">
-            {gostar.map((p) => (
+            {gostarPublic.map((p) => (
               <div key={p.id} className="w-[68%] shrink-0 snap-start sm:w-[44%] md:w-auto">
                 <ProductCard product={p} />
               </div>
@@ -335,11 +413,11 @@ export default async function ProdutoDetalhePage({
         </section>
       )}
 
-      {look.length > 0 && (
+      {lookPublic.length > 0 && (
         <section className="mt-16 border-t border-ink/10 pt-10">
           <h2 className="font-display text-2xl font-bold text-ink">Complete o look</h2>
           <div className="mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible md:pb-0">
-            {look.map((p) => (
+            {lookPublic.map((p) => (
               <div key={p.id} className="w-[68%] shrink-0 snap-start sm:w-[44%] md:w-auto">
                 <ProductCard product={p} />
               </div>

@@ -50,7 +50,19 @@ export async function GET(req: NextRequest) {
       where: { id: cartId },
       include: {
         items: {
-          include: { product: { include: { category: true } } },
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                price: true,
+                stock: true,
+                images: true,
+                category: { select: { name: true } },
+              },
+            },
+          },
           orderBy: { id: "asc" },
         },
       },

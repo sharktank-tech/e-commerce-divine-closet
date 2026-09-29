@@ -5,6 +5,7 @@ import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { discountPercent } from "@/lib/precos";
 import { normalizeImageMeta } from "@/lib/imagens";
+import { calcularSnapshot } from "@/lib/precificacao-server";
 
 const variationSchema = z.array(
   z.object({
@@ -43,6 +44,13 @@ const productSchema = z.object({
   metaTitle: z.string().nullish(),
   metaDescription: z.string().nullish(),
   relacionados: z.array(z.string()).default([]),
+  // Precificação (opcional): origem do custo + overrides. O servidor
+  // recalcula e grava os snapshots; o preço de venda continua livre.
+  loteId: z.string().nullish(),
+  custoPecaManualCentavos: z.number().int().min(0).nullish(),
+  markupProduto: z.number().int().min(0).max(1000).nullish(),
+  custosExtrasCentavos: z.number().int().min(0).optional(),
+  custosExtrasDescricao: z.string().max(200).nullish(),
 });
 
 export async function GET() {
@@ -102,6 +110,31 @@ export async function POST(req: NextRequest) {
       relacionados = found.map((p) => p.id);
     }
 
+    // Snapshot de precificação: só quando há origem de custo.
+    // O preço de venda (data.price) nunca é alterado pelo cálculo.
+    let snapshotData: Record<string, unknown> = {};
+    if (data.loteId || data.custoPecaManualCentavos !== undefined) {
+      const snap = await calcularSnapshot({
+        loteId: data.loteId || null,
+        custoPecaManualCentavos: data.custoPecaManualCentavos ?? null,
+        markupProduto: data.markupProduto ?? null,
+        custosExtrasCentavos: data.custosExtrasCentavos ?? 0,
+        custosExtrasDescricao: data.custosExtrasDescricao || null,
+      });
+      if (snap) {
+        snapshotData = {
+          lote_id: data.loteId || null,
+          custo_peca_centavos: snap.custoPeca,
+          custo_embalagem_centavos: snap.custoEmbalagem,
+          custos_extras_centavos: snap.custosExtras,
+          custos_extras_descricao: data.custosExtrasDescricao || null,
+          markup_percentual: data.markupProduto ?? null,
+          preco_sugerido_centavos: snap.precoSugerido,
+          precificacao_calculada_em: new Date(),
+        };
+      }
+    }
+
     const product = await prisma.product.create({
       data: {
         name: data.name,
@@ -133,6 +166,8 @@ export async function POST(req: NextRequest) {
         ocasiao: data.ocasiao || null,
         metaTitle: data.metaTitle || null,
         metaDescription: data.metaDescription || null,
+        // Snapshot de precificação (quando origem de custo informada).
+        ...snapshotData,
         ...(variations.length > 0
           ? {
               variations: {

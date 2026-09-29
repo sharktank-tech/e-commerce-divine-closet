@@ -152,6 +152,16 @@ model Product {
   tabelaMedidasId   String?    @db.Uuid
   tabelaMedidas     SizeTable? @relation("ProdutoMedidas", fields: [tabelaMedidasId], references: [id])
   relacionados      String[]   @default([])
+
+  lote_id           String?    @db.Uuid
+  custo_peca_centavos Int       @default(0)
+  custo_embalagem_centavos Int      @default(0)
+  custos_extras_centavos Int       @default(0)
+  custos_extras_descricao    String?
+  markup_percentual        Int?
+  preco_sugerido_centavos  Int?
+  precificacao_calculada_em DateTime?
+
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
   deletedAt         DateTime?
@@ -380,4 +390,46 @@ model SizeTable {
 
   products   Product[]  @relation("ProdutoMedidas")
   categories Category[] @relation("CategoriaMedidas")
+}
+
+model LoteCompra {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome             String     @unique
+  data_compra      DateTime   @db.Date
+  valor_mercadoria_centavos Int       @default(0)
+  valor_frete_centavos      Int       @default(0)
+  quantidade_pecas    Int       @default(1)
+  categoria_id      String?    @db.Uuid
+  observacoes       String?
+  created_at        DateTime   @default(now())
+  updated_at        DateTime   @updatedAt
+
+  @@map("lotes_compra")
+}
+
+model ConfigPrecificacao {
+  id                   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  markup_padrao_percentual    Int       @default(100)
+  regra_arredondamento_custo  String    @default("inteiro_para_cima")
+  regra_final_preco           String    @default("termina_99")
+  rateio_frete                String    @default("igual")
+  embalagem_entra_no_markup   Boolean   @default(true)
+  margem_minima_percentual    Int?
+  taxa_pagamento_percentual   Int?
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @updatedAt
+
+  @@map("config_precificacao")
+}
+
+model MateriaisEmbalagem {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome        String     @unique
+  custo_unitario_centavos Int       @default(0)
+  ativo       Boolean    @default(true)
+  ordem       Int        @default(0)
+  created_at  DateTime   @default(now())
+  updated_at  DateTime   @updatedAt
+
+  @@map("materiais_embalagem")
 }

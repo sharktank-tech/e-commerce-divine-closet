@@ -10,7 +10,7 @@ import {
 } from "@/components/admin/ProductContentFields";
 import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
 import { RelatedPicker } from "@/components/admin/RelatedPicker";
-
+import { ProductPricingBlock, emptyPricing, type PricingState } from "@/components/admin/ProductPricingBlock";
 type Category = { id: string; name: string };
 
 type Variation = { size: string; color: string; stock: string; sku: string };
@@ -45,6 +45,13 @@ export default function EditarProdutoPage({
   const [sizeTables, setSizeTables] = useState<{ id: string; name: string }[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [variations, setVariations] = useState<Variation[]>([]);
+  const [pricing, setPricing] = useState<PricingState>(emptyPricing);
+  const [snapshot, setSnapshot] = useState<{
+    custo_peca_centavos: number | null;
+    custo_embalagem_centavos: number | null;
+    preco_sugerido_centavos: number | null;
+    precificacao_calculada_em: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -92,6 +99,31 @@ export default function EditarProdutoPage({
           metaDescription: p.metaDescription || "",
           tabelaMedidasId: p.tabelaMedidasId || "",
         });
+        setSnapshot({
+          custo_peca_centavos: p.custo_peca_centavos ?? null,
+          custo_embalagem_centavos: p.custo_embalagem_centavos ?? null,
+          preco_sugerido_centavos: p.preco_sugerido_centavos ?? null,
+          precificacao_calculada_em: p.precificacao_calculada_em || null,
+        });
+        if (p.lote_id) {
+          setPricing({
+            origem: "lote",
+            loteId: p.lote_id,
+            custoManual: "",
+            markup: p.markup_percentual !== null && p.markup_percentual !== undefined ? String(p.markup_percentual) : "",
+            extras: p.custos_extras_centavos ? String((p.custos_extras_centavos / 100).toFixed(2)) : "",
+            extrasDescricao: p.custos_extras_descricao || "",
+          });
+        } else if (p.custo_peca_centavos > 0 || p.precificacao_calculada_em) {
+          setPricing({
+            origem: "manual",
+            loteId: "",
+            custoManual: p.custo_peca_centavos ? String((p.custo_peca_centavos / 100).toFixed(2)) : "",
+            markup: p.markup_percentual !== null && p.markup_percentual !== undefined ? String(p.markup_percentual) : "",
+            extras: p.custos_extras_centavos ? String((p.custos_extras_centavos / 100).toFixed(2)) : "",
+            extrasDescricao: p.custos_extras_descricao || "",
+          });
+        }
         setVariations(
           (p.variations || []).map(
             (v: { size: string; color?: string | null; stock: number; sku?: string | null }) => ({
@@ -157,6 +189,17 @@ export default function EditarProdutoPage({
           metaTitle: form.metaTitle || null,
           metaDescription: form.metaDescription || null,
           tabelaMedidasId: form.tabelaMedidasId || null,
+          loteId: pricing.origem === "lote" ? pricing.loteId || null : null,
+          custoPecaManualCentavos:
+            pricing.origem === "manual" && pricing.custoManual !== ""
+              ? Math.max(0, Math.round(Number(pricing.custoManual.replace(",", ".")) * 100) || 0)
+              : null,
+          markupProduto: pricing.markup === "" ? null : Number(pricing.markup) || 0,
+          custosExtrasCentavos:
+            pricing.extras === ""
+              ? 0
+              : Math.max(0, Math.round(Number(pricing.extras.replace(",", ".")) * 100) || 0),
+          custosExtrasDescricao: pricing.extrasDescricao || null,
           variations: variations.map((v) => ({
             size: v.size.trim(),
             color: v.color.trim() || null,
@@ -339,6 +382,15 @@ export default function EditarProdutoPage({
             Destaque
           </label>
         </div>
+
+        <ProductPricingBlock
+          value={pricing}
+          onChange={setPricing}
+          precoVenda={form.price}
+          precoPromo={form.comparePrice}
+          snapshot={snapshot}
+          onUsarSugerido={(v) => setForm({ ...form, price: v })}
+        />
 
         <ProductContentFields
           value={form}

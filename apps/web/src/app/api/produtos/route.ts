@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { estadoEstoque } from "@/lib/estoque";
+import { publicProductCardSelect, toPublicCardProduct } from "@/lib/produto-publico";
 
 export async function GET(req: NextRequest) {
   try {
@@ -70,21 +70,13 @@ export async function GET(req: NextRequest) {
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { category: true },
+        select: publicProductCardSelect,
       }),
     ]);
 
-    // Estado de estoque em vez do número exato: a quantidade só vai
-    // junto quando baixa (urgência); o servidor valida os limites.
-    const shaped = items.map((p) => {
-      const estado = estadoEstoque(p.stock);
-      const { stock, ...rest } = p;
-      return {
-        ...rest,
-        estadoEstoque: estado,
-        ...(estado === "baixo" ? { stock } : {}),
-      };
-    });
+    // Allow-list pública + estado de estoque em vez do número exato.
+    // A quantidade só vai junto quando baixa (urgência); o servidor valida os limites.
+    const shaped = items.map(toPublicCardProduct);
 
     return NextResponse.json({
       items: shaped,

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { discountPercent } from "@/lib/precos";
 import { normalizeImageMeta } from "@/lib/imagens";
+import { calcularSnapshot } from "@/lib/precificacao-server";
 
 const updateSchema = productPartial();
 
@@ -34,6 +35,13 @@ function productPartial() {
     ocasiao: z.string().nullish(),
     metaTitle: z.string().nullish(),
     metaDescription: z.string().nullish(),
+    // Precificação (opcional): ao informar origem de custo, o servidor
+    // recalcula e grava os snapshots. O preço de venda continua livre.
+    loteId: z.string().nullish(),
+    custoPecaManualCentavos: z.number().int().min(0).nullish(),
+    markupProduto: z.number().int().min(0).max(1000).nullish(),
+    custosExtrasCentavos: z.number().int().min(0).optional(),
+    custosExtrasDescricao: z.string().max(200).nullish(),
     variations: z
       .array(
         z.object({
@@ -76,7 +84,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
     }
 
-    const { variations, ...rest } = parsed.data;
+    const { variations, loteId, custoPecaManualCentavos, markupProduto, custosExtrasCentavos, custosExtrasDescricao, ...rest } = parsed.data;
 
     // relacionados: mantém só ids existentes (remove o próprio)
     if (rest.relacionados !== undefined) {
@@ -119,6 +127,62 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       const compare =
         rest.comparePrice !== undefined ? rest.comparePrice : current.comparePrice != null ? Number(current.comparePrice) : null;
       (rest as Record<string, unknown>).discountPercent = discountPercent(price, compare);
+    }
+
+    // Snapshot de precificação: só recalcula quando algum campo de
+    // precificação foi informado nesta requisição. Preço de venda nunca
+    // muda sozinho. Usa o lote/custo já gravado como fallback.
+    const pricingTouched =
+      loteId !== undefined ||
+      custoPecaManualCentavos !== undefined ||
+      markupProduto !== undefined ||
+      custosExtrasCentavos !== undefined;
+    if (pricingTouched) {
+      const current = await prisma.product.findUnique({
+        where: { id },
+        select: { lote_id: true, custo_peca_centavos: true },
+      });
+      if (!current) {
+        return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
+      }
+      // Origem final: lote explícito vence; custo manual explícito limpa o lote;
+      // senão mantém o que já estava gravado.
+      const manualExplicito =
+        custoPecaManualCentavos !== undefined && custoPecaManualCentavos !== null;
+      const loteFinal =
+        loteId !== undefined ? loteId : manualExplicito ? null : current.lote_id;
+      const manualFinal = manualExplicito
+        ? custoPecaManualCentavos
+        : loteFinal
+          ? null
+          : current.custo_peca_centavos;
+      const snap = await calcularSnapshot({
+        loteId: loteFinal,
+        custoPecaManualCentavos: manualFinal,
+        markupProduto: markupProduto ?? null,
+        custosExtrasCentavos: custosExtrasCentavos ?? 0,
+        custosExtrasDescricao: custosExtrasDescricao ?? null,
+      });
+      const r = rest as Record<string, unknown>;
+      if (snap) {
+        r.lote_id = loteFinal || null;
+        r.custo_peca_centavos = snap.custoPeca;
+        r.custo_embalagem_centavos = snap.custoEmbalagem;
+        r.custos_extras_centavos = snap.custosExtras;
+        r.custos_extras_descricao = custosExtrasDescricao || null;
+        r.markup_percentual = markupProduto ?? null;
+        r.preco_sugerido_centavos = snap.precoSugerido;
+        r.precificacao_calculada_em = new Date();
+      } else {
+        // origem removida/inexistente: limpa snapshots sem tocar no preço
+        r.lote_id = null;
+        r.custo_peca_centavos = 0;
+        r.custo_embalagem_centavos = 0;
+        r.custos_extras_centavos = 0;
+        r.markup_percentual = null;
+        r.preco_sugerido_centavos = null;
+        r.precificacao_calculada_em = null;
+      }
     }
 
     const product = await prisma.$transaction(async (tx) => {

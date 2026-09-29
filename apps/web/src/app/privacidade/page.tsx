@@ -3,6 +3,8 @@ import { institutional } from "@/config/defaults";
 
 export const metadata: Metadata = {
   title: "Privacidade",
+  description: "Como a Divine Closet trata seus dados pessoais (LGPD).",
+  alternates: { canonical: "/privacidade" },
 };
 
 export default function PrivacidadePage() {

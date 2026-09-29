@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Catalogo } from "@/components/loja/Catalogo";
 
 export const metadata: Metadata = {
-  title: "Ofertas | Divine Closet",
+  title: "Ofertas",
   description:
     "Peças com desconto real na Divine Closet: confira as ofertas com entrega para todo o Brasil e troca em 30 dias.",
+  alternates: { canonical: "/ofertas" },
 };
 
 export const revalidate = 30;

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Catalogo } from "@/components/loja/Catalogo";
+import { absoluteUrl, buildCategoryDescription, buildCategoryTitle } from "@/lib/seo";
 
 export const revalidate = 30;
 
@@ -26,9 +27,16 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug } = await params;
   const category = await getCategory(slug);
   if (!category) return { title: "Categoria não encontrada" };
+  const title = buildCategoryTitle(category.name);
+  const description = buildCategoryDescription(category.name);
+  const url = `/categoria/${category.slug}`;
+  const images = category.image ? [absoluteUrl(category.image)] : [];
   return {
-    title: `${category.name} | Divine Closet`,
-    description: `${category.name} femininos com entrega para todo o Brasil e troca em 30 dias. Confira a seleção Divine Closet.`,
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, url, images },
+    twitter: { card: "summary_large_image", title, description, images },
   };
 }
 
@@ -42,8 +50,24 @@ export default async function CategoriaPage({
 
   const sp = await searchParams;
 
+  const site = (process.env.NEXT_PUBLIC_APP_URL || "https://www.divinecloset.com.br").replace(/\/$/, "");
+  const breadcrumbLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Início", item: `${site}/` },
+      { "@type": "ListItem", position: 2, name: "Coleção", item: `${site}/produtos` },
+      { "@type": "ListItem", position: 3, name: category.name },
+    ],
+  };
+
   return (
-    <Catalogo
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
+      />
+      <Catalogo
       basePath={`/categoria/${slug}`}
       lockedCategoria={slug}
       title={category.name}
@@ -57,6 +81,7 @@ export default async function CategoriaPage({
         soEstoque: str(sp.estoque) === "1",
         soOferta: str(sp.oferta) === "1",
       }}
-    />
+      />
+    </>
   );
 }

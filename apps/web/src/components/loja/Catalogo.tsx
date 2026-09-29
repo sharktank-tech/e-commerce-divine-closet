@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ProductCard } from "@/components/loja/ProductCard";
+import { publicProductCardSelect, toPublicCardProduct } from "@/lib/produto-publico";
 import Link from "next/link";
 
 export type CatalogFilters = {
@@ -85,16 +86,18 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title, empt
   let dbError = false;
 
   try {
-    [total, items] = await Promise.all([
+    const [count, rows] = await Promise.all([
       prisma.product.count({ where }),
       prisma.product.findMany({
         where,
         orderBy,
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
-        include: { category: true },
+        select: publicProductCardSelect,
       }),
     ]);
+    total = count;
+    items = rows.map(toPublicCardProduct);
   } catch {
     dbError = true;
   }

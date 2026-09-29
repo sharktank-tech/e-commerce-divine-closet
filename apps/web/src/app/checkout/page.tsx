@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { formatBRL } from "@/lib/utils";
 import { shipping as shippingConfig } from "@/config/defaults";
+import { analytics } from "@/lib/analytics";
 
 type CartData = {
   items: Array<{
@@ -60,6 +62,7 @@ export default function CheckoutPage() {
     cardCvv: "",
     notes: "",
   });
+  const checkoutTracked = useRef(false);
 
   useEffect(() => {
     fetch("/api/carrinho")
@@ -67,6 +70,18 @@ export default function CheckoutPage() {
       .then((d) => {
         setCart(d);
         if (!d.items?.length) router.replace("/carrinho");
+        else if (!checkoutTracked.current) {
+          checkoutTracked.current = true;
+          analytics.beginCheckout(
+            d.subtotal || 0,
+            (d.items || []).map((i: { product: { id: string; name: string; price: string | number }; quantity: number }) => ({
+              id: i.product.id,
+              name: i.product.name,
+              price: Number(i.product.price),
+              quantity: i.quantity,
+            }))
+          );
+        }
       })
       .finally(() => setLoading(false));
 
@@ -184,7 +199,7 @@ export default function CheckoutPage() {
 
       if (res.ok && data.ok) {
         setStep(3);
-        router.push(`/sucesso?pedido=${data.order.number}`);
+        router.push(`/sucesso?pedido=${data.order.number}&total=${data.order.total}`);
         return;
       }
 

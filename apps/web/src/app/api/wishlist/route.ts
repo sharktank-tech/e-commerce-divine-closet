@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import { publicProductCardSelect, toPublicCardProduct } from "@/lib/produto-publico";
 
 // Estrutura de wishlist — habilitada/desabilitada via features.wishlist em
 // packages/config/src/defaults.ts (seção 3.5 das instruções).
@@ -12,11 +13,11 @@ export async function GET(req: NextRequest) {
 
     const items = await prisma.wishlistItem.findMany({
       where: { userId: session.sub },
-      include: { product: { include: { category: true } } },
+      include: { product: { select: publicProductCardSelect } },
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json({ items: items.map((i) => i.product) });
+    return NextResponse.json({ items: items.map((i) => toPublicCardProduct(i.product)) });
   } catch (err) {
     console.error("[wishlist:list]", err);
     return NextResponse.json({ error: "Erro ao carregar lista" }, { status: 500 });

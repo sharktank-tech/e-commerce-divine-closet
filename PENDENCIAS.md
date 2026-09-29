@@ -29,3 +29,37 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 - [ ] **Renomear órfãos** (base apagada, slug limpo livre): `conjunto-alicia-2` → `conjunto-alicia`, `conjunto-melissa-2` → `conjunto-melissa`, `vestido-pietra-2` → `vestido-pietra`. Onde: admin → Produtos → editar → campo slug. Criar redirect 301 do slug antigo (tabela `SlugRedirect` ou admin).
 - [ ] **Caso emaranhado**: slug `calca-jeans-mavi` pertence hoje ao produto renomeado "Conjunto Saia & Top", enquanto `calca-jeans-mavi-2` é a "Calça Jeans Mavi" original. Decidir: (a) corrigir o slug do conjunto para `conjunto-saia-top` + redirect do antigo; (b) mesclar os dois produtos. Sem pedidos associados a nenhum dos dois (exclusão simples é segura se preferir apagar um).
 - [ ] Regra geral: ao cadastrar produto com nome repetido, o admin agora **avisa** em vez de criar sufixo silencioso — escolha outro nome/slug na hora.
+
+### 🟡 Sistema de Precificação — status atual (2026-09-29, corrigido e validado)
+
+#### O que já funciona (não depende da vendedora):
+- Módulo puro `lib/precificacao` com 28 testes (cadeia completa 300+35,96÷17 → R$ 20,00 → R$ 39,99).
+- Migration aplicada: `lotes_compra`, `config_precificacao`, `materiais_embalagem` + 8 campos em produtos.
+- Telas admin: `/admin/precificacao` (regras, materiais, preview ao vivo) e `/admin/lotes` (CRUD + cálculo em tempo real).
+- Bloco "Precificação" no cadastro/edição de produto, com "Usar preço sugerido" e painel lucro/markup/margem.
+- Lista de produtos com colunas custo/lucro/margem, filtros e recálculo com diff + confirmação.
+- API pública e HTML da loja não expõem custos (teste automatizado `produto-publico.test.ts`).
+
+#### Pendências da vendedora (precisam ser preenchidas):
+- **Custos reais de embalagem**: sacola, papel de embrulho, tag e cartão estão cadastrados com custo 0 — preencher em admin → Precificação.
+- **Confirmação da regra de embalagem**: hoje `embalagem_entra_no_markup = true` (ganho sobre tudo). Confirmar ou desmarcar.
+- **Regra de arredondamento do custo**: hoje `inteiro_para_cima`. Confirmar.
+- **Margem mínima**: hoje sem limite (null). Definir, se quiser alertas.
+- **Taxas de pagamento**: hoje sem taxa (null). Informar, se quiser lucro real líquido.
+- **Lotes anteriores**: cadastrar em admin → Lotes, se quiser histórico.
+
+## 🟡 Média — Operações
+
+### Carrinho abandonado
+- Estrutura pronta, porém disparo por e-mail ainda não configurado (precisa de `EMAIL_DRIVER=smtp` e credenciais).
+
+### Login Google
+- Botão configurável no admin, porém chaves OAuth ainda não geradas.
+
+### Integração com ERP/envio
+- Webhooks para transportadoras ainda em estudo.
+
+## 🟢 Baixa — Aparência e Conteúdo
+
+- Completo: SEO, titles, canonical, og:image, sitemap, robots.txt.
+- Pendente: descrições próprias dos 19 produtos, fotos profissionais, conteúdo da página "Sobre nós".

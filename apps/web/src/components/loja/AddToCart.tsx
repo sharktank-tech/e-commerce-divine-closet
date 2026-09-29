@@ -5,23 +5,27 @@ import { useRouter } from "next/navigation";
 import { useCart } from "./CartProvider";
 import { Button } from "@/components/ui/Button";
 import { ordenarTamanhos } from "@/lib/tamanhos";
-import { textoEstoque } from "@/lib/estoque";
+import { textoEstoque, type EstadoEstoque } from "@/lib/estoque";
+import { analytics } from "@/lib/analytics";
 import { GuiaMedidas } from "./GuiaMedidas";
 import { COLOR_SELECT_EVENT } from "./ProductSlideshow";
 import type { SizeTableData } from "@/lib/medidas";
 
-type Variation = { size: string; color: string | null; stock: number };
+type Variation = { size: string; color: string | null; estado: EstadoEstoque; stock?: number };
 
 type Props = {
   productId: string;
-  stock: number;
+  productName: string;
+  productPrice: number;
+  stockEstado: EstadoEstoque;
+  stock?: number;
   sizes: string[];
   colors: string[];
   variations?: Variation[];
   sizeTable?: SizeTableData | null;
 };
 
-export function AddToCart({ productId, stock, sizes, colors, variations = [], sizeTable }: Props) {
+export function AddToCart({ productId, productName, productPrice, stockEstado, stock, sizes, colors, variations = [], sizeTable }: Props) {
   const [size, setSize] = useState<string>("");
   const [color, setColor] = useState<string>("");
   const [qty, setQty] = useState(1);
@@ -43,36 +47,57 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
       ? colors
       : [...new Set(variations.map((v) => v.color).filter((c): c is string => !!c))];
 
-  // estoque disponível para a combinação atualmente selecionada
-  function availFor(s?: string, c?: string): number {
-    if (!hasVar) return stock;
-    return variations
-      .filter((v) => (!s || v.size === s) && (!c || (v.color ?? null) === c))
-      .reduce((sum, v) => sum + v.stock, 0);
+  // Disponibilidade sem expor o número exato quando o estoque é alto.
+  // O servidor valida o limite final; aqui usamos exato só em urgência/baixa.
+  function availEstado(s?: string, c?: string): EstadoEstoque {
+    if (!hasVar) return stockEstado;
+    const matches = variations.filter(
+      (v) => (!s || v.size === s) && (!c || (v.color ?? null) === c)
+    );
+    if (matches.length === 0) return "esgotado";
+    if (matches.some((v) => v.estado === "disponivel")) return "disponivel";
+    if (matches.some((v) => v.estado === "baixo")) return "baixo";
+    return "esgotado";
+  }
+
+  function availExato(s?: string, c?: string): number | null {
+    if (!hasVar) {
+      return stockEstado === "baixo" && typeof stock === "number" ? stock : null;
+    }
+    const lows = variations.filter(
+      (v) =>
+        (!s || v.size === s) &&
+        (!c || (v.color ?? null) === c) &&
+        v.estado === "baixo" &&
+        typeof v.stock === "number"
+    );
+    if (lows.length === 0) return null;
+    return lows.reduce((sum, v) => sum + (v.stock || 0), 0);
   }
 
   // Seleção padrão: primeira cor com estoque + tamanho único disponível.
   // Tamanho com múltiplas opções exige escolha consciente (reduz trocas).
   useEffect(() => {
     if (colorList.length > 0 && !color) {
-      const first = colorList.find((c) => availFor(undefined, c) > 0) || "";
+      const first = colorList.find((c) => availEstado(undefined, c) !== "esgotado") || "";
       if (first) {
         setColor(first);
         window.dispatchEvent(new CustomEvent(COLOR_SELECT_EVENT, { detail: first }));
       }
     }
     if (sizeList.length > 0 && !size) {
-      const available = sizeList.filter((s) => availFor(s, color || undefined) > 0);
+      const available = sizeList.filter((s) => availEstado(s, color || undefined) !== "esgotado");
       if (available.length === 1) setSize(available[0]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
-  const comboStock = availFor(size || undefined, color || undefined);
+  const comboEstado = availEstado(size || undefined, color || undefined);
+  const comboExato = availExato(size || undefined, color || undefined);
   const needsSize = sizeList.length > 0 && !size;
   const needsColor = colorList.length > 0 && !color;
-  const maxQty = hasVar ? comboStock : stock;
-  const soldOut = maxQty <= 0;
+  const maxQty = comboExato ?? (comboEstado === "esgotado" ? 0 : 99);
+  const soldOut = comboEstado === "esgotado";
 
   function flagMissing(which: "size" | "color", message: string): boolean {
     setMissing(which);
@@ -102,6 +127,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
     const ok = await addItem(productId, qty, size || undefined, color || undefined);
     setLoading(false);
     if (ok) {
+      analytics.addToCart([{ id: productId, name: productName, price: productPrice, quantity: qty }]);
       setAdded(true);
       setTimeout(() => setAdded(false), 2000);
     } else {
@@ -149,7 +175,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
           </div>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Tamanhos">
             {sizeList.map((s) => {
-              const out = availFor(s, color || undefined) <= 0;
+              const out = availEstado(s, color || undefined) === "esgotado";
               return (
                 <button
                   key={s}
@@ -181,7 +207,7 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
           </p>
           <div className="flex flex-wrap gap-2" role="group" aria-label="Cores">
             {colorList.map((c) => {
-              const out = availFor(size || undefined, c) <= 0;
+              const out = availEstado(size || undefined, c) === "esgotado";
               return (
                 <button
                   key={c}
@@ -232,7 +258,9 @@ export function AddToCart({ productId, stock, sizes, colors, variations = [], si
             {soldOut
               ? "Esgotado nesta combinação."
               : size || color
-                ? textoEstoque(comboStock)
+                ? comboEstado === "baixo" && comboExato != null
+                  ? textoEstoque(comboExato)
+                  : "Em estoque"
                 : "Selecione as opções para ver o estoque"}
           </p>
         )}

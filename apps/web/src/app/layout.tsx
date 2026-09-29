@@ -4,19 +4,46 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { CartProvider } from "@/components/loja/CartProvider";
 import { prisma } from "@/lib/prisma";
+import { ConsentBanner } from "@/components/loja/ConsentBanner";
+import { TrackingScripts } from "@/components/loja/TrackingScripts";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    (process.env.NEXT_PUBLIC_APP_URL || "https://www.divinecloset.com.br").replace(/\/$/, "")
+  ),
   title: {
-    default: "Divine Closet — Moda que eleva o seu dia",
+    default: "Divine Closet | Moda feminina: vestidos, conjuntos e mais",
     template: "%s | Divine Closet",
   },
   description:
-    "Loja de moda online com vestidos, conjuntos e acessórios selecionados. Entrega para todo o Brasil.",
+    "Moda feminina online: vestidos, conjuntos, blusas e mais. Peças selecionadas com entrega para todo o Brasil e troca fácil em 30 dias.",
+  openGraph: {
+    type: "website",
+    locale: "pt_BR",
+    siteName: "Divine Closet",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
   icons: {
     icon: [{ url: "/favicon.png?v=2", sizes: "64x64", type: "image/png" }],
     apple: [{ url: "/apple-touch-icon.png?v=2", sizes: "180x180", type: "image/png" }],
   },
 };
+
+function injectOrgSchema(): React.ReactNode {
+  const ld = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "Divine Closet",
+    url: "https://www.divinecloset.com.br",
+    description:
+      "Loja de moda feminina online: vestidos, conjuntos, blusas e mais. Peças selecionadas com entrega para todo o Brasil e troca fácil em 30 dias.",
+    logo: "/favicon.png?v=2",
+  });
+  // Script SSR puro (não next/script): rastreadores leem sem executar JS.
+  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: ld }} />;
+}
 
 // Revalida configurações (pixels) periodicamente sem quebrar páginas estáticas.
 export const revalidate = 300;
@@ -54,45 +81,15 @@ export default async function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&display=swap"
           rel="stylesheet"
         />
-        {pixels.meta && (
-          <>
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${pixels.meta}');fbq('track','PageView');`,
-              }}
-            />
-            <noscript>
-              <img
-                height="1"
-                width="1"
-                style={{ display: "none" }}
-                src={`https://www.facebook.com/tr?id=${pixels.meta}&ev=PageView&noscript=1`}
-                alt=""
-              />
-            </noscript>
-          </>
-        )}
-        {pixels.gtag.length > 0 && (
-          <>
-            <script
-              async
-              src={`https://www.googletagmanager.com/gtag/js?id=${pixels.gtag[0]}`}
-            />
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());${pixels.gtag
-                  .map((id) => `gtag('config','${id}');`)
-                  .join("")}`,
-              }}
-            />
-          </>
-        )}
+        {injectOrgSchema()}
+        <TrackingScripts meta={pixels.meta} gtag={pixels.gtag} />
       </head>
       <body className="flex min-h-screen flex-col font-sans">
         <CartProvider>
           <Header />
           <main className="flex-1">{children}</main>
           <Footer />
+          <ConsentBanner />
         </CartProvider>
       </body>
     </html>

@@ -31,7 +31,16 @@ export default function ContatoPage() {
         </div>
         <div className="rounded-xl border border-ink/10 bg-white p-4">
           <p className="text-xs uppercase tracking-wide text-ink-mute">WhatsApp</p>
-          <p className="mt-1 text-sm font-medium">{institutional.contact.whatsapp}</p>
+          <p className="mt-1 text-sm font-medium">
+            <a
+              href={`https://wa.me/55${institutional.contact.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent("Olá! Vim pelo site da Divine Closet.")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary-700 hover:underline"
+            >
+              {institutional.contact.whatsapp}
+            </a>
+          </p>
         </div>
       </div>
 

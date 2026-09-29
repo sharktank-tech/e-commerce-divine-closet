@@ -97,7 +97,22 @@ export async function POST(req: NextRequest) {
     const cart = cartWhere.length
       ? await prisma.cart.findFirst({
           where: { OR: cartWhere },
-          include: { items: { include: { product: true } } },
+          include: {
+            items: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                    price: true,
+                    stock: true,
+                    images: true,
+                  },
+                },
+              },
+            },
+          },
         })
       : null;
 

@@ -3,6 +3,8 @@ import { institutional } from "@/config/defaults";
 
 export const metadata: Metadata = {
   title: "Trocas e devoluções",
+  description: "Como trocar ou devolver sua peça na Divine Closet.",
+  alternates: { canonical: "/trocas" },
 };
 
 export default function TrocasPage() {

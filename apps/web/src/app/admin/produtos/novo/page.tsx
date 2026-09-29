@@ -10,6 +10,7 @@ import {
 } from "@/components/admin/ProductContentFields";
 import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
 import { RelatedPicker } from "@/components/admin/RelatedPicker";
+import { ProductPricingBlock, emptyPricing, type PricingState } from "@/components/admin/ProductPricingBlock";
 
 type Category = { id: string; name: string };
 
@@ -39,6 +40,7 @@ export default function NovoProdutoPage() {
     ...emptyProductContent,
     tabelaMedidasId: "",
   });
+  const [pricing, setPricing] = useState<PricingState>(emptyPricing);
 
   useEffect(() => {
     fetch("/api/categorias")
@@ -96,6 +98,17 @@ export default function NovoProdutoPage() {
           imageColors: form.imageColors,
           imageAlts: form.imageAlts,
           relacionados: form.relacionados,
+          loteId: pricing.origem === "lote" ? pricing.loteId || null : null,
+          custoPecaManualCentavos:
+            pricing.origem === "manual" && pricing.custoManual !== ""
+              ? Math.max(0, Math.round(Number(pricing.custoManual.replace(",", ".")) * 100) || 0)
+              : null,
+          markupProduto: pricing.markup === "" ? null : Number(pricing.markup) || 0,
+          custosExtrasCentavos:
+            pricing.extras === ""
+              ? 0
+              : Math.max(0, Math.round(Number(pricing.extras.replace(",", ".")) * 100) || 0),
+          custosExtrasDescricao: pricing.extrasDescricao || null,
         }),
       });
       const data = await res.json();
@@ -170,6 +183,14 @@ export default function NovoProdutoPage() {
             </select>
           </label>
         </div>
+
+        <ProductPricingBlock
+          value={pricing}
+          onChange={setPricing}
+          precoVenda={form.price}
+          precoPromo={form.comparePrice}
+          onUsarSugerido={(v) => setForm({ ...form, price: v })}
+        />
 
         <div className="border-t border-ink/10 pt-4">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-mute">

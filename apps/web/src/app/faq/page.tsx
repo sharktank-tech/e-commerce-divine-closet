@@ -3,6 +3,8 @@ import { institutional } from "@/config/defaults";
 
 export const metadata: Metadata = {
   title: "Perguntas frequentes",
+  description: "Dúvidas sobre entrega, trocas, pagamento e tamanhos na Divine Closet.",
+  alternates: { canonical: "/faq" },
 };
 
 export default function FaqPage() {

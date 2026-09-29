@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { buildMenu } from "@/lib/categorias";
+import { payment } from "@/config/defaults";
 
 async function getMenuLinks() {
   try {
@@ -85,7 +86,7 @@ export async function Footer() {
 
       <div className="border-t border-white/10 py-5 text-center text-xs text-primary-300">
         © {new Date().getFullYear()} Divine Closet — Todos os direitos reservados.
-        Pagamento em sandbox (modo dev).
+        {payment.driver === "mock" && " Pagamento em sandbox (modo dev)."}
       </div>
     </footer>
   );

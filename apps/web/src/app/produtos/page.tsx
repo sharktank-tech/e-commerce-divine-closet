@@ -2,10 +2,24 @@ import type { Metadata } from "next";
 import { permanentRedirect } from "next/navigation";
 import { Catalogo } from "@/components/loja/Catalogo";
 
-export const metadata: Metadata = {
+const BASE_METADATA: Metadata = {
   title: "Coleção",
   description: "Todos os produtos da Divine Closet",
+  alternates: { canonical: "/produtos" },
 };
+
+// Busca interna (q=) não deve ser indexada: evita conteúdo duplicado/fino no Google.
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}): Promise<Metadata> {
+  const sp = await searchParams;
+  if (str(sp.q)) {
+    return { ...BASE_METADATA, robots: { index: false, follow: false } };
+  }
+  return BASE_METADATA;
+}
 
 export const revalidate = 30;
 

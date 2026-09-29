@@ -17,6 +17,27 @@ async function readToken(req: NextRequest, name: string) {
 }
 
 export async function middleware(req: NextRequest) {
+  const res = await handle(req);
+
+  // Páginas privadas/transacionais: nunca indexar (X-Robots-Tag cobre
+  // também as client components, que não aceitam export metadata).
+  const { pathname } = req.nextUrl;
+  if (
+    pathname.startsWith("/carrinho") ||
+    pathname.startsWith("/checkout") ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/registro") ||
+    pathname.startsWith("/conta") ||
+    pathname.startsWith("/sucesso") ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/api/")
+  ) {
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+  }
+  return res;
+}
+
+async function handle(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   const isAdmin = pathname.startsWith("/admin");
@@ -68,10 +89,12 @@ export async function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     "/admin/:path*",
-    "/api/admin/:path*",
+    "/api/:path*",
     "/conta/:path*",
-    "/api/auth/register",
-    "/api/auth/login",
-    "/api/auth/me",
+    "/carrinho",
+    "/checkout",
+    "/login",
+    "/registro",
+    "/sucesso",
   ],
 };
