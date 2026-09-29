@@ -22,7 +22,6 @@ async function getData() {
       take: 8,
       orderBy: { createdAt: "desc" },
     });
-    // ...ou os mais vendidos dos últimos 30 dias como fallback
     if (destaques.length === 0) {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const top = await prisma.orderItem.groupBy({
@@ -41,7 +40,7 @@ async function getData() {
     }
     destaques = takeFresh(destaques, used, 8);
 
-    // 2. Novidades: mais recentes, excluindo os já exibidos
+    // 2. Novidades
     const recentes = await prisma.product.findMany({
       where: { ...AVAILABLE, id: { notIn: [...used] } },
       select: publicProductCardSelect,
@@ -50,7 +49,7 @@ async function getData() {
     });
     const novidades = takeFresh(recentes, used, 8);
 
-    // 3. Ofertas: maior desconto, excluindo os já exibidos
+    // 3. Ofertas
     const promos = await prisma.product.findMany({
       where: { ...AVAILABLE, discountPercent: { gt: 0 }, id: { notIn: [...used] } },
       select: publicProductCardSelect,
@@ -59,127 +58,57 @@ async function getData() {
     });
     const ofertas = takeFresh(promos, used, 8);
 
-    const [categories, count, banners, offersCount] = await Promise.all([
-      prisma.category.findMany({
-        where: { status: "ACTIVE", deletedAt: null, showInHome: true },
-        orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
-        include: {
-          _count: {
-            select: {
-              products: { where: { isActive: true, deletedAt: null, stock: { gt: 0 } } },
-            },
-          },
-        },
-      }),
-      prisma.product.count({ where: { isActive: true, deletedAt: null } }),
-      prisma.banner.findMany({
-        where: { status: "ACTIVE", deletedAt: null },
-        orderBy: { position: "asc" },
-        take: 5,
-      }),
-      prisma.product.count({
-        where: { isActive: true, deletedAt: null, discountPercent: { gt: 0 }, stock: { gt: 0 } },
-      }),
-    ]);
-    return {
-      destaques: destaques.map(toPublicCardProduct),
-      novidades: novidades.map(toPublicCardProduct),
-      ofertas: ofertas.map(toPublicCardProduct),
-      categories,
-      count,
-      banners,
-      offersCount,
-      error: false,
-    };
+    // 4. Categorias para o carrossel/home
+    const categories = await prisma.category.findMany({
+      where: { status: "ACTIVE", deletedAt: null, showInHome: true },
+      orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
+    });
+
+    // 5. Banners
+    const banners = await prisma.banner.findMany({ where: { status: "ACTIVE", deletedAt: null } });
+
+    // Contagem ofertas (dos produtos promocionais)
+    const offersCount = ofertas.length;
+
+    return { destaques, novidades, ofertas, categories, banners, offersCount };
   } catch {
-    return { destaques: [], novidades: [], ofertas: [], categories: [], count: 0, banners: [], offersCount: 0, error: true };
+    return { destaques: [], novidades: [], ofertas: [], categories: [], banners: [], offersCount: 0, error: true };
   }
 }
 
-export default async function HomePage() {
+export default async function Home() {
   const { destaques, novidades, ofertas, categories, banners, offersCount, error } = await getData();
 
+  // Filtrar categorias que têm produtos ativos
+  const catsWithProducts = categories;
+
   return (
-    <div>
-      <section className="relative overflow-hidden bg-[#290582]">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary-400/30 blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-accent-400/20 blur-3xl"
-        />
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-4 py-16 sm:px-6 md:grid-cols-2 md:py-24">
-          <div>
-            <span className="inline-block rounded-full border border-white/30 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-white">
-              Nova coleção
-            </span>
-            <h1 className="mt-5 font-display text-4xl font-bold leading-tight text-white sm:text-5xl lg:text-6xl">
-              Vista-se de
-              <span className="text-accent-300"> formas divinas</span>
-            </h1>
-            <p className="mt-5 max-w-md text-base leading-relaxed text-primary-100 sm:text-lg">
-              Peças exclusivas, caimento impecável e curadoria de moda para
-              mulheres que brilham no dia a dia e nas ocasiões especiais.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button
-                href="/produtos"
-                size="lg"
-                className="bg-white font-semibold text-[#290582] hover:bg-primary-100"
-              >
-                Explorar coleção
-              </Button>
-              {offersCount > 0 && (
-                <Button
-                  href="/ofertas"
-                  variant="outline"
-                  size="lg"
-                  className="border-white/40 text-white hover:border-white hover:bg-white/10"
-                >
-                  Ver ofertas
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="aspect-[4/5] overflow-hidden rounded-3xl bg-white/10 shadow-2xl">
-              <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-                <img
-                  src="/logo.png"
-                  alt="Divine Closet"
-                  className="h-44 w-44 rounded-full object-cover shadow-2xl ring-4 ring-white/20"
-                />
-                <p className="max-w-xs text-sm text-primary-100">
-                  Sua próxima peça favorita está aqui.
-                </p>
-              </div>
-            </div>
-            <div className="absolute -bottom-5 -left-5 rounded-2xl bg-white px-5 py-4 shadow-xl">
-              <p className="text-xs text-ink-mute">Frete grátis acima de</p>
-              <p className="text-lg font-bold text-ink">
-                R$ {shipping.freeFrom.toFixed(2).replace(".", ",")}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
+    <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+      {/* Hero / banners */}
       {banners.length > 0 && <BannerCarousel banners={banners} />}
 
-      {categories.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-          <h2 className="font-display text-2xl font-bold text-ink">Compre por categoria</h2>
-          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            {categories
-              .filter((c) => (c._count?.products ?? 0) > 0)
-              .map((c) => (
+      {/* Compre por categoria - carrossel horizontal */}
+      {catsWithProducts.length > 0 && (
+        <section
+          className="mx-auto max-w-7xl px-4 py-14 sm:px-6"
+          aria-label="Compre por categoria"
+        >
+          <h2 className="font-display text-2xl font-bold text-ink mb-6">
+            Compre por categoria
+          </h2>
+
+          {/* Container do carrossel com scroll suave */}
+          <div
+            className="overflow-x-auto overflow-y-hidden scroll-snap-type: x mandatory"
+            style={{ scrollBehavior: "smooth" }}
+          >
+            <div className="flex gap-2 scroll-snap-align: start min-w-min">
+              {catsWithProducts.map((c) => (
                 <Link
                   key={c.id}
                   href={`/categoria/${c.slug}`}
-                  className="group overflow-hidden rounded-xl border border-ink/10 bg-white text-center transition-all hover:border-primary-400 hover:shadow-md"
+                  className="flex flex-col shrink-0 rounded-xl border border-ink/10 bg-white overflow-hidden hover:border-primary-400 hover:shadow-md transition-all duration-200"
+                  aria-label={c.name}
                 >
                   {c.image ? (
                     <div className="aspect-[4/3] overflow-hidden bg-primary-100">
@@ -187,23 +116,63 @@ export default async function HomePage() {
                         src={c.image}
                         alt={c.name}
                         loading="lazy"
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
                       />
                     </div>
                   ) : (
-                    <div className="flex aspect-[4/3] items-center justify-center bg-gradient-to-br from-primary-200 via-primary-100 to-primary-50">
+                    <div
+                      className="flex aspect-[4/3] items-center justify-center bg-gradient-to-br from-primary-200 via-primary-100 to-primary-50"
+                    >
                       <span className="font-display text-3xl font-bold text-primary-700">
                         {c.name.charAt(0)}
                       </span>
                     </div>
                   )}
-                  <p className="p-4 font-medium text-ink group-hover:text-primary-700">{c.name}</p>
+                  <p className="p-2 font-medium text-ink">{c.name}</p>
                 </Link>
               ))}
+            </div>
           </div>
+
+          {/* Setas de navegação (apenas desktop, >768px) */}
+          {typeof window !== "undefined" && window.innerWidth >= 768 && (
+            <div className="mt-4 flex items-center justify-between">
+              <button
+                type="button"
+                className="prev-btn rounded-full bg-primary-50 px-3 py-1 text-ink-mute hover:text-ink transition-colors"
+                aria-label="Categoria anterior"
+                onClick={() => {
+                  const container = document.querySelector(
+                    '[overflow-x="auto"]'
+                  ) as HTMLElement;
+                  if (container) container.scrollBy({ left: -300, behavior: "smooth" });
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="next-btn rounded-full bg-primary-50 px-3 py-1 text-ink-mute hover:text-ink transition-colors"
+                aria-label="Próxima categoria"
+                onClick={() => {
+                  const container = document.querySelector(
+                    '[overflow-x="auto"]'
+                  ) as HTMLElement;
+                  if (container) container.scrollBy({ left: 300, behavior: "smooth" });
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M10 8l8 8-8 8" />
+                </svg>
+              </button>
+            </div>
+          )}
         </section>
       )}
 
+      {/* Destaques da semana */}
       {shouldShow(destaques) && (
         <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
           <div className="flex items-end justify-between">

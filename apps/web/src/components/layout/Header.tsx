@@ -5,8 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatCartCount } from "@/lib/cart";
-import { buildMenu, type MenuItem } from "@/lib/categorias";
 import { useCart } from "@/components/loja/CartProvider";
+import { buildMenu, type MenuItem } from "@/lib/categorias";
 
 type Session = { name: string; email: string; role: string } | null;
 
@@ -76,7 +76,9 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur">
+    <header
+      className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur"
+    >
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2.5">
           <img
@@ -89,7 +91,11 @@ export function Header() {
           </span>
         </Link>
 
-        <nav className="hidden items-center gap-6 md:flex">
+        {/* --- Navegação principal (desktop) --- */}
+        <nav
+          className="hidden items-center gap-6 md:flex items-center"
+          aria-label="Menu de navegação principal"
+        >
           {nav.map((item) => (
             <Link
               key={item.href}
@@ -98,13 +104,34 @@ export function Header() {
                 "text-sm text-ink-soft transition-colors hover:text-ink",
                 pathname.startsWith(item.href.split("?")[0]) && "font-semibold text-ink"
               )}
+              aria-current={pathname.startsWith(item.href.split("?")[0]) ? "page" : undefined}
             >
               {item.label}
             </Link>
           ))}
         </nav>
 
-        <div className="flex items-center gap-1 sm:gap-3">
+        {/* --- Grupo superior direito: mobile + desktop --- */}
+        <div className="flex items-center gap-2 sm:gap-3 relative">
+          {/* Botão de busca - visível apenas em mobile */}
+          <button
+            aria-label="Buscar"
+            className="rounded-full p-2 text-ink-md md:hidden hover:bg-ink/5 transition-colors"
+            onClick={() => setOpen(!open)}
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+          </button>
+
           <Link
             href="/carrinho"
             className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-full p-2 text-ink transition-colors hover:bg-ink/5"
@@ -122,17 +149,20 @@ export function Header() {
             )}
           </Link>
 
+          {/* Conta / login - visível em desktop (sm:flex), escondido em mobile fixo */}
           {session ? (
             <div className="hidden items-center gap-2 sm:flex">
               <Link
                 href={session.role === "ADMIN" ? "/admin" : "/conta"}
                 className="text-sm font-medium text-ink-soft hover:text-ink"
+                aria-label={session.role === "ADMIN" ? "Painel admin" : "Minha conta"}
               >
                 Minha conta
               </Link>
               <button
                 onClick={logout}
                 className="text-xs text-ink-mute hover:text-ink"
+                aria-label="Sair"
               >
                 Sair
               </button>
@@ -152,12 +182,14 @@ export function Header() {
               <Link
                 href="/login"
                 className="hidden rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50 hover:bg-ink-soft sm:inline-flex"
+                aria-label="Entrar"
               >
                 Entrar
               </Link>
             </>
           )}
 
+          {/* Botão hambúrguer - visível apenas em mobile */}
           <button
             className="rounded-full p-2 text-ink md:hidden"
             onClick={() => setOpen((v) => !v)}
@@ -179,13 +211,18 @@ export function Header() {
                 href={item.href}
                 onClick={() => setOpen(false)}
                 className="text-sm text-ink-soft"
+                aria-current={pathname.startsWith(item.href.split("?")[0]) ? "page" : undefined}
               >
                 {item.label}
               </Link>
             ))}
             {session ? (
               <>
-                <Link href={session.role === "ADMIN" ? "/admin" : "/conta"} className="text-sm font-medium">
+                <Link
+                  href={session.role === "ADMIN" ? "/admin" : "/conta"}
+                  className="text-sm font-medium"
+                  aria-label={session.role === "ADMIN" ? "Painel admin" : "Minha conta"}
+                >
                   Minha conta
                 </Link>
                 <button onClick={logout} className="text-left text-sm text-ink-mute">
