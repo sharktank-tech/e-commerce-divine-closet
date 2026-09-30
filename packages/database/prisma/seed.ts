@@ -1,7 +1,25 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { readFileSync } from "node:fs";
 
 const prisma = new PrismaClient();
+
+// Carrega SEED_ADMIN_* do .env.local (gitignore) quando o ambiente não exporta.
+try {
+  const texto = readFileSync(".env.local", "utf-8");
+  for (const linha of texto.split("\n")) {
+    const [chave, ...resto] = linha.split("=");
+    const k = (chave || "").trim();
+    if (
+      (k === "SEED_ADMIN_EMAIL" || k === "SEED_ADMIN_PASSWORD") &&
+      !(k in process.env)
+    ) {
+      process.env[k] = resto.join("=").trim().replace(/^"|"$/g, "");
+    }
+  }
+} catch {
+  // sem .env.local — segue com o que estiver no ambiente
+}
 
 async function main() {
   console.log("🌱 Seed Divine Closet...");
@@ -20,6 +38,24 @@ async function main() {
       phone: "11999990000",
     },
   });
+
+  // Admin oficial: credenciais fora do repositório (.env.local).
+  const oficialEmail = process.env.SEED_ADMIN_EMAIL;
+  const oficialSenha = process.env.SEED_ADMIN_PASSWORD;
+  if (oficialEmail && oficialSenha) {
+    const hash = await bcrypt.hash(oficialSenha, 10);
+    const conta = await prisma.user.upsert({
+      where: { email: oficialEmail.toLowerCase() },
+      update: { role: "ADMIN", password: hash, deletedAt: null },
+      create: {
+        email: oficialEmail.toLowerCase(),
+        name: "Admin Divine",
+        password: hash,
+        role: "ADMIN",
+      },
+    });
+    console.log(`   👤 Admin oficial: ${conta.email}`);
+  }
 
   const client = await prisma.user.upsert({
     where: { email: "cliente@divinecloset.com" },
