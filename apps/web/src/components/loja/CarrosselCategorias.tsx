@@ -34,12 +34,12 @@ export function CarrosselCategorias({ categorias }: { categorias: Categoria[] })
         className="carousel-track overflow-x-auto overflow-y-hidden"
         style={{ scrollBehavior: "smooth" }}
       >
-        <div className="carousel-card flex gap-2 min-w-min">
+        <div className="flex gap-2 min-w-min">
           {categorias.map((c) => (
             <Link
               key={c.id}
               href={`/categoria/${c.slug}`}
-              className="flex w-44 flex-col shrink-0 rounded-xl border border-ink/10 bg-white overflow-hidden hover:border-primary-400 hover:shadow-md transition-all duration-200"
+              className="carousel-card flex w-44 flex-col shrink-0 rounded-xl border border-ink/10 bg-white overflow-hidden hover:border-primary-400 hover:shadow-md transition-all duration-200"
               aria-label={c.name}
             >
               {c.image ? (
