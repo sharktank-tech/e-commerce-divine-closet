@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { ProductCard } from "@/components/loja/ProductCard";
 import { BannerCarousel } from "@/components/loja/BannerCarousel";
+import { CarrosselCategorias } from "@/components/loja/CarrosselCategorias";
 import { Button } from "@/components/ui/Button";
 import { shipping, institutional, payment } from "@/config/defaults";
 import { shouldShow, takeFresh } from "@/lib/home";
@@ -97,75 +98,7 @@ export default async function Home() {
             Compre por categoria
           </h2>
 
-          {/* Container do carrossel com scroll suave */}
-          <div className="carousel-track overflow-x-auto overflow-y-hidden" style={{ scrollBehavior: "smooth" }}>
-            <div className="carousel-card flex gap-2 min-w-min">
-              {catsWithProducts.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/categoria/${c.slug}`}
-                  className="flex flex-col shrink-0 rounded-xl border border-ink/10 bg-white overflow-hidden hover:border-primary-400 hover:shadow-md transition-all duration-200"
-                  aria-label={c.name}
-                >
-                  {c.image ? (
-                    <div className="aspect-[4/3] overflow-hidden bg-primary-100">
-                      <img
-                        src={c.image}
-                        alt={c.name}
-                        loading="lazy"
-                        className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      className="flex aspect-[4/3] items-center justify-center bg-gradient-to-br from-primary-200 via-primary-100 to-primary-50"
-                    >
-                      <span className="font-display text-3xl font-bold text-primary-700">
-                        {c.name.charAt(0)}
-                      </span>
-                    </div>
-                  )}
-                  <p className="p-2 font-medium text-ink">{c.name}</p>
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Setas de navegação (apenas desktop, >768px) */}
-          {typeof window !== "undefined" && window.innerWidth >= 768 && (
-            <div className="mt-4 flex items-center justify-between">
-              <button
-                type="button"
-                className="prev-btn rounded-full bg-primary-50 px-3 py-1 text-ink-mute hover:text-ink transition-colors"
-                aria-label="Categoria anterior"
-                onClick={() => {
-                  const container = document.querySelector(
-                    '[overflow-x="auto"]'
-                  ) as HTMLElement;
-                  if (container) container.scrollBy({ left: -300, behavior: "smooth" });
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="next-btn rounded-full bg-primary-50 px-3 py-1 text-ink-mute hover:text-ink transition-colors"
-                aria-label="Próxima categoria"
-                onClick={() => {
-                  const container = document.querySelector(
-                    '[overflow-x="auto"]'
-                  ) as HTMLElement;
-                  if (container) container.scrollBy({ left: 300, behavior: "smooth" });
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M10 8l8 8-8 8" />
-                </svg>
-              </button>
-            </div>
-          )}
+          <CarrosselCategorias categorias={catsWithProducts} />
         </section>
       )}
 
