@@ -6,12 +6,13 @@ Tudo aqui depende de decisão, conteúdo ou credencial do dono. Nada é placehol
 
 ### 1. Header & Autenticação
 
-**Status:** Funcionalidades de layout validadas via JWT forjado. Fluxo de logout mockado com sucesso. Pendente credenciais reais para homologação fim a fim.
+**Status:** Funcionalidades de layout validadas via JWT forjado. Fluxo de logout mockado com sucesso. Homologação fim a fim com credenciais reais concluída em 2026-09-30 — não há pendência de credencial.
 
 - Link **Painel Admin** visível apenas para `ADMIN`/`OPERATOR`/`MARKETING` (mesmos roles que o middleware aceita em `/admin`); **Minha conta** e **Sair** para qualquer usuário logado — desktop e drawer mobile.
 - Testes automatizados (`admin-header.test.ts`): ADMIN vê os dois links; CLIENT vê só "Minha conta"; deslogado vê nenhum; clicar em "Sair" faz `POST /api/auth/logout` e volta ao estado deslogado.
 - Homologação em browser real (1280px) com sessão montada por JWT forjado: admin vê os dois links lado a lado, cliente vê só "Minha conta", logout apaga o cookie de sessão nos dois casos.
-- **Pendente:** credenciais reais para o ciclo completo (input → banco → cookie real → redirect → logout). O `seed.ts` cria `admin@divinecloset.com` / `cliente@divinecloset.com`, mas esses usuários **não existem** no banco remoto — enquanto as credenciais oficiais não forem injetadas em `.env.local`, o login real retorna 401.
+- **Homologação real (2026-09-30):** formulário `/login` preenchido com as credenciais oficiais (`.env.local`, fora do git) → login validado no banco remoto (HTTP 200 + cookie `dc_admin_session`) → redirect `/admin` → header da loja com os dois links → "Sair" apaga o cookie e volta ao estado deslogado. Ciclo completo verificado em browser.
+- `seed.ts` agora espelha o admin oficial via `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` (valores no `.env.local`; placeholders em `.env.example`).
 
 ### 2. Carrossel de Precificação
 

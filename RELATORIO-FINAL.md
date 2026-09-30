@@ -11,11 +11,13 @@
 ## Status por escopo
 
 ### 1. Header & Autenticação
-**Status:** Funcionalidades de layout validadas via JWT forjado. Fluxo de logout mockado com sucesso. Pendente credenciais reais para homologação fim a fim.
+**Status:** Funcionalidades de layout validadas via JWT forjado. Fluxo de logout mockado com sucesso. Homologação fim a fim com credenciais reais concluída em 2026-09-30 — não há pendência de credencial.
 
 - Header com grupos visuais; "Painel Admin" apenas para roles staff (`ADMIN`/`OPERATOR`/`MARKETING`), "Minha conta" e "Sair" para qualquer logado (desktop + drawer mobile).
 - 5 testes automatizados em `admin-header.test.ts` (admin/client/deslogado/logout) — suíte completa 102/102.
-- Homologação em browser real (1280px): ambos os estados de role e o logout (cookie apagado) verificados; sessão montada por JWT forjado por falta de credenciais reais no banco remoto.
+- Homologação em browser real (1280px): estados de role e logout verificados com JWT forjado.
+- **Homologação real (2026-09-30):** login pelo formulário com credenciais oficiais (`.env.local`, fora do git) → HTTP 200 + cookie `dc_admin_session` → redirect `/admin` → header com os dois links → logout apaga o cookie. Ciclo completo (input → banco → cookie → redirect → logout) verificado em browser.
+- `seed.ts` espelha o admin oficial via `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` (valores no `.env.local`, placeholders em `.env.example`).
 
 ### 2. Carrossel de Precificação
 **Status:** Ajustes de usabilidade desktop identificados e corrigidos (correção do seletor das setas para o track e redistribuição do snap-start para as tags `<Link>`).
