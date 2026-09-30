@@ -2,6 +2,43 @@
 
 Tudo aqui depende de decisão, conteúdo ou credencial do dono. Nada é placeholder no site: o que não está configurado, não é renderizado.
 
+## Status por escopo (atualizado em 2026-09-30)
+
+### 1. Header & Autenticação
+
+**Status:** Funcionalidades de layout validadas via JWT forjado. Fluxo de logout mockado com sucesso. Pendente credenciais reais para homologação fim a fim.
+
+- Link **Painel Admin** visível apenas para `ADMIN`/`OPERATOR`/`MARKETING` (mesmos roles que o middleware aceita em `/admin`); **Minha conta** e **Sair** para qualquer usuário logado — desktop e drawer mobile.
+- Testes automatizados (`admin-header.test.ts`): ADMIN vê os dois links; CLIENT vê só "Minha conta"; deslogado vê nenhum; clicar em "Sair" faz `POST /api/auth/logout` e volta ao estado deslogado.
+- Homologação em browser real (1280px) com sessão montada por JWT forjado: admin vê os dois links lado a lado, cliente vê só "Minha conta", logout apaga o cookie de sessão nos dois casos.
+- **Pendente:** credenciais reais para o ciclo completo (input → banco → cookie real → redirect → logout). O `seed.ts` cria `admin@divinecloset.com` / `cliente@divinecloset.com`, mas esses usuários **não existem** no banco remoto — enquanto as credenciais oficiais não forem injetadas em `.env.local`, o login real retorna 401.
+
+### 2. Carrossel de Precificação
+
+**Status:** Ajustes de usabilidade desktop identificados e corrigidos (correção do seletor das setas para o track e redistribuição do snap-start para as tags `<Link>`).
+
+- Commit `595f02d` — **setas**: o bloco nunca renderizava (page.tsx é server component; `typeof window !== "undefined"` é falso no SSR) e o `querySelector('[overflow-x="auto"]')` referenciava atributo inexistente. Extraído para client component `CarrosselCategorias.tsx` com `useRef`; cards ganharam largura fixa `w-44` (antes 70–172px irregulares e sem overflow em desktop). Validado: seta avança 300px, volta, e não aparece em mobile.
+- Commit `b868361` — **snap**: `carousel-card` removido da div wrapper (ponto único de snap) e aplicado a cada `<Link>` de categoria. Validado em 375px: o swipe para exatamente na borda do card (184px = largura + gap).
+- **Pendente do dono:** fotos nas categorias — hoje todas com `image = null` (fallback de letra).
+
+### 3. Otimização de SEO
+
+**Status:** Entregue e commitado (`ac197cd`).
+
+- Titles templateados, canonical, Open Graph, JSON-LD (Organization no layout, Product na PDP), `sitemap.ts`, `robots.ts`, noindex + header `X-Robots-Tag` em páginas privadas, alt automático e lazy-loading.
+- **Pendente:** meta title/description próprios dos 19 produtos (conteúdo do dono — ver Tarefa 8 no fim deste arquivo).
+
+### 4. Conformidade LGPD
+
+**Status:** Entregue e commitado (`ac197cd`).
+
+- `ConsentBanner` no layout (aviso de coleta de dados/cookies), página `/privacidade`, noindex das páginas transacionais.
+- **Pendente:** revisão do conteúdo da política de privacidade pelo responsável jurídico do dono (o texto atual é o entregue no escopo do projeto).
+
+---
+
+## Pendências de conteúdo e decisão do dono
+
 ## 🔴 Alta — catálogo e vendas
 
 ### Avaliações (Tarefa 11)

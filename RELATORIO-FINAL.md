@@ -1,12 +1,37 @@
 # Relatório Final - Divine Closet E-commerce
 
-## Status Geral (atualizado em 2026-09-29, após auditoria e correções)
+## Status Geral (atualizado em 2026-09-30)
 - `npx tsc --noEmit`: CLEAN (0 erros)
-- `npm test`: 97 testes passando (14 arquivos)
+- `npm test`: 102 testes passando (15 arquivos)
 - `npm run build`: Exit 0 (0 erros, apenas warnings de `<img>`)
 - `next lint`: 0 erros
 - Fluxo E2E de precificação validado ao vivo (12/12)
 - Auditoria completa em `AUDITORIA-2026-09-29.md` (inclui seção 9 com as correções aplicadas)
+
+## Status por escopo
+
+### 1. Header & Autenticação
+**Status:** Funcionalidades de layout validadas via JWT forjado. Fluxo de logout mockado com sucesso. Pendente credenciais reais para homologação fim a fim.
+
+- Header com grupos visuais; "Painel Admin" apenas para roles staff (`ADMIN`/`OPERATOR`/`MARKETING`), "Minha conta" e "Sair" para qualquer logado (desktop + drawer mobile).
+- 5 testes automatizados em `admin-header.test.ts` (admin/client/deslogado/logout) — suíte completa 102/102.
+- Homologação em browser real (1280px): ambos os estados de role e o logout (cookie apagado) verificados; sessão montada por JWT forjado por falta de credenciais reais no banco remoto.
+
+### 2. Carrossel de Precificação
+**Status:** Ajustes de usabilidade desktop identificados e corrigidos (correção do seletor das setas para o track e redistribuição do snap-start para as tags `<Link>`).
+
+- Commit `595f02d`: setas extraídas para o client component `CarrosselCategorias.tsx` com `useRef` (antes: bloco nunca renderizava e o seletor `'[overflow-x="auto"]'` não existia); cards com largura fixa `w-44`.
+- Commit `b868361`: snap por card (`scroll-snap-align: start` em cada `<Link>`, não mais na div wrapper) — validado em 375px, swipe para na borda do card.
+
+### 3. Otimização de SEO
+**Status:** Entregue e commitado (`ac197cd`).
+
+- Titles templateados (`%s | Divine Closet`), canonical, Open Graph, JSON-LD (Organization + Product), `sitemap.ts`, `robots.ts`, noindex + `X-Robots-Tag` em páginas privadas, alt automático (`describeAlt()`), lazy-loading e CLS/LCP otimizados.
+
+### 4. Conformidade LGPD
+**Status:** Entregue e commitado (`ac197cd`).
+
+- `ConsentBanner` no layout, página `/privacidade`, noindex das páginas transacionais; cookies httpOnly (`dc_session`, `dc_admin_session`, `dc_guest`).
 
 ## O que foi Implementado
 
