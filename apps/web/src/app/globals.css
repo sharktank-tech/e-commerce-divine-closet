@@ -17,3 +17,13 @@ body {
   background: rgba(176, 141, 87, 0.35);
   color: #14181f;
 }
+
+/* Scrollbar e scroll-snap personalizados */
+.carousel-track {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}

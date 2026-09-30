@@ -153,19 +153,19 @@ export function Header() {
           {session ? (
             <div className="hidden items-center gap-2 sm:flex">
               <Link
-                href={session.role === "ADMIN" ? "/admin" : "/conta"}
+                href="/admin"
                 className="text-sm font-medium text-ink-soft hover:text-ink"
-                aria-label={session.role === "ADMIN" ? "Painel admin" : "Minha conta"}
+                aria-label="Painel admin"
+              >
+                Painel Admin
+              </Link>
+              <Link
+                href="/conta"
+                className="text-sm font-medium text-ink-soft hover:text-ink ml-4"
+                aria-label="Minha conta"
               >
                 Minha conta
               </Link>
-              <button
-                onClick={logout}
-                className="text-xs text-ink-mute hover:text-ink"
-                aria-label="Sair"
-              >
-                Sair
-              </button>
             </div>
           ) : (
             <>
