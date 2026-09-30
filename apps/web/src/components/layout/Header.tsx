@@ -75,6 +75,12 @@ export function Header() {
     router.refresh();
   }
 
+  const isStaff =
+    session !== null &&
+    (session.role === "ADMIN" ||
+      session.role === "OPERATOR" ||
+      session.role === "MARKETING");
+
   return (
     <header
       className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur"
@@ -151,21 +157,30 @@ export function Header() {
 
           {/* Conta / login - visível em desktop (sm:flex), escondido em mobile fixo */}
           {session ? (
-            <div className="hidden items-center gap-2 sm:flex">
-              <Link
-                href="/admin"
-                className="text-sm font-medium text-ink-soft hover:text-ink"
-                aria-label="Painel admin"
-              >
-                Painel Admin
-              </Link>
+            <div className="hidden items-center gap-3 sm:flex">
+              {isStaff && (
+                <Link
+                  href="/admin"
+                  className="text-sm font-medium text-ink-soft hover:text-ink"
+                  aria-label="Painel admin"
+                >
+                  Painel Admin
+                </Link>
+              )}
               <Link
                 href="/conta"
-                className="text-sm font-medium text-ink-soft hover:text-ink ml-4"
+                className="text-sm font-medium text-ink-soft hover:text-ink"
                 aria-label="Minha conta"
               >
                 Minha conta
               </Link>
+              <button
+                onClick={logout}
+                className="text-sm font-medium text-ink-soft hover:text-ink"
+                aria-label="Sair"
+              >
+                Sair
+              </button>
             </div>
           ) : (
             <>
@@ -218,10 +233,19 @@ export function Header() {
             ))}
             {session ? (
               <>
+                {isStaff && (
+                  <Link
+                    href="/admin"
+                    className="text-sm font-medium"
+                    aria-label="Painel admin"
+                  >
+                    Painel Admin
+                  </Link>
+                )}
                 <Link
-                  href={session.role === "ADMIN" ? "/admin" : "/conta"}
+                  href="/conta"
                   className="text-sm font-medium"
-                  aria-label={session.role === "ADMIN" ? "Painel admin" : "Minha conta"}
+                  aria-label="Minha conta"
                 >
                   Minha conta
                 </Link>

@@ -22,8 +22,13 @@ body {
 .carousel-track {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  scroll-snap-type: x mandatory;
 }
 
 .carousel-track::-webkit-scrollbar {
   display: none;
+}
+
+.carousel-card {
+  scroll-snap-align: start;
 }

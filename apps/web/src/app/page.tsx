@@ -99,7 +99,7 @@ export default async function Home() {
 
           {/* Container do carrossel com scroll suave */}
           <div className="carousel-track overflow-x-auto overflow-y-hidden" style={{ scrollBehavior: "smooth" }}>
-            <div className="flex gap-2 scroll-snap-align: start min-w-min">
+            <div className="carousel-card flex gap-2 min-w-min">
               {catsWithProducts.map((c) => (
                 <Link
                   key={c.id}
