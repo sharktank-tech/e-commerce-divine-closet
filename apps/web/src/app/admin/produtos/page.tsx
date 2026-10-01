@@ -16,6 +16,7 @@ type Product = {
   featured: boolean;
   images: string[];
   category: { name: string };
+  _count?: { orderItems: number };
   custo_peca_centavos: number;
   custo_embalagem_centavos: number;
   custos_extras_centavos: number;
@@ -65,10 +66,14 @@ export default function AdminProdutosPage() {
       .catch(() => {});
   }, []);
 
-  async function remove(id: string) {
-    if (!confirm("Excluir este produto?")) return;
-    const res = await fetch(`/api/admin/produtos/${id}`, { method: "DELETE" });
-    if (res.ok) setItems((prev) => prev.filter((p) => p.id !== id));
+  async function remove(p: Product) {
+    const temPedidos = (p._count?.orderItems ?? 0) > 0;
+    const confirma = temPedidos
+      ? `"${p.name}" já foi vendido e será DESATIVADO: some da loja, mas o histórico de pedidos é preservado. Continuar?`
+      : `Excluir "${p.name}" definitivamente?`;
+    if (!confirm(confirma)) return;
+    const res = await fetch(`/api/admin/produtos/${p.id}`, { method: "DELETE" });
+    if (res.ok) setItems((prev) => prev.filter((x) => x.id !== p.id));
     else alert("Erro ao excluir");
   }
 
@@ -426,8 +431,8 @@ export default function AdminProdutosPage() {
                       >
                         Editar
                       </Link>
-                      <button onClick={() => remove(p.id)} className="text-red-600 hover:underline">
-                        Excluir
+                      <button onClick={() => remove(p)} className="text-red-600 hover:underline">
+                        {(p._count?.orderItems ?? 0) > 0 ? "Desativar" : "Excluir"}
                       </button>
                     </div>
                   </td>

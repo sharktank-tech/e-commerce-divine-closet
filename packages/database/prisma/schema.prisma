@@ -277,7 +277,7 @@ model OrderItem {
   orderId     String  @db.Uuid
   order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId   String  @db.Uuid
-  product     Product @relation(fields: [productId], references: [id])
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
   productName String
   productSlug String
   imageUrl    String?

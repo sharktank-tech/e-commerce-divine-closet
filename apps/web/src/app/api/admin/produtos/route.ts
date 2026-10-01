@@ -57,7 +57,11 @@ export async function GET() {
   try {
     const products = await prisma.product.findMany({
       where: { deletedAt: null },
-      include: { category: true, variations: { orderBy: { size: "asc" } } },
+      include: {
+        category: true,
+        variations: { orderBy: { size: "asc" } },
+        _count: { select: { orderItems: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json({ items: products });

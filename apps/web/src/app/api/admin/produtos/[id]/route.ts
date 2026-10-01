@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { discountPercent } from "@/lib/precos";
+import { aplicarExclusaoProduto } from "@/lib/produto-exclusao";
 import { normalizeImageMeta } from "@/lib/imagens";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
@@ -224,11 +225,16 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     if (!session) return forbidden();
 
     const { id } = await params;
-    await prisma.product.update({
+    const existing = await prisma.product.findUnique({
       where: { id },
-      data: { deletedAt: new Date(), isActive: false },
+      select: { id: true },
     });
-    return NextResponse.json({ ok: true });
+    if (!existing) {
+      return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
+    }
+    // Com pedidos associados desativa; sem pedidos apaga de vez.
+    const modo = await aplicarExclusaoProduto(prisma, id);
+    return NextResponse.json({ ok: true, modo: modo === "desativar" ? "desativado" : "excluido" });
   } catch (err) {
     console.error("[admin:produto:delete]", err);
     return NextResponse.json({ error: "Erro ao excluir" }, { status: 500 });
