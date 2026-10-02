@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { processPayment } from "@/lib/pagamento";
 import { sendEmail, emails } from "@/lib/email";
 import { orderNumber, formatBRL } from "@/lib/utils";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { cookies } from "next/headers";
 
@@ -107,6 +108,7 @@ export async function POST(req: NextRequest) {
                     slug: true,
                     price: true,
                     stock: true,
+                    isActive: true,
                     images: true,
                   },
                 },
@@ -118,6 +120,26 @@ export async function POST(req: NextRequest) {
 
     if (!cart || cart.items.length === 0) {
       return NextResponse.json({ error: "Carrinho vazio" }, { status: 400 });
+    }
+
+    // Revalidação final: preço/ disponibilidade podem ter mudado entre a
+    // adição ao carrinho e o checkout. Nada é cobrado silenciosamente —
+    // o cliente resolve no checkout (aceitar novo preço ou remover o item).
+    const bloqueios: Array<{ itemId: string; name: string; motivo: string }> = [];
+    for (const item of cart.items) {
+      if (!item.product.isActive) {
+        bloqueios.push({ itemId: item.id, name: item.product.name, motivo: "indisponivel" });
+        continue;
+      }
+      if (reaisParaCentavos(item.unitPrice) !== reaisParaCentavos(item.product.price)) {
+        bloqueios.push({ itemId: item.id, name: item.product.name, motivo: "preco" });
+      }
+    }
+    if (bloqueios.length > 0) {
+      return NextResponse.json(
+        { error: "Revise os avisos do carrinho antes de finalizar", bloqueios },
+        { status: 409 }
+      );
     }
 
     for (const item of cart.items) {

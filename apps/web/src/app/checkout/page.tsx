@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { formatBRL } from "@/lib/utils";
+import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics } from "@/lib/analytics";
 
@@ -15,7 +16,9 @@ type CartData = {
     id: string;
     quantity: number;
     lineTotal: number;
-    product: { name: string; price: string | number };
+    unitPrice: number;
+    aviso: AvisoItem | null;
+    product: { id: string; name: string; price: string | number };
   }>;
   subtotal: number;
 };
@@ -64,11 +67,16 @@ export default function CheckoutPage() {
   });
   const checkoutTracked = useRef(false);
 
+  async function carregarCarrinho() {
+    const r = await fetch("/api/carrinho");
+    const d = await r.json();
+    setCart(d);
+    return d as CartData;
+  }
+
   useEffect(() => {
-    fetch("/api/carrinho")
-      .then((r) => r.json())
+    carregarCarrinho()
       .then((d) => {
-        setCart(d);
         if (!d.items?.length) router.replace("/carrinho");
         else if (!checkoutTracked.current) {
           checkoutTracked.current = true;
@@ -94,6 +102,28 @@ export default function CheckoutPage() {
   function set(key: keyof typeof form, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
   }
+
+  async function aceitarPreco(itemId: string) {
+    const res = await fetch("/api/carrinho", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, aceitarPreco: true }),
+    });
+    if (res.ok) {
+      const d = await carregarCarrinho();
+      if (!d.items?.length) router.replace("/carrinho");
+    }
+  }
+
+  async function removerItem(itemId: string) {
+    const res = await fetch(`/api/carrinho?itemId=${itemId}`, { method: "DELETE" });
+    if (res.ok) {
+      const d = await carregarCarrinho();
+      if (!d.items?.length) router.replace("/carrinho");
+    }
+  }
+
+  const avisos = (cart?.items || []).filter((i) => i.aviso);
 
   const subtotal = cart?.subtotal || 0;
   const couponFreeShipping = !!coupon?.freeShipping;
@@ -205,6 +235,12 @@ export default function CheckoutPage() {
 
       if (res.status === 402 && data.order) {
         setError(data.error || "Pagamento recusado. Pedido cancelado.");
+        return;
+      }
+
+      if (res.status === 409 && data.bloqueios) {
+        await carregarCarrinho();
+        setError(data.error || "Revise os avisos do carrinho antes de finalizar");
         return;
       }
 
@@ -462,6 +498,43 @@ export default function CheckoutPage() {
 
         <aside className="h-fit rounded-xl border border-ink/10 bg-white p-6">
           <h2 className="font-display text-lg font-bold text-ink">Seu pedido</h2>
+          {avisos.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {avisos.map((i) => (
+                <div key={i.id} className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+                  {i.aviso?.tipo === "preco" && i.aviso ? (
+                    <>
+                      <p>
+                        O preço de {i.product.name} mudou de{" "}
+                        {formatBRL(i.aviso.deCentavos / 100)} para{" "}
+                        {formatBRL(i.aviso.paraCentavos / 100)} desde que você
+                        adicionou ao carrinho.
+                      </p>
+                      <div className="mt-2 flex gap-3">
+                        <Button type="button" size="sm" onClick={() => aceitarPreco(i.id)}>
+                          Aceitar novo preço
+                        </Button>
+                        <button type="button" className="underline" onClick={() => removerItem(i.id)}>
+                          Remover
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        {i.aviso?.tipo === "estoque"
+                          ? `Estoque insuficiente para ${i.product.name}.`
+                          : `${i.product.name} não está mais disponível.`}
+                      </p>
+                      <button type="button" className="mt-2 underline" onClick={() => removerItem(i.id)}>
+                        Remover
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <ul className="mt-4 space-y-3 text-sm">
             {(cart?.items || []).map((i) => (
               <li key={i.id} className="flex justify-between gap-3">
@@ -527,9 +600,14 @@ export default function CheckoutPage() {
           )}
 
           {step === STEPS.length - 1 && (
-            <Button type="submit" className="mt-5 w-full" size="lg" disabled={submitting}>
+            <Button type="submit" className="mt-5 w-full" size="lg" disabled={submitting || avisos.length > 0}>
               {submitting ? "Processando..." : `Pagar ${formatBRL(total)}`}
             </Button>
+          )}
+          {avisos.length > 0 && (
+            <p className="mt-2 text-xs text-amber-700">
+              Resolva os avisos acima para continuar.
+            </p>
           )}
         </aside>
       </form>

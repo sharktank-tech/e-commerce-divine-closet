@@ -229,6 +229,7 @@ model CartItem {
   productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   quantity  Int     @default(1)
+  unitPrice Decimal @db.Decimal(10, 2)
   size      String?
   color     String?
 

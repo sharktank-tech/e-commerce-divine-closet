@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { cookies } from "next/headers";
+import { reaisParaCentavos, revalidarItem } from "@/lib/carrinho-revalidacao";
 
 const GUEST_COOKIE = "dc_guest";
 
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
                 slug: true,
                 price: true,
                 stock: true,
+                isActive: true,
                 images: true,
                 category: { select: { name: true } },
               },
@@ -68,22 +70,33 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    const items = (cart?.items || []).map((i) => ({
-      id: i.id,
-      quantity: i.quantity,
-      size: i.size,
-      color: i.color,
-      product: {
-        id: i.product.id,
-        name: i.product.name,
-        slug: i.product.slug,
-        price: i.product.price,
-        stock: i.product.stock,
-        images: i.product.images,
-        category: i.product.category.name,
-      },
-      lineTotal: Number(i.product.price) * i.quantity,
-    }));
+    const items = (cart?.items || []).map((i) => {
+      const precoAtual = reaisParaCentavos(i.product.price);
+      return {
+        id: i.id,
+        quantity: i.quantity,
+        size: i.size,
+        color: i.color,
+        // snapshot do preço no momento da adição (item 3)
+        unitPrice: Number(i.unitPrice),
+        product: {
+          id: i.product.id,
+          name: i.product.name,
+          slug: i.product.slug,
+          price: i.product.price,
+          stock: i.product.stock,
+          images: i.product.images,
+          category: i.product.category.name,
+        },
+        lineTotal: Number(i.product.price) * i.quantity,
+        aviso: revalidarItem({
+          unitPriceCentavos: reaisParaCentavos(i.unitPrice),
+          precoAtualCentavos: precoAtual,
+          ativo: i.product.isActive,
+          estoqueSuficiente: i.product.stock >= i.quantity,
+        }),
+      };
+    });
 
     const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
 
@@ -162,7 +175,15 @@ export async function POST(req: NextRequest) {
       });
     } else {
       await prisma.cartItem.create({
-        data: { cartId, productId, quantity, size: size ?? null, color: color ?? null },
+        data: {
+          cartId,
+          productId,
+          quantity,
+          size: size ?? null,
+          color: color ?? null,
+          // snapshot do preço neste momento (revalidado no checkout)
+          unitPrice: Number(product.price),
+        },
       });
     }
 
@@ -176,16 +197,35 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { itemId, quantity } = body as { itemId?: string; quantity?: number };
-    if (!itemId || typeof quantity !== "number") {
+    const { itemId, quantity, aceitarPreco } = body as {
+      itemId?: string;
+      quantity?: number;
+      aceitarPreco?: boolean;
+    };
+    if (!itemId || (typeof quantity !== "number" && aceitarPreco !== true)) {
       return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
     }
 
     const { cartId } = await resolveCartId(req);
-    const item = await prisma.cartItem.findFirst({ where: { id: itemId, cartId } });
+    const item = await prisma.cartItem.findFirst({
+      where: { id: itemId, cartId },
+      include: { product: { select: { price: true, isActive: true } } },
+    });
     if (!item) return NextResponse.json({ error: "Item não encontrado" }, { status: 404 });
 
-    if (quantity <= 0) {
+    // Cliente aceitou o novo preço após o aviso de divergência.
+    if (aceitarPreco === true) {
+      if (!item.product || !item.product.isActive) {
+        return NextResponse.json({ error: "Produto indisponível" }, { status: 409 });
+      }
+      await prisma.cartItem.update({
+        where: { id: item.id },
+        data: { unitPrice: Number(item.product.price) },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (quantity === undefined || quantity <= 0) {
       await prisma.cartItem.delete({ where: { id: item.id } });
     } else {
       await prisma.cartItem.update({
