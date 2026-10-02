@@ -3,11 +3,16 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
+import { normalizarCustoCsv, temOrigemCusto } from "@/lib/import-csv";
+import { calcularSnapshot } from "@/lib/precificacao-server";
 
 // Importação em massa via planilha CSV (seção 4.3).
-// Colunas: nome,descricao,preco,estoque,categoria,sku,tamanhos,cores
+// Colunas: nome,descricao,preco,preco_de,estoque,categoria,sku,tamanhos,cores
+// Opcionais de custo: lote_id (UUID), lote (nome), custo_peca (R$),
+// markup (0–1000), custos_extras (R$). Com origem de custo, grava os mesmos
+// snapshots do formulário manual; sem elas, importa sem custo (lista semCusto).
 // Tamanhos/cores separados por "|". Exemplo:
-// Vestido Floral,Descrição da peça,189.90,10,Vestidos,VST-001,P|PP|M,Verde|Preto
+// Vestido Floral,Descrição da peça,189.90,,10,Vestidos,VST-001,P|PP|M,Verde|Preto
 
 function parseCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -73,6 +78,11 @@ export async function POST(req: NextRequest) {
     const iSku = col("sku");
     const iSizes = col("tamanhos");
     const iColors = col("cores");
+    const iLoteId = col("lote_id");
+    const iLote = col("lote");
+    const iCustoPeca = col("custo_peca");
+    const iMarkup = col("markup");
+    const iExtras = col("custos_extras");
 
     if (iName < 0 || iPrice < 0) {
       return NextResponse.json(
@@ -83,7 +93,9 @@ export async function POST(req: NextRequest) {
 
     let created = 0;
     const errors: string[] = [];
+    const semCusto: string[] = [];
     const categories = new Map<string, string>();
+    const lotes = new Map<string, string | null>();
 
     for (let li = 1; li < lines.length; li++) {
       const cols = parseCsvLine(lines[li]);
@@ -128,6 +140,57 @@ export async function POST(req: NextRequest) {
         const rawDe = iDe >= 0 ? (cols[iDe] || "").replace(",", ".") : "";
         const comparePrice = rawDe ? Number(rawDe) : null;
 
+        // Custo (opcional): mesmas regras do formulário manual. Sem origem
+        // de custo, importa normalmente e sinaliza no relatório (semCusto).
+        const { custo, erro: erroCusto } = normalizarCustoCsv({
+          lote_id: iLoteId >= 0 ? cols[iLoteId] : "",
+          lote: iLote >= 0 ? cols[iLote] : "",
+          custo_peca: iCustoPeca >= 0 ? cols[iCustoPeca] : "",
+          markup: iMarkup >= 0 ? cols[iMarkup] : "",
+          custos_extras: iExtras >= 0 ? cols[iExtras] : "",
+        });
+        if (erroCusto) {
+          errors.push(`Linha ${li + 1}: ${erroCusto}`);
+          continue;
+        }
+
+        let snapshotData: Record<string, unknown> = {};
+        if (temOrigemCusto(custo)) {
+          let loteFinal: string | null = custo.loteId;
+          if (!loteFinal && custo.loteNome) {
+            const chave = custo.loteNome.toLowerCase();
+            const emCache = lotes.get(chave);
+            if (emCache !== undefined) {
+              loteFinal = emCache;
+            } else {
+              const lote = await prisma.loteCompra.findFirst({
+                where: { nome: { equals: custo.loteNome, mode: "insensitive" } },
+              });
+              loteFinal = lote?.id ?? null;
+              lotes.set(chave, loteFinal);
+            }
+          }
+          const snap = await calcularSnapshot({
+            loteId: loteFinal,
+            custoPecaManualCentavos: custo.custoPecaCentavos,
+            markupProduto: custo.markup,
+            custosExtrasCentavos: custo.extrasCentavos,
+            custosExtrasDescricao: null,
+          });
+          if (snap) {
+            snapshotData = {
+              lote_id: loteFinal,
+              custo_peca_centavos: snap.custoPeca,
+              custo_embalagem_centavos: snap.custoEmbalagem,
+              custos_extras_centavos: snap.custosExtras,
+              custos_extras_descricao: null,
+              markup_percentual: custo.markup,
+              preco_sugerido_centavos: snap.precoSugerido,
+              precificacao_calculada_em: new Date(),
+            };
+          }
+        }
+
         await prisma.product.create({
           data: {
             name,
@@ -140,15 +203,17 @@ export async function POST(req: NextRequest) {
             sizes,
             colors,
             categoryId,
+            ...snapshotData,
           },
         });
         created++;
+        if (Object.keys(snapshotData).length === 0) semCusto.push(name);
       } catch (e) {
         errors.push(`Linha ${li + 1}: ${e instanceof Error ? e.message : "erro"}`);
       }
     }
 
-    return NextResponse.json({ created, errors });
+    return NextResponse.json({ created, errors, semCusto });
   } catch (err) {
     console.error("[admin:produtos:import]", err);
     return NextResponse.json({ error: "Erro ao importar CSV" }, { status: 500 });

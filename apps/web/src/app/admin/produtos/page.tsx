@@ -96,7 +96,8 @@ export default function AdminProdutosPage() {
       if (list.ok) setItems((await list.json()).items || []);
       setImportMsg(
         `Importados: ${data.created} produto(s)` +
-          (data.errors?.length ? ` — ${data.errors.length} erro(s)` : "")
+          (data.errors?.length ? ` — ${data.errors.length} erro(s)` : "") +
+          (data.semCusto?.length ? ` — ${data.semCusto.length} sem custo (${data.semCusto.slice(0, 3).join(", ")}${data.semCusto.length > 3 ? ", …" : ""})` : "")
       );
       if (data.created > 0) {
         setCsvText("");
@@ -301,8 +302,10 @@ export default function AdminProdutosPage() {
         <div className="rounded-xl border border-ink/10 bg-white p-5">
           <p className="font-semibold text-ink">Importação em massa (CSV)</p>
           <p className="mt-1 text-xs text-ink-mute">
-            Colunas: <code>nome,descricao,preco,estoque,categoria,sku,tamanhos,cores</code> —
-            tamanhos/cores separados por <code>|</code>.
+            Colunas: <code>nome,descricao,preco,preco_de,estoque,categoria,sku,tamanhos,cores</code> —
+            tamanhos/cores separados por <code>|</code>. Opcionais de custo:{" "}
+            <code>lote_id,lote,custo_peca,markup,custos_extras</code> (sem elas, o
+            produto entra na lista &quot;sem custo&quot; do relatório).
           </p>
           <div className="mt-3 flex flex-col gap-3">
             <textarea
