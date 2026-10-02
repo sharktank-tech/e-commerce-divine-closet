@@ -2,16 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import { enderecoSchema } from "@/lib/validacao";
 
-const patchSchema = z.object({
+const patchSchema = enderecoSchema.partial().extend({
   label: z.string().optional(),
-  street: z.string().min(3).optional(),
-  number: z.string().min(1).optional(),
-  complement: z.string().nullish(),
-  neighborhood: z.string().min(2).optional(),
-  city: z.string().min(2).optional(),
-  state: z.string().min(2).optional(),
-  zipCode: z.string().min(8).optional(),
   isDefault: z.boolean().optional(),
 });
 

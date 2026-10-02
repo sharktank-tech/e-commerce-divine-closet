@@ -12,20 +12,12 @@ import {
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
+import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { cookies } from "next/headers";
 
 const checkoutSchema = z.object({
-  address: z.object({
-    street: z.string().min(3),
-    number: z.string().min(1),
-    complement: z.string().nullish(),
-    neighborhood: z.string().min(2),
-    city: z.string().min(2),
-    state: z.string().min(2),
-    zipCode: z.string().min(8),
-    label: z.string().optional(),
-  }),
+  address: enderecoSchema.extend({ label: z.string().optional() }),
   payment: z.object({
     method: z.enum(["card", "pix", "boleto"]).default("card"),
     card: z
@@ -41,8 +33,15 @@ const checkoutSchema = z.object({
   notes: z.string().nullish(),
   guest: z
     .object({
-      email: z.string().email("E-mail do convidado inválido"),
-      name: z.string().min(2).optional(),
+      email: z
+        .string()
+        .email("E-mail do convidado inválido")
+        .refine((v) => validarEmail(v) === "OK", "E-mail do convidado inválido"),
+      name: z
+        .string()
+        .min(2)
+        .optional()
+        .refine((v) => v == null || validarNome(v) === "OK", "Nome inválido"),
     })
     .optional(),
   utm: z

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession, hashPassword, verifyPassword } from "@/lib/auth";
+import { validarNome, validarTelefone } from "@/lib/validacao";
 
 export async function GET(req: NextRequest) {
   const session = await getSession(req);
@@ -24,8 +25,18 @@ export async function GET(req: NextRequest) {
 }
 
 const schema = z.object({
-  name: z.string().min(2).optional(),
-  phone: z.string().nullish(),
+  name: z
+    .string()
+    .min(2)
+    .optional()
+    .refine((v) => v == null || validarNome(v) === "OK", "Nome inválido"),
+  phone: z
+    .string()
+    .nullish()
+    .refine(
+      (v) => v == null || v.trim() === "" || validarTelefone(v) === "OK",
+      "Telefone inválido"
+    ),
   currentPassword: z.string().optional(),
   newPassword: z.string().min(6, "Nova senha deve ter ao menos 6 caracteres").optional(),
 });

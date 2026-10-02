@@ -3,12 +3,29 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, setSession } from "@/lib/auth";
 import { emails, sendEmail } from "@/lib/email";
+import { validarEmail, validarNome, validarTelefone } from "@/lib/validacao";
 
 const schema = z.object({
-  name: z.string().min(2, "Nome muito curto"),
-  email: z.string().email("E-mail inválido"),
+  // Mensagens antigas preservadas; regras novas (charset/telefone) usam as
+  // mensagens da especificação do item 8.
+  name: z
+    .string()
+    .min(1, "Nome é obrigatório")
+    .min(2, "Nome muito curto")
+    .max(100, "Nome muito longo")
+    .refine((v) => validarNome(v) === "OK", "Nome inválido"),
+  email: z
+    .string()
+    .email("E-mail inválido")
+    .refine((v) => validarEmail(v) === "OK", "E-mail inválido"),
   password: z.string().min(6, "Senha deve ter ao menos 6 caracteres"),
-  phone: z.string().optional(),
+  phone: z
+    .string()
+    .optional()
+    .refine(
+      (v) => v == null || v.trim() === "" || validarTelefone(v) === "OK",
+      "Telefone inválido"
+    ),
 });
 
 export async function POST(req: NextRequest) {
