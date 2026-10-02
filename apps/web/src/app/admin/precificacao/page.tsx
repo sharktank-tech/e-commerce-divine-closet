@@ -10,6 +10,8 @@ import {
   custoUnitarioBruto,
   formatarReais,
 } from "@/lib/precificacao";
+import { reaisParaCentavosTexto } from "@/lib/moeda-input";
+const centavosParaReais = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 
 type Config = {
   id: string;
@@ -29,10 +31,6 @@ type Material = {
   ativo: boolean;
   ordem: number;
 };
-
-const reaisParaCentavos = (v: string) =>
-  Math.max(0, Math.round(Number(String(v).replace(",", ".")) * 100) || 0);
-const centavosParaReais = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 
 export default function PrecificacaoPage() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -89,10 +87,10 @@ export default function PrecificacaoPage() {
   async function criarMaterial() {
     const body: Record<string, unknown> = { nome: novo.nome };
     if (novo.modo === "unitario") {
-      body.custo_unitario_centavos = reaisParaCentavos(novo.unitario);
+      body.custo_unitario_centavos = reaisParaCentavosTexto(novo.unitario);
     } else {
       body.quantidade_comprada = Number(novo.qtd) || 0;
-      body.valor_total_comprado_centavos = reaisParaCentavos(novo.total);
+      body.valor_total_comprado_centavos = reaisParaCentavosTexto(novo.total);
     }
     const res = await fetch("/api/admin/precificacao/materiais", {
       method: "POST",
@@ -265,7 +263,7 @@ export default function PrecificacaoPage() {
                 value={editando[m.id] ?? centavosParaReais(m.custo_unitario_centavos)}
                 onChange={(e) => setEditando({ ...editando, [m.id]: e.target.value })}
                 onBlur={(e) => {
-                  const v = reaisParaCentavos(e.target.value);
+                  const v = reaisParaCentavosTexto(e.target.value);
                   if (v !== m.custo_unitario_centavos) {
                     patchMaterial(m.id, { custo_unitario_centavos: v });
                   }

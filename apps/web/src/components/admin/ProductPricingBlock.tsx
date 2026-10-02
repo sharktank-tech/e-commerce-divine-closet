@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { reaisParaCentavosTexto } from "@/lib/moeda-input";
 import {
   arredondarCusto,
   calcularPrecoSugerido,
@@ -57,9 +58,6 @@ type Props = {
   } | null;
 };
 
-const reaisParaCentavos = (v: string) =>
-  Math.max(0, Math.round(Number(String(v).replace(",", ".")) * 100) || 0);
-
 export function ProductPricingBlock({ value, onChange, precoVenda, onUsarSugerido, precoPromo, snapshot }: Props) {
   const [open, setOpen] = useState(false);
   const [lotes, setLotes] = useState<Lote[]>([]);
@@ -105,12 +103,12 @@ export function ProductPricingBlock({ value, onChange, precoVenda, onUsarSugerid
         custoPeca = Math.round(arredondarCusto(bruto, regraArred as never));
         origemOk = true;
       } else if (value.origem === "manual" && value.custoManual !== "") {
-        custoPeca = reaisParaCentavos(value.custoManual);
+        custoPeca = reaisParaCentavosTexto(value.custoManual);
         origemOk = true;
       }
       if (!origemOk) return null;
       const markup = value.markup === "" ? markupPadrao : Number(value.markup) || 0;
-      const extras = reaisParaCentavos(value.extras);
+      const extras = reaisParaCentavosTexto(value.extras);
       const total = custoTotalUnitario(custoPeca, embalagem, extras);
       const sug = calcularPrecoSugerido(total, markup, regraFinal as never, {
         embalagemNoMarkup,
@@ -123,11 +121,11 @@ export function ProductPricingBlock({ value, onChange, precoVenda, onUsarSugerid
     }
   }, [value, lotes, markupPadrao, regraArred, regraFinal, embalagemNoMarkup, embalagem]);
 
-  const vendaCentavos = reaisParaCentavos(precoVenda);
+  const vendaCentavos = reaisParaCentavosTexto(precoVenda);
   const metVenda = calc ? metricasVenda(vendaCentavos, calc.total, 0) : null;
   const alertaPrejuizo = calc ? verificarAlertaPrejuizo(vendaCentavos, calc.total) : null;
   const alertaEmb = alertaEmbalagemNaoConfigurada(embalagem);
-  const promoCentavos = precoPromo ? reaisParaCentavos(precoPromo) : 0;
+  const promoCentavos = precoPromo ? reaisParaCentavosTexto(precoPromo) : 0;
   const metPromo = calc && promoCentavos > 0 ? metricasVenda(promoCentavos, calc.total, 0) : null;
   const abaixoMinima =
     margemMinima !== null && metVenda ? metVenda.margemRealPercentual < margemMinima : false;

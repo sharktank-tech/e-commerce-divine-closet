@@ -9,6 +9,7 @@ import {
   custoUnitarioBruto,
   formatarReais,
 } from "@/lib/precificacao";
+import { reaisParaCentavosTexto } from "@/lib/moeda-input";
 
 type Lote = {
   id: string;
@@ -23,9 +24,6 @@ type Lote = {
 };
 
 type Category = { id: string; name: string };
-
-const reaisParaCentavos = (v: string) =>
-  Math.max(0, Math.round(Number(String(v).replace(",", ".")) * 100) || 0);
 
 export default function LotesPage() {
   const [lotes, setLotes] = useState<Lote[]>([]);
@@ -57,8 +55,8 @@ export default function LotesPage() {
   // Cálculo em tempo real antes de salvar.
   const previa = useMemo(() => {
     try {
-      const merc = reaisParaCentavos(form.mercadoria);
-      const frete = reaisParaCentavos(form.frete);
+      const merc = reaisParaCentavosTexto(form.mercadoria);
+      const frete = reaisParaCentavosTexto(form.frete);
       const qtd = Number(form.qtd) || 0;
       if (qtd <= 0) return null;
       const bruto = custoUnitarioBruto(merc, frete, qtd, "lote");
@@ -78,8 +76,8 @@ export default function LotesPage() {
       body: JSON.stringify({
         nome: form.nome,
         data_compra: form.data,
-        valor_mercadoria_centavos: reaisParaCentavos(form.mercadoria),
-        valor_frete_centavos: reaisParaCentavos(form.frete),
+        valor_mercadoria_centavos: reaisParaCentavosTexto(form.mercadoria),
+        valor_frete_centavos: reaisParaCentavosTexto(form.frete),
         quantidade_pecas: Number(form.qtd),
         categoria_id: form.categoria || null,
         observacoes: form.obs || null,

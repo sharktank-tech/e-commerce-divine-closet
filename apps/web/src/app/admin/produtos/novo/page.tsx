@@ -11,6 +11,7 @@ import {
 import { ProductImagesEditor } from "@/components/admin/ProductImagesEditor";
 import { RelatedPicker } from "@/components/admin/RelatedPicker";
 import { ProductPricingBlock, emptyPricing, type PricingState } from "@/components/admin/ProductPricingBlock";
+import { reaisParaCentavosTexto } from "@/lib/moeda-input";
 
 type Category = { id: string; name: string };
 
@@ -101,13 +102,13 @@ export default function NovoProdutoPage() {
           loteId: pricing.origem === "lote" ? pricing.loteId || null : null,
           custoPecaManualCentavos:
             pricing.origem === "manual" && pricing.custoManual !== ""
-              ? Math.max(0, Math.round(Number(pricing.custoManual.replace(",", ".")) * 100) || 0)
+              ? reaisParaCentavosTexto(pricing.custoManual)
               : null,
           markupProduto: pricing.markup === "" ? null : Number(pricing.markup) || 0,
           custosExtrasCentavos:
             pricing.extras === ""
               ? 0
-              : Math.max(0, Math.round(Number(pricing.extras.replace(",", ".")) * 100) || 0),
+              : reaisParaCentavosTexto(pricing.extras),
           custosExtrasDescricao: pricing.extrasDescricao || null,
         }),
       });
