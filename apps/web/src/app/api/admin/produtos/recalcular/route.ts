@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { calcularSnapshot, metricasSobrePreco } from "@/lib/precificacao-server";
 import { registrarMudancaPreco } from "@/lib/historico-preco";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 
 const bodySchema = z.object({
   // pré-visualização (sem alterar nada)
@@ -11,11 +12,6 @@ const bodySchema = z.object({
   // aplicação confirmada (só estes têm o preço atualizado)
   aplicar: z.array(z.string()).max(200).optional(),
 });
-
-function reaisParaCentavos(v: unknown): number {
-  const n = typeof v === "object" && v !== null && "toString" in v ? Number(String(v)) : Number(v);
-  return Math.round(n * 100);
-}
 
 export async function POST(req: NextRequest) {
   try {

@@ -5,6 +5,7 @@ import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { normalizarCustoCsv, temOrigemCusto, adicionarSemCusto } from "@/lib/import-csv";
 import { registrarMudancaPreco } from "@/lib/historico-preco";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
 // Importação em massa via planilha CSV (seção 4.3).
@@ -213,7 +214,7 @@ export async function POST(req: NextRequest) {
           produtoId: criado.id,
           usuarioId: session.sub,
           precoAnteriorCentavos: 0,
-          precoNovoCentavos: Math.round(price * 100),
+          precoNovoCentavos: reaisParaCentavos(price),
           origem: "import_csv",
         });
         created++;

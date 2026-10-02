@@ -5,6 +5,7 @@ import Link from "next/link";
 import { formatBRL } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 
 type Product = {
   id: string;
@@ -112,7 +113,7 @@ export default function AdminProdutosPage() {
 
   const custoTotalDe = (p: Product) =>
     (p.custo_peca_centavos || 0) + (p.custo_embalagem_centavos || 0) + (p.custos_extras_centavos || 0);
-  const precoCentavosDe = (p: Product) => Math.round(Number(p.price) * 100);
+  const precoCentavosDe = (p: Product) => reaisParaCentavos(p.price);
   const margemDe = (p: Product) => {
     const custo = custoTotalDe(p);
     const preco = precoCentavosDe(p);
