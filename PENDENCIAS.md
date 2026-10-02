@@ -97,6 +97,19 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 ### Integração com ERP/envio
 - Webhooks para transportadoras ainda em estudo.
 
+## 🔧 Dívida técnica — backlog de código (não corrigir sem avisar)
+
+### Consolidar conversões monetárias duplicadas (registrado em 2026-10-02)
+- Fonte de verdade: `reaisParaCentavos` em `apps/web/src/lib/carrinho-revalidacao.ts` (aceita `number|string|Decimal`, usada pelas rotas carrinho/pedidos/cupom, `[id]` e por `lib/pedidos/calculo-total.ts`).
+- Duplicações conhecidas (mesmo nome ou mesma fórmula, contratos ligeiramente diferentes — unificar preservando cada contrato):
+  - `apps/web/src/app/api/admin/produtos/recalcular/route.ts:15-18` — cópia local idêntica à da lib; trocar pelo import (caso mais simples, sem divergência de contrato).
+  - `apps/web/src/app/admin/precificacao/page.tsx:33-34`, `apps/web/src/app/admin/lotes/page.tsx:27-28`, `apps/web/src/components/admin/ProductPricingBlock.tsx:60-61` — variante cliente (string com vírgula decimal + `max(0, … || 0)`).
+  - `apps/web/src/app/admin/produtos/[id]/page.tsx:229,235` e `apps/web/src/app/admin/produtos/novo/page.tsx:104,110` — mesma variante inline.
+  - `apps/web/src/app/admin/produtos/page.tsx:115` (`precoCentavosDe`) — sem tratamento de vírgula; diverge das variantes cliente.
+  - `apps/web/src/lib/import-csv.ts:29` (`parseReais`) — contrato próprio (retorna `null`/`"invalido"` em vez de número).
+  - `apps/web/src/app/api/admin/produtos/import/route.ts:216` (`Math.round(price * 100)`) — deveria usar o helper da lib.
+- Critério de aceite futuro: uma única implementação por contrato (servidor Decimal-safe × cliente com vírgula), sem mudar arredondamento de nenhum caminho; suíte verde antes/depois.
+
 ## 🟢 Baixa — Aparência e Conteúdo
 
 - Completo: SEO, titles, canonical, og:image, sitemap, robots.txt.

@@ -7,6 +7,7 @@ import {
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
+import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 
 /**
  * Aplica cupom no carrinho do usuário/convidado.
@@ -28,25 +29,24 @@ export async function POST(req: NextRequest) {
     });
 
     const now = new Date();
-    if (
-      !coupon ||
-      !coupon.active ||
-      coupon.deletedAt ||
-      (coupon.startsAt && coupon.startsAt > now) ||
-      (coupon.endsAt && coupon.endsAt < now) ||
-      (coupon.maxUses != null && coupon.usedCount >= coupon.maxUses)
-    ) {
+    const sub = Number(subtotal || 0);
+    // Mesma regra de /api/pedidos (lib/elegibilidade-cupom.ts); só as
+    // mensagens/status abaixo são desta rota.
+    const elig = elegibilidadeCupom(coupon, now, sub);
+    if (!elig.elegivel) {
+      if (elig.motivo === "minimo" && coupon?.minSubtotal != null) {
+        return NextResponse.json(
+          {
+            error: `Cupom exige pedido mínimo de R$ ${toNumber(coupon.minSubtotal).toFixed(2)}`,
+          },
+          { status: 400 }
+        );
+      }
       return NextResponse.json({ error: "Cupom inválido ou expirado" }, { status: 404 });
     }
-
-    const sub = Number(subtotal || 0);
-    if (coupon.minSubtotal && sub < toNumber(coupon.minSubtotal)) {
-      return NextResponse.json(
-        {
-          error: `Cupom exige pedido mínimo de R$ ${toNumber(coupon.minSubtotal).toFixed(2)}`,
-        },
-        { status: 400 }
-      );
+    if (!coupon) {
+      // Inalcançável (elegibilidade já cobre nulo); guarda de tipo.
+      return NextResponse.json({ error: "Cupom inválido ou expirado" }, { status: 404 });
     }
 
     // Cálculo único em lib/pedidos/calculo-total.ts — mesmo módulo que

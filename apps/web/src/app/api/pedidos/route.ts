@@ -11,6 +11,7 @@ import {
   calcularTotalCentavos,
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
+import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { cookies } from "next/headers";
 
@@ -198,15 +199,10 @@ export async function POST(req: NextRequest) {
         where: { code: appliedCouponCode },
       });
       const now = new Date();
-      if (
-        !coupon ||
-        !coupon.active ||
-        coupon.deletedAt ||
-        (coupon.startsAt && coupon.startsAt > now) ||
-        (coupon.endsAt && coupon.endsAt < now) ||
-        (coupon.maxUses != null && coupon.usedCount >= coupon.maxUses) ||
-        (coupon.minSubtotal != null && subtotal < Number(coupon.minSubtotal))
-      ) {
+      // Mesma regra de /api/cupom (lib/elegibilidade-cupom.ts); aqui
+      // qualquer motivo vira 400 com a mensagem única desta rota.
+      const eleg = elegibilidadeCupom(coupon, now, subtotal);
+      if (!coupon || !eleg.elegivel) {
         return NextResponse.json({ error: "Cupom inválido" }, { status: 400 });
       }
       cupomValido = { type: coupon.type, value: coupon.value };

@@ -6,6 +6,7 @@ import {
   calcularTotalCentavos,
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 
 const FRETE = { fixed: 20, freeFrom: 300 };
 
@@ -95,5 +96,33 @@ describe("calcularPedido (pipeline)", () => {
       freteCentavos: 0,
       totalCentavos: 32000,
     });
+  });
+
+  it("sem cupom abaixo do limiar: frete fixo (caminho sem desconto)", () => {
+    const r = calcularPedido(29999, null, FRETE);
+    expect(r).toEqual({
+      descontoCentavos: 0,
+      freteGratis: false,
+      freteCentavos: 2000,
+      totalCentavos: 31999,
+    });
+  });
+
+  it("limiares como chegam da rota (reais → centavos): 299,99 paga frete, 300,00 não", () => {
+    const abaixo = calcularPedido(reaisParaCentavos(299.99), null, FRETE);
+    expect(abaixo.freteCentavos).toBe(2000);
+    expect(abaixo.totalCentavos).toBe(31999);
+    const noLimiar = calcularPedido(reaisParaCentavos(300.0), null, FRETE);
+    expect(noLimiar.freteCentavos).toBe(0);
+    expect(noLimiar.totalCentavos).toBe(30000);
+  });
+
+  it("PERCENT aceita valor como string ou Decimal-like", () => {
+    expect(
+      calcularDescontoCentavos(10000, { type: "PERCENT", value: "10" })
+    ).toEqual({ descontoCentavos: 1000, freteGratis: false });
+    expect(
+      calcularDescontoCentavos(10000, { type: "PERCENT", value: { toString: () => "10" } })
+    ).toEqual({ descontoCentavos: 1000, freteGratis: false });
   });
 });
