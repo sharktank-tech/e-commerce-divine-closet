@@ -114,3 +114,18 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 
 - Completo: SEO, titles, canonical, og:image, sitemap, robots.txt.
 - Pendente: descrições próprias dos 19 produtos, fotos profissionais, conteúdo da página "Sobre nós".
+
+## ✅ FECHADO — Fase 2: correções priorizadas (2026-10-02)
+
+- [x] Item 1 — Restrict em `OrderItem → Product` + excluir com pedido desativa (`10e2361`)
+- [x] Item 2 — `discountPercent` derivado via hook do Prisma, Opção B (`f1f4060`)
+- [x] Item 3 — Snapshot `unitPrice` no carrinho + revalidação no checkout (`ff88ef0`)
+- [x] Item 4 — Colunas de custo no CSV + relatório `semCusto` (`670d910`)
+- [x] Item 5 — Auditoria em `historico_preco` nos 3 caminhos + aba Histórico (`0e7b009`, fix `0731abc`)
+- [x] Item 6 — Cálculo único de total em centavos p/ cupom e pedidos (`cf790eb`)
+- [x] Item 7 — Elegibilidade pura + limiares + backlog dívida técnica (`54aa124`)
+- [x] Consolidação monetária — helper cliente + usos servidor (`3fcb400`, `d09ce68`)
+
+**E2E:** homologado ao vivo com pedido real e limpeza total (resíduo zero) nos itens 2, 3, 4, 5, 6 (PERCENT) e 7 (FIXED).
+**Suíte no fechamento:** 164 testes em 23 arquivos, todos passando; typecheck, lint e build limpos.
+**Detalhes por versão:** ver `CHANGELOG.md`.
