@@ -13,6 +13,16 @@ import { RelatedPicker } from "@/components/admin/RelatedPicker";
 import { ProductPricingBlock, emptyPricing, type PricingState } from "@/components/admin/ProductPricingBlock";
 type Category = { id: string; name: string };
 
+const brl = (centavos: number) =>
+  `R$ ${(centavos / 100).toFixed(2).replace(".", ",")}`;
+
+function origemLabel(origem: string): string {
+  if (origem === "edicao_manual") return "Edição manual";
+  if (origem === "recalculo_massa") return "Recálculo em massa";
+  if (origem === "import_csv") return "Importação CSV";
+  return origem;
+}
+
 type Variation = { size: string; color: string; stock: string; sku: string };
 
 type Form = {
@@ -55,6 +65,30 @@ export default function EditarProdutoPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [historico, setHistorico] = useState<
+    Array<{
+      id: string;
+      preco_anterior_centavos: number;
+      preco_novo_centavos: number;
+      origem: string;
+      criado_em: string;
+      usuario: { name: string; email: string } | null;
+    }>
+  >([]);
+
+  async function carregarHistorico() {
+    try {
+      const r = await fetch(`/api/admin/produtos/${id}/historico`);
+      if (r.ok) setHistorico((await r.json()).items || []);
+    } catch {
+      /* histórico é acessório: não bloqueia a edição */
+    }
+  }
+
+  useEffect(() => {
+    carregarHistorico();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   useEffect(() => {
     Promise.all([
@@ -215,6 +249,7 @@ export default function EditarProdutoPage({
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      carregarHistorico();
     } catch {
       setError("Erro de conexão");
     } finally {
@@ -424,6 +459,29 @@ export default function EditarProdutoPage({
           </Button>
         </div>
       </form>
+
+      <div className="rounded-xl border border-ink/10 bg-white p-6">
+        <h2 className="font-display text-lg font-bold text-ink">Histórico de preço</h2>
+        {historico.length === 0 ? (
+          <p className="mt-2 text-sm text-ink-mute">Nenhuma alteração registrada.</p>
+        ) : (
+          <ul className="mt-3 space-y-2 text-sm">
+            {historico.map((h) => (
+              <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/5 pb-2">
+                <span className="text-ink-soft">
+                  {brl(h.preco_anterior_centavos)} →{" "}
+                  <strong className="text-ink">{brl(h.preco_novo_centavos)}</strong>
+                </span>
+                <span className="text-xs text-ink-mute">
+                  {origemLabel(h.origem)}
+                  {h.usuario ? ` · ${h.usuario.name}` : ""} ·{" "}
+                  {new Date(h.criado_em).toLocaleString("pt-BR")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

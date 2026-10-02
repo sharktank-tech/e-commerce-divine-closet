@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { aplicarExclusaoProduto } from "@/lib/produto-exclusao";
+import { registrarMudancaPreco } from "@/lib/historico-preco";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { normalizeImageMeta } from "@/lib/imagens";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
@@ -85,6 +87,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
 
     const { variations, loteId, custoPecaManualCentavos, markupProduto, custosExtrasCentavos, custosExtrasDescricao, ...rest } = parsed.data;
+
+    const antes = await prisma.product.findUnique({
+      where: { id },
+      select: { price: true },
+    });
+    if (!antes) {
+      return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
+    }
 
     // relacionados: mantém só ids existentes (remove o próprio)
     if (rest.relacionados !== undefined) {
@@ -201,6 +211,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         include: { category: true, variations: { orderBy: { size: "asc" } } },
       });
     });
+
+    // Auditoria de preço (item 5): só quando o preço de venda mudou.
+    if (rest.price !== undefined && product) {
+      await registrarMudancaPreco(prisma, {
+        produtoId: id,
+        usuarioId: session.sub,
+        precoAnteriorCentavos: reaisParaCentavos(antes.price),
+        precoNovoCentavos: reaisParaCentavos(product.price),
+        origem: "edicao_manual",
+      });
+    }
 
     return NextResponse.json({ product });
   } catch (err) {

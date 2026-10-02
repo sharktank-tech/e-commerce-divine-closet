@@ -74,6 +74,7 @@ model User {
   reviews   Review[]
   cart      Cart?
   wishlist  WishlistItem[]
+  historicoPreco HistoricoPreco[]
 
   @@index([email])
   @@index([role])
@@ -171,6 +172,7 @@ model Product {
   cartItems    CartItem[]
   variations   ProductVariation[]
   wishlistedBy WishlistItem[]
+  historicoPreco HistoricoPreco[]
 
   @@index([categoryId])
   @@index([isActive, featured])
@@ -433,4 +435,22 @@ model MateriaisEmbalagem {
   updated_at  DateTime   @updatedAt
 
   @@map("materiais_embalagem")
+}
+
+// Auditoria de preço: uma linha por mudança de Product.price.
+// origem: edicao_manual | recalculo_massa | import_csv
+// (import registra a criação com anterior = 0).
+model HistoricoPreco {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  produto_id              String    @db.Uuid
+  produto                 Product   @relation(fields: [produto_id], references: [id], onDelete: Cascade)
+  usuario_id              String?   @db.Uuid
+  usuario                 User?     @relation(fields: [usuario_id], references: [id], onDelete: SetNull)
+  preco_anterior_centavos Int
+  preco_novo_centavos     Int
+  origem                  String
+  criado_em               DateTime  @default(now())
+
+  @@index([produto_id, criado_em])
+  @@map("historico_preco")
 }

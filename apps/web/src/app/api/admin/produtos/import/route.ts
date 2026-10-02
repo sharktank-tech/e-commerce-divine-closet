@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { normalizarCustoCsv, temOrigemCusto } from "@/lib/import-csv";
+import { registrarMudancaPreco } from "@/lib/historico-preco";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
 // Importação em massa via planilha CSV (seção 4.3).
@@ -191,7 +192,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        await prisma.product.create({
+        const criado = await prisma.product.create({
           data: {
             name,
             slug,
@@ -206,7 +207,17 @@ export async function POST(req: NextRequest) {
             ...snapshotData,
           },
         });
+        // Auditoria de preço (item 5): criação via import entra com
+        // anterior = 0, documentando a origem do preço inicial.
+        await registrarMudancaPreco(prisma, {
+          produtoId: criado.id,
+          usuarioId: session.sub,
+          precoAnteriorCentavos: 0,
+          precoNovoCentavos: Math.round(price * 100),
+          origem: "import_csv",
+        });
         created++;
+        if (Object.keys(snapshotData).length === 0) semCusto.push(name);
         if (Object.keys(snapshotData).length === 0) semCusto.push(name);
       } catch (e) {
         errors.push(`Linha ${li + 1}: ${e instanceof Error ? e.message : "erro"}`);

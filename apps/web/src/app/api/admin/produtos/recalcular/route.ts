@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { calcularSnapshot, metricasSobrePreco } from "@/lib/precificacao-server";
+import { registrarMudancaPreco } from "@/lib/historico-preco";
 
 const bodySchema = z.object({
   // pré-visualização (sem alterar nada)
@@ -51,6 +52,13 @@ export async function POST(req: NextRequest) {
             preco_sugerido_centavos: snap.precoSugerido,
             precificacao_calculada_em: new Date(),
           },
+        });
+        await registrarMudancaPreco(prisma, {
+          produtoId: p.id,
+          usuarioId: session.sub,
+          precoAnteriorCentavos: reaisParaCentavos(p.price),
+          precoNovoCentavos: snap.precoSugerido,
+          origem: "recalculo_massa",
         });
         aplicados++;
       }
