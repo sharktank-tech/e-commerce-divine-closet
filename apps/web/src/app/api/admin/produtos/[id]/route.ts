@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
-import { discountPercent } from "@/lib/precos";
 import { aplicarExclusaoProduto } from "@/lib/produto-exclusao";
 import { normalizeImageMeta } from "@/lib/imagens";
 import { calcularSnapshot } from "@/lib/precificacao-server";
@@ -118,17 +117,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       (rest as Record<string, unknown>).imageAlts = meta.alts;
     }
 
-    // mantém discountPercent sincronizado ao trocar preço/de
-    if (rest.price !== undefined || rest.comparePrice !== undefined) {
-      const current = await prisma.product.findUnique({ where: { id } });
-      if (!current) {
-        return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
-      }
-      const price = rest.price ?? Number(current.price);
-      const compare =
-        rest.comparePrice !== undefined ? rest.comparePrice : current.comparePrice != null ? Number(current.comparePrice) : null;
-      (rest as Record<string, unknown>).discountPercent = discountPercent(price, compare);
-    }
+    // discountPercent: derivado via hook do client a partir do price/compare
+    // final (lib/desconto-sync.ts) — sem sincronismo manual aqui.
 
     // Snapshot de precificação: só recalcula quando algum campo de
     // precificação foi informado nesta requisição. Preço de venda nunca

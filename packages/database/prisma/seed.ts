@@ -1,6 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { readFileSync } from "node:fs";
+// Fonte de verdade do % de oferta (mesma de apps/web/src/lib/precos.ts,
+// aplicada via hook em lib/desconto-sync.ts — o seed usa client próprio).
+import { discountPercent } from "../../../apps/web/src/lib/precos";
 
 const prisma = new PrismaClient();
 
@@ -270,6 +273,7 @@ async function main() {
       update: {
         price: p.price,
         comparePrice: p.comparePrice ?? null,
+        discountPercent: discountPercent(p.price, p.comparePrice ?? null),
         stock: p.stock,
         featured: p.featured,
         isActive: true,
@@ -280,6 +284,7 @@ async function main() {
         description: p.description,
         price: p.price,
         comparePrice: p.comparePrice ?? null,
+        discountPercent: discountPercent(p.price, p.comparePrice ?? null),
         sku: p.sku,
         stock: p.stock,
         featured: p.featured,

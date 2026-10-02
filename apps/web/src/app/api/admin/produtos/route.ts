@@ -3,7 +3,6 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
-import { discountPercent } from "@/lib/precos";
 import { normalizeImageMeta } from "@/lib/imagens";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
@@ -146,7 +145,7 @@ export async function POST(req: NextRequest) {
         description: data.description,
         price: data.price,
         comparePrice: data.comparePrice ?? null,
-        discountPercent: discountPercent(data.price, data.comparePrice ?? null),
+        // discountPercent: derivado via hook do client (lib/desconto-sync.ts).
         sku: data.sku || null,
         stock: variations.length > 0 ? variationStock : data.stock,
         isActive: data.isActive,

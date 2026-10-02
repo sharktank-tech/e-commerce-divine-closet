@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
     const iName = col("nome");
     const iDesc = col("descricao");
     const iPrice = col("preco");
+    const iDe = col("preco_de");
     const iStock = col("estoque");
     const iCat = col("categoria");
     const iSku = col("sku");
@@ -122,6 +123,10 @@ export async function POST(req: NextRequest) {
         const sizes = iSizes >= 0 ? (cols[iSizes] || "").split("|").map((s) => s.trim()).filter(Boolean) : [];
         const colors = iColors >= 0 ? (cols[iColors] || "").split("|").map((s) => s.trim()).filter(Boolean) : [];
         const stock = iStock >= 0 ? Math.max(0, Number(cols[iStock]) || 0) : 0;
+        // preco_de (opcional): preço "de" para oferta. discountPercent é
+        // derivado via hook do client (lib/desconto-sync.ts).
+        const rawDe = iDe >= 0 ? (cols[iDe] || "").replace(",", ".") : "";
+        const comparePrice = rawDe ? Number(rawDe) : null;
 
         await prisma.product.create({
           data: {
@@ -129,6 +134,7 @@ export async function POST(req: NextRequest) {
             slug,
             description: (iDesc >= 0 && cols[iDesc]) || name,
             price,
+            comparePrice: comparePrice && comparePrice > price ? comparePrice : null,
             stock,
             sku: (iSku >= 0 && cols[iSku]) || null,
             sizes,
