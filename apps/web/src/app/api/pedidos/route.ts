@@ -12,6 +12,7 @@ import {
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
+import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { cookies } from "next/headers";
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
+export const POST = comErro(async (req: NextRequest) => {
   try {
     // Compra como convidado é permitida: sessão opcional.
     const session = await getSession(req);
@@ -357,4 +358,4 @@ export async function POST(req: NextRequest) {
     console.error("[pedidos:create]", err);
     return NextResponse.json({ error: "Erro ao finalizar pedido" }, { status: 500 });
   }
-}
+}, { rota: "pedidos" });

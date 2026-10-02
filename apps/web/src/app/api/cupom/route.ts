@@ -8,12 +8,13 @@ import {
 } from "@/lib/pedidos/calculo-total";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
+import { comErro } from "@/lib/erros";
 
 /**
  * Aplica cupom no carrinho do usuário/convidado.
  * TODO-CLIENTE: campanhas reais de cupom via admin.
  */
-export async function POST(req: NextRequest) {
+export const POST = comErro(async (req: NextRequest) => {
   try {
     const { code, subtotal } = (await req.json()) as {
       code?: string;
@@ -72,4 +73,4 @@ export async function POST(req: NextRequest) {
     console.error("[cupom]", err);
     return NextResponse.json({ error: "Erro ao validar cupom" }, { status: 500 });
   }
-}
+}, { rota: "cupom" });
