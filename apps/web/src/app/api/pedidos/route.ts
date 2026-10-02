@@ -6,6 +6,11 @@ import { processPayment } from "@/lib/pagamento";
 import { sendEmail, emails } from "@/lib/email";
 import { orderNumber, formatBRL } from "@/lib/utils";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
+import {
+  calcularPedido,
+  calcularTotalCentavos,
+  centavosParaReais,
+} from "@/lib/pedidos/calculo-total";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { cookies } from "next/headers";
 
@@ -176,15 +181,17 @@ export async function POST(req: NextRequest) {
       (s, i) => s + Number(i.product.price) * i.quantity,
       0
     );
+    const subtotalCentavos = reaisParaCentavos(subtotal);
 
     const { address: addr, payment, notes, couponCode, utm } = parsed.data;
     const methodMap = { card: "CARD", pix: "PIX", boleto: "BOLETO" } as const;
     const paymentMethod = methodMap[payment.method] || "CARD";
 
-    // Cupom — revalidado no servidor
-    let discount = 0;
-    let freeShipping = false;
+    // Cupom — revalidado no servidor. Cálculo único em
+    // lib/pedidos/calculo-total.ts — mesmo módulo que /api/cupom usa
+    // para exibir, para gravado e exibido coincidirem até o centavo.
     const appliedCouponCode = couponCode?.trim().toUpperCase() || null;
+    let cupomValido: { type: "PERCENT" | "FIXED" | "FREE_SHIPPING"; value: unknown } | null = null;
 
     if (appliedCouponCode) {
       const coupon = await prisma.coupon.findUnique({
@@ -202,22 +209,20 @@ export async function POST(req: NextRequest) {
       ) {
         return NextResponse.json({ error: "Cupom inválido" }, { status: 400 });
       }
-
-      if (coupon.type === "PERCENT") {
-        discount = (subtotal * Number(coupon.value)) / 100;
-      } else if (coupon.type === "FIXED") {
-        discount = Math.min(subtotal, Number(coupon.value));
-      } else if (coupon.type === "FREE_SHIPPING") {
-        freeShipping = true;
-      }
+      cupomValido = { type: coupon.type, value: coupon.value };
     }
 
+    const { descontoCentavos, freteCentavos } = calcularPedido(
+      subtotalCentavos,
+      cupomValido,
+      shippingConfig
+    );
     // TODO-CLIENTE: tabela de frete real da transportadora
-    const shipping =
-      freeShipping || subtotal >= shippingConfig.freeFrom
-        ? 0
-        : shippingConfig.fixed;
-    const total = Math.max(0, subtotal - discount) + shipping;
+    const discount = centavosParaReais(descontoCentavos);
+    const shipping = centavosParaReais(freteCentavos);
+    const total = centavosParaReais(
+      calcularTotalCentavos(subtotalCentavos, descontoCentavos, freteCentavos)
+    );
 
     const address = await prisma.address.create({
       data: {
@@ -244,9 +249,9 @@ export async function POST(req: NextRequest) {
         paymentStatus: "PENDING",
         paymentMethod,
         couponCode: appliedCouponCode,
-        subtotal,
+        subtotal: centavosParaReais(subtotalCentavos),
         shipping,
-        discount: Math.round(discount * 100) / 100,
+        discount,
         total,
         notes: notes || null,
         utmSource: utm?.source || null,

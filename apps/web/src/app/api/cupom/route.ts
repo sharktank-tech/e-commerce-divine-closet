@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/utils";
 import { shipping as shippingConfig } from "@/config/defaults";
+import {
+  calcularPedido,
+  centavosParaReais,
+} from "@/lib/pedidos/calculo-total";
+import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 
 /**
  * Aplica cupom no carrinho do usuário/convidado.
@@ -44,19 +49,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let discount = 0;
-    let freeShipping = false;
-
-    if (coupon.type === "PERCENT") {
-      discount = (sub * toNumber(coupon.value)) / 100;
-    } else if (coupon.type === "FIXED") {
-      discount = Math.min(sub, toNumber(coupon.value));
-    } else if (coupon.type === "FREE_SHIPPING") {
-      freeShipping = true;
-    }
-
-    const shippingCost =
-      freeShipping || sub >= shippingConfig.freeFrom ? 0 : shippingConfig.fixed;
+    // Cálculo único em lib/pedidos/calculo-total.ts — mesmo módulo que
+    // /api/pedidos usa para gravar, para exibido e gravado coincidirem.
+    const { descontoCentavos, freteGratis, freteCentavos } = calcularPedido(
+      reaisParaCentavos(sub),
+      { type: coupon.type, value: coupon.value },
+      shippingConfig
+    );
+    const shippingCost = centavosParaReais(freteCentavos);
 
     return NextResponse.json({
       coupon: {
@@ -64,8 +64,8 @@ export async function POST(req: NextRequest) {
         type: coupon.type,
         value: toNumber(coupon.value),
       },
-      discount: Math.round(discount * 100) / 100,
-      freeShipping,
+      discount: centavosParaReais(descontoCentavos),
+      freeShipping: freteGratis,
       shipping: shippingCost,
     });
   } catch (err) {
