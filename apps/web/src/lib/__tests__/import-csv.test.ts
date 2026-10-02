@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizarCustoCsv, temOrigemCusto } from "@/lib/import-csv";
+import { normalizarCustoCsv, temOrigemCusto, adicionarSemCusto } from "@/lib/import-csv";
 
 describe("normalizarCustoCsv", () => {
   it("tudo vazio: sem origem, sem erro", () => {
@@ -56,5 +56,27 @@ describe("normalizarCustoCsv", () => {
     expect(erro).toBeNull();
     expect(custo.extrasCentavos).toBe(300);
     expect(temOrigemCusto(custo)).toBe(false);
+  });
+});
+
+describe("adicionarSemCusto", () => {
+  it("mesmo produto registrado duas vezes aparece uma vez", () => {
+    const lista: string[] = [];
+    adicionarSemCusto(lista, "Vestido X", false);
+    adicionarSemCusto(lista, "Vestido X", false);
+    expect(lista).toEqual(["Vestido X"]);
+  });
+
+  it("com snapshot não entra na lista", () => {
+    const lista: string[] = [];
+    adicionarSemCusto(lista, "Vestido Y", true);
+    expect(lista).toEqual([]);
+  });
+
+  it("produtos diferentes acumulam", () => {
+    const lista: string[] = [];
+    adicionarSemCusto(lista, "Vestido X", false);
+    adicionarSemCusto(lista, "Vestido Z", false);
+    expect(lista).toEqual(["Vestido X", "Vestido Z"]);
   });
 });

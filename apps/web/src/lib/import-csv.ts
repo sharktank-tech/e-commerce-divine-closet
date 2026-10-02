@@ -33,6 +33,17 @@ export function temOrigemCusto(c: CustoCsv): boolean {
   return !!(c.loteId || c.loteNome || c.custoPecaCentavos != null);
 }
 
+// Acumula o relatório pós-import sem duplicar o mesmo produto — mesmo que
+// o chamador registre a linha mais de uma vez, cada nome aparece uma vez.
+export function adicionarSemCusto(
+  lista: string[],
+  nome: string,
+  temSnapshot: boolean
+): string[] {
+  if (!temSnapshot && !lista.includes(nome)) lista.push(nome);
+  return lista;
+}
+
 export function normalizarCustoCsv(raw: {
   lote_id?: string;
   lote?: string;

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
-import { normalizarCustoCsv, temOrigemCusto } from "@/lib/import-csv";
+import { normalizarCustoCsv, temOrigemCusto, adicionarSemCusto } from "@/lib/import-csv";
 import { registrarMudancaPreco } from "@/lib/historico-preco";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
@@ -217,8 +217,7 @@ export async function POST(req: NextRequest) {
           origem: "import_csv",
         });
         created++;
-        if (Object.keys(snapshotData).length === 0) semCusto.push(name);
-        if (Object.keys(snapshotData).length === 0) semCusto.push(name);
+        adicionarSemCusto(semCusto, name, Object.keys(snapshotData).length > 0);
       } catch (e) {
         errors.push(`Linha ${li + 1}: ${e instanceof Error ? e.message : "erro"}`);
       }

@@ -99,7 +99,9 @@ export default function AdminProdutosPage() {
           (data.errors?.length ? ` — ${data.errors.length} erro(s)` : "") +
           (data.semCusto?.length ? ` — ${data.semCusto.length} sem custo (${data.semCusto.slice(0, 3).join(", ")}${data.semCusto.length > 3 ? ", …" : ""})` : "")
       );
-      if (data.created > 0) {
+      // Fecha o painel só quando não há nada a ler; com erros ou semCusto,
+      // o relatório precisa continuar visível.
+      if (data.created > 0 && !data.errors?.length && !data.semCusto?.length) {
         setCsvText("");
         setShowImport(false);
       }
