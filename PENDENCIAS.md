@@ -97,9 +97,12 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 ### Integração com ERP/envio
 - Webhooks para transportadoras ainda em estudo.
 
-## 🔧 Dívida técnica — backlog de código (não corrigir sem avisar)
+## 🔧 Dívida técnica — backlog de código
 
-### Consolidar conversões monetárias duplicadas (registrado em 2026-10-02)
+### Consolidar conversões monetárias duplicadas ✅ RESOLVIDO em 2026-10-02
+- Resolvido pelos commits `3fcb400` (helper cliente `lib/moeda-input.ts` + 5 usos) e `d09ce68` (3 usos servidor via `reaisParaCentavos` da lib).
+- Mantido de propósito com contrato próprio: `parseReais` em `lib/import-csv.ts` (sinaliza `null`/`"invalido"` em vez de número).
+- Entrada original registrada em 2026-10-02, antes da consolidação.
 - Fonte de verdade: `reaisParaCentavos` em `apps/web/src/lib/carrinho-revalidacao.ts` (aceita `number|string|Decimal`, usada pelas rotas carrinho/pedidos/cupom, `[id]` e por `lib/pedidos/calculo-total.ts`).
 - Duplicações conhecidas (mesmo nome ou mesma fórmula, contratos ligeiramente diferentes — unificar preservando cada contrato):
   - `apps/web/src/app/api/admin/produtos/recalcular/route.ts:15-18` — cópia local idêntica à da lib; trocar pelo import (caso mais simples, sem divergência de contrato).

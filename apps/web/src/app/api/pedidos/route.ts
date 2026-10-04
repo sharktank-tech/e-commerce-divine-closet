@@ -12,6 +12,7 @@ import {
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
+import { invalidarCupom, obterCupom } from "@/lib/cupom-cache";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { shipping as shippingConfig } from "@/config/defaults";
@@ -195,9 +196,7 @@ export const POST = comErro(async (req: NextRequest) => {
     let cupomValido: { type: "PERCENT" | "FIXED" | "FREE_SHIPPING"; value: unknown } | null = null;
 
     if (appliedCouponCode) {
-      const coupon = await prisma.coupon.findUnique({
-        where: { code: appliedCouponCode },
-      });
+      const { cupom: coupon } = await obterCupom(appliedCouponCode);
       const now = new Date();
       // Mesma regra de /api/cupom (lib/elegibilidade-cupom.ts); aqui
       // qualquer motivo vira 400 com a mensagem única desta rota.
@@ -292,6 +291,9 @@ export const POST = comErro(async (req: NextRequest) => {
           where: { code: appliedCouponCode },
           data: { usedCount: { increment: 1 } },
         });
+        // usedCount mudou: tira do cache (relevante p/ cupons com limite,
+        // que aliás nem entram no cache — só ilimitados são guardados).
+        invalidarCupom(appliedCouponCode);
       }
 
       for (const item of cart.items) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
+import { invalidarCupom } from "@/lib/cupom-cache";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -33,6 +34,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       },
     });
 
+    invalidarCupom(coupon.code);
     return NextResponse.json({ coupon });
   } catch (err) {
     console.error("[admin:cupom:patch]", err);
@@ -46,10 +48,15 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     if (!session) return forbidden();
 
     const { id } = await params;
+    const alvo = await prisma.coupon.findUnique({
+      where: { id },
+      select: { code: true },
+    });
     await prisma.coupon.update({
       where: { id },
       data: { deletedAt: new Date(), active: false },
     });
+    if (alvo) invalidarCupom(alvo.code);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[admin:cupom:delete]", err);

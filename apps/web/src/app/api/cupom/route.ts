@@ -8,6 +8,7 @@ import {
 } from "@/lib/pedidos/calculo-total";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
+import { obterCupom } from "@/lib/cupom-cache";
 import { comErro } from "@/lib/erros";
 
 /**
@@ -25,9 +26,10 @@ export const POST = comErro(async (req: NextRequest) => {
       return NextResponse.json({ error: "Informe o código do cupom" }, { status: 400 });
     }
 
-    const coupon = await prisma.coupon.findUnique({
-      where: { code: code.trim().toUpperCase() },
-    });
+    // Leitura com cache (só ilimitados; com limite sempre lê do banco).
+    // Header x-cupom-cache (HIT/MISS) é observabilidade aditiva.
+    const { cupom: coupon, origem } = await obterCupom(code.trim());
+    const cabecalhoCache = { "x-cupom-cache": origem === "cache" ? "HIT" : "MISS" };
 
     const now = new Date();
     const sub = Number(subtotal || 0);
@@ -40,10 +42,10 @@ export const POST = comErro(async (req: NextRequest) => {
           {
             error: `Cupom exige pedido mínimo de R$ ${toNumber(coupon.minSubtotal).toFixed(2)}`,
           },
-          { status: 400 }
+          { status: 400, headers: cabecalhoCache }
         );
       }
-      return NextResponse.json({ error: "Cupom inválido ou expirado" }, { status: 404 });
+      return NextResponse.json({ error: "Cupom inválido ou expirado" }, { status: 404, headers: cabecalhoCache });
     }
     if (!coupon) {
       // Inalcançável (elegibilidade já cobre nulo); guarda de tipo.
@@ -59,16 +61,19 @@ export const POST = comErro(async (req: NextRequest) => {
     );
     const shippingCost = centavosParaReais(freteCentavos);
 
-    return NextResponse.json({
-      coupon: {
-        code: coupon.code,
-        type: coupon.type,
-        value: toNumber(coupon.value),
+    return NextResponse.json(
+      {
+        coupon: {
+          code: coupon.code,
+          type: coupon.type,
+          value: toNumber(coupon.value),
+        },
+        discount: centavosParaReais(descontoCentavos),
+        freeShipping: freteGratis,
+        shipping: shippingCost,
       },
-      discount: centavosParaReais(descontoCentavos),
-      freeShipping: freteGratis,
-      shipping: shippingCost,
-    });
+      { headers: cabecalhoCache }
+    );
   } catch (err) {
     console.error("[cupom]", err);
     return NextResponse.json({ error: "Erro ao validar cupom" }, { status: 500 });

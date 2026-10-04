@@ -44,6 +44,15 @@ npm run dev
 - Loja: http://localhost:3000
 - Admin: http://localhost:3000/admin/login
 
+### Variáveis de ambiente que o servidor precisa enxergar
+- O middleware edge (`src/middleware.ts`) lê `process.env.JWT_SECRET` **no momento da requisição** e não carrega `.env` sozinho — ao rodar o servidor local, exporte no shell:
+  ```bash
+  export JWT_SECRET="$(grep '^JWT_SECRET=' .env | cut -d'"' -f2)"
+  ```
+  Sem isso, sessões admin válidas são rejeitadas com 401 nas rotas `/admin/*` e `/api/admin/*` (as rotas Node carregam o `.env` da raiz por conta própria, o edge não).
+- Em produção (Vercel), basta definir as variáveis no dashboard — valem para build e runtime.
+- `FONTCONFIG_FILE` só é necessário para os scripts locais de verificação com Chromium headless, não para rodar a loja.
+
 ## Credenciais do seed
 
 | Perfil | E-mail | Senha |
