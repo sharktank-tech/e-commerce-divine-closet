@@ -132,3 +132,12 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 **E2E:** homologado ao vivo com pedido real e limpeza total (resíduo zero) nos itens 2, 3, 4, 5, 6 (PERCENT) e 7 (FIXED).
 **Suíte no fechamento:** 164 testes em 23 arquivos, todos passando; typecheck, lint e build limpos.
 **Detalhes por versão:** ver `CHANGELOG.md`.
+
+## ✅ FECHADO — Fase 3: validação, erros e cache (2026-10-02)
+
+- [x] Item 8 — Validador central de campos (`lib/validacao.ts`) sem breaking change (`c215aab`)
+- [x] Item 9 — `AppError` + wrapper `comErro` fiado em cupom/pedidos (`95cebb9`)
+- [x] Item 10 — Cache in-memory de cupons ilimitados + invalidação (`73740e8`)
+
+**Suíte no fechamento:** 200 testes em 26 arquivos, todos passando; typecheck, lint e build limpos.
+**Homologação do item 10:** MISS→HIT com corpos idênticos, com-limite nunca em cache, PATCH/DELETE invalidam, resíduo zero.
