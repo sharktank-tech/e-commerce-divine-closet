@@ -137,7 +137,12 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 
 - [x] Item 8 — Validador central de campos (`lib/validacao.ts`) sem breaking change (`c215aab`)
 - [x] Item 9 — `AppError` + wrapper `comErro` fiado em cupom/pedidos (`95cebb9`)
-- [x] Item 10 — Cache in-memory de cupons ilimitados + invalidação (`73740e8`)
+- [x] Item 10 — Cache de cupons (Fase 3) (`73740e8`, código; `6018010`, registro)
+  - Rotas:
+    - `POST /api/cupom` → retorna header `x-cupom-cache: HIT | MISS`
+    - `PATCH /api/admin/cupons/[id]` → invalida cache
+    - `DELETE /api/admin/cupons/[id]` → invalida + remove cupom
+  - Status: 200/200 testes, HIT/MISS/invalidação validados ao vivo, resíduo zero
 
 **Suíte no fechamento:** 200 testes em 26 arquivos, todos passando; typecheck, lint e build limpos.
 **Homologação do item 10:** MISS→HIT com corpos idênticos, com-limite nunca em cache, PATCH/DELETE invalidam, resíduo zero.
