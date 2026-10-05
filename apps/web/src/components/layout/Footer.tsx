@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { buildMenu } from "@/lib/categorias";
 import { payment } from "@/config/defaults";
+import { getEmpresa } from "@/lib/config-loja";
 
 async function getMenuLinks() {
   try {
@@ -39,25 +40,41 @@ async function getMenuLinks() {
 }
 
 export async function Footer() {
-  const catLinks = await getMenuLinks();
+  const [catLinks, empresa] = await Promise.all([getMenuLinks(), getEmpresa()]);
+  const partes = empresa.name.split(" ");
+  const temContato = empresa.email || empresa.phone || empresa.address;
   return (
     <footer className="bg-primary-950 text-white">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
           <p className="flex items-center gap-2.5 font-display text-xl font-bold text-white">
             <img
-              src="/logo.png"
-              alt="Divine Closet"
+              src={empresa.logoUrl || "/logo.png"}
+              alt={empresa.name}
               className="h-9 w-9 rounded-full object-cover ring-2 ring-white/20"
             />
             <span>
-              Divine<span className="text-accent-300">Closet</span>
+              {partes.length > 1 ? (
+                <>
+                  {partes.slice(0, -1).join(" ")}{" "}
+                  <span className="text-accent-300">{partes[partes.length - 1]}</span>
+                </>
+              ) : (
+                empresa.name
+              )}
             </span>
           </p>
           <p className="mt-3 max-w-sm text-sm leading-relaxed text-primary-200">
             Moda que eleva o seu dia a dia. Peças selecionadas com cuidado,
             entrega para todo o Brasil e troca fácil em 30 dias.
           </p>
+          {temContato && (
+            <ul className="mt-4 space-y-1 text-sm text-primary-200">
+              {empresa.email && <li>{empresa.email}</li>}
+              {empresa.phone && <li>{empresa.phone}</li>}
+              {empresa.address && <li>{empresa.address}</li>}
+            </ul>
+          )}
         </div>
 
         <div>
@@ -85,7 +102,7 @@ export async function Footer() {
       </div>
 
       <div className="border-t border-white/10 py-5 text-center text-xs text-primary-300">
-        © {new Date().getFullYear()} Divine Closet — Todos os direitos reservados.
+        © {new Date().getFullYear()} {empresa.name} — Todos os direitos reservados.
         {payment.driver === "mock" && " Pagamento em sandbox (modo dev)."}
       </div>
     </footer>

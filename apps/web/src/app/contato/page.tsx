@@ -1,13 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { institutional } from "@/config/defaults";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
+type EmpresaContato = {
+  name: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  address: string;
+};
+
 export default function ContatoPage() {
   const [sent, setSent] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", message: "" });
+  const [empresa, setEmpresa] = useState<EmpresaContato | null>(null);
+
+  // Dados do painel (/admin/configuracoes → empresa); mock só enquanto carrega.
+  useEffect(() => {
+    fetch("/api/config-loja")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.empresa) setEmpresa(d.empresa);
+      })
+      .catch(() => {});
+  }, []);
+
+  const contato: EmpresaContato = empresa ?? {
+    name: "Divine Closet",
+    email: institutional.contact.email,
+    phone: institutional.contact.phone,
+    whatsapp: institutional.contact.whatsapp,
+    address: institutional.contact.address,
+  };
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,28 +50,30 @@ export default function ContatoPage() {
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-ink/10 bg-white p-4">
           <p className="text-xs uppercase tracking-wide text-ink-mute">E-mail</p>
-          <p className="mt-1 text-sm font-medium">{institutional.contact.email}</p>
+          <p className="mt-1 text-sm font-medium">{contato.email}</p>
         </div>
         <div className="rounded-xl border border-ink/10 bg-white p-4">
           <p className="text-xs uppercase tracking-wide text-ink-mute">Telefone</p>
-          <p className="mt-1 text-sm font-medium">{institutional.contact.phone}</p>
+          <p className="mt-1 text-sm font-medium">{contato.phone}</p>
         </div>
-        <div className="rounded-xl border border-ink/10 bg-white p-4">
-          <p className="text-xs uppercase tracking-wide text-ink-mute">WhatsApp</p>
-          <p className="mt-1 text-sm font-medium">
-            <a
-              href={`https://wa.me/55${institutional.contact.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent("Olá! Vim pelo site da Divine Closet.")}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary-700 hover:underline"
-            >
-              {institutional.contact.whatsapp}
-            </a>
-          </p>
-        </div>
+        {contato.whatsapp && (
+          <div className="rounded-xl border border-ink/10 bg-white p-4">
+            <p className="text-xs uppercase tracking-wide text-ink-mute">WhatsApp</p>
+            <p className="mt-1 text-sm font-medium">
+              <a
+                href={`https://wa.me/55${contato.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(`Olá! Vim pelo site da ${contato.name}.`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary-700 hover:underline"
+              >
+                {contato.whatsapp}
+              </a>
+            </p>
+          </div>
+        )}
       </div>
 
-      <p className="mt-4 text-sm text-ink-mute">{institutional.contact.address}</p>
+      <p className="mt-4 text-sm text-ink-mute">{contato.address}</p>
 
       {sent ? (
         <div className="mt-8 rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-800">

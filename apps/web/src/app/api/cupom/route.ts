@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/utils";
-import { shipping as shippingConfig } from "@/config/defaults";
+import { getFrete } from "@/lib/config-loja";
 import {
   calcularPedido,
   centavosParaReais,
@@ -52,12 +52,11 @@ export const POST = comErro(async (req: NextRequest) => {
       return NextResponse.json({ error: "Cupom inválido ou expirado" }, { status: 404 });
     }
 
-    // Cálculo único em lib/pedidos/calculo-total.ts — mesmo módulo que
-    // /api/pedidos usa para gravar, para exibido e gravado coincidirem.
+    // Frete do painel (Setting.frete) — cai no padrão se não configurado.
     const { descontoCentavos, freteGratis, freteCentavos } = calcularPedido(
       reaisParaCentavos(sub),
       { type: coupon.type, value: coupon.value },
-      shippingConfig
+      await getFrete()
     );
     const shippingCost = centavosParaReais(freteCentavos);
 

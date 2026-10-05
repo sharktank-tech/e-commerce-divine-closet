@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { shipping } from "@/config/defaults";
+import { getFrete } from "@/lib/config-loja";
 import { validarCep } from "@/lib/validacao";
 
 // TODO-CLIENTE: substituir por API real da transportadora (Correios/Melhor Envio).
@@ -17,14 +17,16 @@ export async function GET(req: NextRequest) {
 
   const d = Number(cep[0]);
   const [minDays, maxDays] = d <= 3 ? [3, 5] : d <= 6 ? [5, 8] : [7, 12];
-  const freeShipping = subtotal >= shipping.freeFrom;
-  const price = freeShipping ? 0 : shipping.fixed;
+  // Frete do painel (Setting.frete) — cai no padrão se não configurado.
+  const freteCfg = await getFrete();
+  const freeShipping = subtotal >= freteCfg.freeFrom;
+  const price = freeShipping ? 0 : freteCfg.fixed;
 
   return NextResponse.json({
     cep,
     subtotal,
     freeShipping,
-    freeFrom: shipping.freeFrom,
+    freeFrom: freteCfg.freeFrom,
     delivery: [
       {
         id: "padrao",

@@ -28,6 +28,7 @@ export default function CarrinhoPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [subtotal, setSubtotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [freteCfg, setFreteCfg] = useState<{ fixed: number; freeFrom: number } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -45,6 +46,13 @@ export default function CarrinhoPage() {
 
   useEffect(() => {
     load();
+    // Frete do painel; defaults locais até carregar.
+    fetch("/api/config-loja")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.frete) setFreteCfg(d.frete);
+      })
+      .catch(() => {});
   }, []);
 
   async function updateQty(itemId: string, quantity: number) {
@@ -61,10 +69,11 @@ export default function CarrinhoPage() {
     load();
   }
 
+  const frete = freteCfg ?? shippingConfig;
   const shipping =
-    subtotal >= shippingConfig.freeFrom || subtotal === 0
+    subtotal >= frete.freeFrom || subtotal === 0
       ? 0
-      : shippingConfig.fixed;
+      : frete.fixed;
   const total = subtotal + shipping;
 
   if (loading) {
@@ -172,9 +181,9 @@ export default function CarrinhoPage() {
             </div>
           </dl>
 
-          {subtotal < shippingConfig.freeFrom && subtotal > 0 && (
+          {subtotal < frete.freeFrom && subtotal > 0 && (
             <p className="mt-3 rounded-lg bg-primary-50 p-3 text-xs text-primary-800">
-              Faltam {formatBRL(shippingConfig.freeFrom - subtotal)} para frete
+              Faltam {formatBRL(frete.freeFrom - subtotal)} para frete
               grátis.
             </p>
           )}

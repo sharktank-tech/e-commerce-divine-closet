@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 
 type Settings = {
-  empresa: { name: string; cnpj: string; email: string; phone: string; address: string; logoUrl: string };
+  empresa: { name: string; cnpj: string; email: string; phone: string; whatsapp: string; address: string; logoUrl: string };
   pixels: { metaPixelId: string; googleAdsId: string; ga4Id: string };
   frete: { fixed: number; freeFrom: number; prazoDias: string };
   pagamento: { card: boolean; pix: boolean; boleto: boolean };
@@ -97,6 +97,7 @@ export default function AdminConfiguracoesPage() {
           <Input label="CNPJ" value={settings.empresa.cnpj} onChange={(v) => set("empresa", { cnpj: v })} />
           <Input label="E-mail" value={settings.empresa.email} onChange={(v) => set("empresa", { email: v })} />
           <Input label="Telefone" value={settings.empresa.phone} onChange={(v) => set("empresa", { phone: v })} />
+          <Input label="WhatsApp" value={settings.empresa.whatsapp || ""} onChange={(v) => set("empresa", { whatsapp: v })} placeholder="(11) 99999-0000" />
           <div className="sm:col-span-2">
             <Input label="Endereço" value={settings.empresa.address} onChange={(v) => set("empresa", { address: v })} />
           </div>

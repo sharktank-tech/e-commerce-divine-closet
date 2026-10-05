@@ -12,10 +12,10 @@ import {
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
+import { getFrete, getPagamento } from "@/lib/config-loja";
 import { obterCupom } from "@/lib/cupom-cache";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
-import { shipping as shippingConfig } from "@/config/defaults";
 import { cookies } from "next/headers";
 
 const checkoutSchema = z.object({
@@ -193,6 +193,13 @@ export const POST = comErro(async (req: NextRequest) => {
     const methodMap = { card: "CARD", pix: "PIX", boleto: "BOLETO" } as const;
     const paymentMethod = methodMap[payment.method] || "CARD";
 
+    // Forma de pagamento precisa estar habilitada no painel.
+    const formas = await getPagamento();
+    const formaId = (payment.method || "card") as keyof typeof formas;
+    if (!formas[formaId]) {
+      return NextResponse.json({ error: "Forma de pagamento indisponível" }, { status: 400 });
+    }
+
     // Cupom — revalidado no servidor. Cálculo único em
     // lib/pedidos/calculo-total.ts — mesmo módulo que /api/cupom usa
     // para exibir, para gravado e exibido coincidirem até o centavo.
@@ -214,7 +221,7 @@ export const POST = comErro(async (req: NextRequest) => {
     const { descontoCentavos, freteCentavos } = calcularPedido(
       subtotalCentavos,
       cupomValido,
-      shippingConfig
+      await getFrete()
     );
     // TODO-CLIENTE: tabela de frete real da transportadora
     const discount = centavosParaReais(descontoCentavos);

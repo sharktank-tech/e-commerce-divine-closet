@@ -11,6 +11,17 @@ import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics } from "@/lib/analytics";
 
+type ConfigLoja = {
+  frete: { fixed: number; freeFrom: number };
+  pagamento: { card: boolean; pix: boolean; boleto: boolean };
+};
+
+const METODOS: Array<{ id: "card" | "pix" | "boleto"; label: string }> = [
+  { id: "card", label: "Cartão" },
+  { id: "pix", label: "Pix" },
+  { id: "boleto", label: "Boleto" },
+];
+
 type CartData = {
   items: Array<{
     id: string;
@@ -54,6 +65,28 @@ export default function CheckoutPage() {
   } | null>(null);
 
   const [method, setMethod] = useState<"card" | "pix" | "boleto">("card");
+  const [cfgLoja, setCfgLoja] = useState<ConfigLoja | null>(null);
+
+  // Frete e formas de pagamento do painel; defaults locais até carregar.
+  useEffect(() => {
+    fetch("/api/config-loja")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.frete && d?.pagamento) setCfgLoja({ frete: d.frete, pagamento: d.pagamento });
+      })
+      .catch(() => {});
+  }, []);
+
+  const freteCfg = cfgLoja?.frete ?? shippingConfig;
+  const metodosAtivos = METODOS.filter((m) => cfgLoja?.pagamento[m.id] ?? true);
+
+  // Se o painel desabilitou a forma atual, migra para a primeira ativa.
+  useEffect(() => {
+    if (cfgLoja && metodosAtivos.length > 0 && !metodosAtivos.some((m) => m.id === method)) {
+      setMethod(metodosAtivos[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfgLoja]);
   const [frete, setFrete] = useState<{ price: number; eta: string } | null>(null);
   const [freteLoading, setFreteLoading] = useState(false);
   const [freteError, setFreteError] = useState("");
@@ -135,9 +168,9 @@ export default function CheckoutPage() {
   const subtotal = cart?.subtotal || 0;
   const couponFreeShipping = !!coupon?.freeShipping;
   const shipping =
-    couponFreeShipping || subtotal >= shippingConfig.freeFrom
+    couponFreeShipping || subtotal >= freteCfg.freeFrom
       ? 0
-      : frete?.price ?? shippingConfig.fixed;
+      : frete?.price ?? freteCfg.fixed;
   const discount = coupon?.discount || 0;
   const total = Math.max(0, subtotal - discount) + shipping;
 
@@ -432,7 +465,7 @@ export default function CheckoutPage() {
               )}
               {shipping === 0 && (
                 <p className="mt-3 text-xs text-ink-mute">
-                  Este pedido tem frete grátis {couponFreeShipping ? "(cupom)" : "acima de " + formatBRL(shippingConfig.freeFrom)}.
+                  Este pedido tem frete grátis {couponFreeShipping ? "(cupom)" : "acima de " + formatBRL(freteCfg.freeFrom)}.
                 </p>
               )}
             </section>
@@ -449,13 +482,7 @@ export default function CheckoutPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-3 gap-2">
-                  {(
-                    [
-                      ["card", "Cartão"],
-                      ["pix", "Pix"],
-                      ["boleto", "Boleto"],
-                    ] as const
-                  ).map(([id, label]) => (
+                  {metodosAtivos.map(({ id, label }) => (
                     <button
                       key={id}
                       type="button"
@@ -470,6 +497,11 @@ export default function CheckoutPage() {
                     </button>
                   ))}
                 </div>
+                {metodosAtivos.length === 0 && (
+                  <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">
+                    Nenhuma forma de pagamento habilitada no momento.
+                  </p>
+                )}
 
                 {method === "card" && (
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -647,7 +679,7 @@ export default function CheckoutPage() {
           )}
 
           {step === STEPS.length - 1 && (
-            <Button type="submit" className="mt-5 w-full" size="lg" disabled={submitting || avisos.length > 0}>
+            <Button type="submit" className="mt-5 w-full" size="lg" disabled={submitting || avisos.length > 0 || metodosAtivos.length === 0}>
               {submitting ? "Processando..." : `Pagar ${formatBRL(total)}`}
             </Button>
           )}
