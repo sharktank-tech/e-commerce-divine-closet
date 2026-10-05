@@ -15,6 +15,8 @@ type EmpresaContato = {
 
 export default function ContatoPage() {
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [empresa, setEmpresa] = useState<EmpresaContato | null>(null);
 
@@ -38,9 +40,25 @@ export default function ContatoPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // TODO-CLIENTE: endpoint real de contato / SMTP
-    console.log("[CONTATO MOCK]", form);
-    setSent(true);
+    setSendError("");
+    setSending(true);
+    try {
+      const res = await fetch("/api/contato", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setSendError(data?.error || "Não foi possível enviar. Tente novamente.");
+        return;
+      }
+      setSent(true);
+    } catch {
+      setSendError("Erro de conexão. Tente novamente.");
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -77,14 +95,17 @@ export default function ContatoPage() {
 
       {sent ? (
         <div className="mt-8 rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-800">
-          Mensagem registrada (mock — sem envio real até configurar SMTP).
+          Mensagem enviada! Retornaremos em breve.
         </div>
       ) : (
         <form onSubmit={submit} className="mt-8 space-y-4 rounded-xl border border-ink/10 bg-white p-6">
           <Input label="Nome" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
           <Input label="E-mail" type="email" required value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
           <Input label="Mensagem" textarea required value={form.message} onChange={(v) => setForm({ ...form, message: v })} />
-          <Button type="submit">Enviar mensagem</Button>
+          {sendError && <p className="text-sm text-red-600">{sendError}</p>}
+          <Button type="submit" disabled={sending}>
+            {sending ? "Enviando..." : "Enviar mensagem"}
+          </Button>
         </form>
       )}
     </div>
