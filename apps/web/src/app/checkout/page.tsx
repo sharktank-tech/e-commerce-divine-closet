@@ -45,6 +45,13 @@ export default function CheckoutPage() {
     freeShipping: boolean;
   } | null>(null);
   const [couponError, setCouponError] = useState("");
+  const [qr, setQr] = useState<{
+    codigo: string;
+    base64: string | null;
+    ticketUrl: string | null;
+    pedido: string;
+    total: number;
+  } | null>(null);
 
   const [method, setMethod] = useState<"card" | "pix" | "boleto">("card");
   const [frete, setFrete] = useState<{ price: number; eta: string } | null>(null);
@@ -228,6 +235,17 @@ export default function CheckoutPage() {
       const data = await res.json();
 
       if (res.ok && data.ok) {
+        // Pix aguardando: exibe o QR em vez de ir ao sucesso.
+        if (data.pendente && data.payment?.qr) {
+          setQr({
+            codigo: data.payment.qr.codigo,
+            base64: data.payment.qr.base64 ?? null,
+            ticketUrl: data.payment.qr.ticketUrl ?? null,
+            pedido: data.order.number,
+            total: Number(data.order.total),
+          });
+          return;
+        }
         setStep(3);
         router.push(`/sucesso?pedido=${data.order.number}&total=${data.order.total}`);
         return;
@@ -256,6 +274,35 @@ export default function CheckoutPage() {
     return (
       <div className="mx-auto max-w-5xl px-4 py-16 text-center text-ink-mute">
         Carregando checkout...
+      </div>
+    );
+  }
+
+  if (qr) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-10 text-center sm:px-6">
+        <h1 className="font-display text-2xl font-bold text-ink">Pague com Pix</h1>
+        <p className="mt-2 text-sm text-ink-mute">
+          Pedido {qr.pedido} · {formatBRL(qr.total)} · aguardando pagamento.
+        </p>
+        {qr.base64 && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`data:image/png;base64,${qr.base64}`}
+            alt="QR Code Pix"
+            className="mx-auto mt-6 h-64 w-64"
+          />
+        )}
+        <p className="mt-4 break-all rounded-lg bg-ink/5 p-3 font-mono text-xs">{qr.codigo}</p>
+        {qr.ticketUrl && (
+          <a href={qr.ticketUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm underline">
+            Abrir no app do banco
+          </a>
+        )}
+        <p className="mt-4 text-xs text-ink-mute">
+          Após pagar, o pedido é confirmado automaticamente.{" "}
+          <Link href="/conta" className="underline">Ver meus pedidos</Link>
+        </p>
       </div>
     );
   }

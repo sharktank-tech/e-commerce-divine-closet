@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { processPayment } from "@/lib/pagamento";
-import { sendEmail, emails } from "@/lib/email";
+import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 import { orderNumber, formatBRL } from "@/lib/utils";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import {
@@ -12,7 +12,7 @@ import {
   centavosParaReais,
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
-import { invalidarCupom, obterCupom } from "@/lib/cupom-cache";
+import { obterCupom } from "@/lib/cupom-cache";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { shipping as shippingConfig } from "@/config/defaults";
@@ -30,6 +30,10 @@ const checkoutSchema = z.object({
         cvv: z.string().optional(),
       })
       .optional(),
+    // Checkout Transparente MP: token gerado no front (public key).
+    cardToken: z.string().nullish(),
+    installments: z.number().int().min(1).nullish(),
+    paymentMethodId: z.string().nullish(),
   }),
   couponCode: z.string().nullish(),
   notes: z.string().nullish(),
@@ -274,57 +278,21 @@ export const POST = comErro(async (req: NextRequest) => {
       amount: total,
       method: payment.method || "card",
       card: payment.card,
+      cardToken: payment.cardToken ?? undefined,
+      installments: payment.installments ?? undefined,
+      paymentMethodId: payment.paymentMethodId ?? undefined,
+      payerEmail: session?.email || guestEmail || undefined,
     });
 
-    if (result.success) {
+    if (result.status === "PENDING") {
+      // Pix aguardando: pedido continua PENDING com o id do pagamento; a
+      // confirmação (baixa de estoque, cupom, e-mail) chega no webhook.
       await prisma.order.update({
         where: { id: order.id },
-        data: {
-          status: "PAID",
-          paymentStatus: "PAID",
-          paymentId: result.paymentId,
-        },
+        data: { paymentId: result.paymentId },
       });
-
-      if (appliedCouponCode) {
-        await prisma.coupon.update({
-          where: { code: appliedCouponCode },
-          data: { usedCount: { increment: 1 } },
-        });
-        // usedCount mudou: tira do cache (relevante p/ cupons com limite,
-        // que aliás nem entram no cache — só ilimitados são guardados).
-        invalidarCupom(appliedCouponCode);
-      }
-
-      for (const item of cart.items) {
-        await prisma.product.update({
-          where: { id: item.product.id },
-          data: { stock: { decrement: item.quantity } },
-        });
-        // baixa também o estoque da variação correspondente
-        const vars = await prisma.productVariation.findMany({
-          where: { productId: item.product.id },
-        });
-        if (vars.length > 0) {
-          const bySize = vars.filter((v) => v.size === item.size);
-          const exact = bySize.find((v) => (v.color ?? null) === (item.color ?? null));
-          const match = exact ?? (!item.color && bySize.length === 1 ? bySize[0] : undefined);
-          if (match) {
-            await prisma.productVariation.update({
-              where: { id: match.id },
-              data: { stock: { decrement: item.quantity } },
-            });
-          }
-        }
-      }
-
-      const mail = emails.orderPaid(order.number);
-      // confirmação por e-mail não bloqueia o pedido
-      sendEmail({
-        to: session?.email || guestEmail || "",
-        subject: mail.subject,
-        text: mail.text,
-      }).catch((err) => console.error("[pedidos:email]", err));
+    } else if (result.success) {
+      await finalizarPedidoPago(order.id, result.paymentId);
     } else {
       await prisma.order.update({
         where: { id: order.id },
@@ -347,7 +315,12 @@ export const POST = comErro(async (req: NextRequest) => {
 
     if (result.success) {
       return NextResponse.json(
-        { order: finalOrder, payment: result, ok: true },
+        {
+          order: finalOrder,
+          payment: result,
+          ok: true,
+          pendente: result.status === "PENDING",
+        },
         { status: 201 }
       );
     }
