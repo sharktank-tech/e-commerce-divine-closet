@@ -164,15 +164,18 @@ export function Header() {
                   className="text-sm font-medium text-ink-soft hover:text-ink"
                   aria-label="Painel admin"
                 >
-                  Painel Admin
+                  Admin
                 </Link>
               )}
               <Link
                 href="/conta"
-                className="text-sm font-medium text-ink-soft hover:text-ink"
+                className="inline-flex items-center text-purple-700 hover:text-purple-900"
                 aria-label="Minha conta"
               >
-                Minha conta
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21c0-4 3.5-6.5 8-6.5s8 2.5 8 6.5" />
+                </svg>
               </Link>
               <button
                 onClick={logout}
@@ -239,15 +242,18 @@ export function Header() {
                     className="text-sm font-medium"
                     aria-label="Painel admin"
                   >
-                    Painel Admin
+                    Admin
                   </Link>
                 )}
                 <Link
                   href="/conta"
-                  className="text-sm font-medium"
+                  className="inline-flex items-center text-purple-700 hover:text-purple-900"
                   aria-label="Minha conta"
                 >
-                  Minha conta
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <circle cx="12" cy="8" r="4" />
+                    <path d="M4 21c0-4 3.5-6.5 8-6.5s8 2.5 8 6.5" />
+                  </svg>
                 </Link>
                 <button onClick={logout} className="text-left text-sm text-ink-mute">
                   Sair
