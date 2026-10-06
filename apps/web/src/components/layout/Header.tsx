@@ -81,6 +81,9 @@ export function Header() {
       session.role === "OPERATOR" ||
       session.role === "MARKETING");
 
+  // O admin tem chrome próprio (sidebar/topbar); o header da loja não entra.
+  if (pathname.startsWith("/admin")) return null;
+
   return (
     <header
       className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur"
