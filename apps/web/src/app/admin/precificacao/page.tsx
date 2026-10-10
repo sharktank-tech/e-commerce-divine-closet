@@ -256,22 +256,29 @@ export default function PrecificacaoPage() {
               <span className="min-w-40 flex-1 text-sm font-medium text-ink">{m.nome}</span>
               <input
                 className="w-28 rounded-lg border border-ink/15 px-3 py-2 text-sm outline-none"
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 title="Custo unitário (R$)"
                 value={editando[m.id] ?? centavosParaReais(m.custo_unitario_centavos)}
                 onChange={(e) => setEditando({ ...editando, [m.id]: e.target.value })}
                 onBlur={(e) => {
                   const v = reaisParaCentavosTexto(e.target.value);
-                  if (v !== m.custo_unitario_centavos) {
-                    patchMaterial(m.id, { custo_unitario_centavos: v });
-                  }
+                  // Limpa o rascunho e já reflete o novo valor na lista
+                  // (otimista): sem isso o campo voltava ao valor antigo
+                  // até o refetch chegar, parecendo que o digitado sumiu.
                   setEditando((ed) => {
                     const c = { ...ed };
                     delete c[m.id];
                     return c;
                   });
+                  if (v !== m.custo_unitario_centavos) {
+                    setMateriais((ms) =>
+                      ms.map((x) =>
+                        x.id === m.id ? { ...x, custo_unitario_centavos: v } : x
+                      )
+                    );
+                    patchMaterial(m.id, { custo_unitario_centavos: v });
+                  }
                 }}
               />
               <label className="flex items-center gap-1 text-xs text-ink-soft">
