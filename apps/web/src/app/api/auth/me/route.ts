@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { getSession, hashPassword, verifyPassword } from "@/lib/auth";
+import { clearSession, getSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { validarNome, validarTelefone } from "@/lib/validacao";
 
 export async function GET(req: NextRequest) {
@@ -88,5 +89,57 @@ export async function PATCH(req: NextRequest) {
   } catch (err) {
     console.error("[me:patch]", err);
     return NextResponse.json({ error: "Erro ao atualizar dados" }, { status: 500 });
+  }
+}
+
+// LGPD — eliminação: anonimiza a identidade, desativa e desloga. O
+// histórico de pedidos é preservado por obrigação fiscal, sem dados
+// pessoais (endereços também anonimizados); carrinho e wishlist apagados.
+export async function DELETE(req: NextRequest) {
+  try {
+    const session = await getSession(req);
+    if (!session) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+    if (session.role !== "CLIENT") {
+      return NextResponse.json({ error: "Disponível apenas para contas de cliente" }, { status: 403 });
+    }
+
+    const anonimo = `deleted-${randomUUID()}`;
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: session.sub },
+        data: {
+          name: "Usuário removido",
+          email: `${anonimo}@deleted.local`,
+          phone: null,
+          password: await hashPassword(randomUUID()),
+          active: false,
+          deletedAt: new Date(),
+        },
+      }),
+      prisma.address.updateMany({
+        where: { userId: session.sub },
+        data: {
+          label: "Removido",
+          street: "Removido",
+          number: "S/N",
+          complement: null,
+          neighborhood: "Removido",
+          city: "Removido",
+          state: "XX",
+          zipCode: "00000000",
+        },
+      }),
+      prisma.cartItem.deleteMany({ where: { cart: { userId: session.sub } } }),
+      prisma.cart.deleteMany({ where: { userId: session.sub } }),
+      prisma.wishlistItem.deleteMany({ where: { userId: session.sub } }),
+    ]);
+
+    await clearSession("CLIENT");
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[me:delete]", err);
+    return NextResponse.json({ error: "Erro ao excluir conta" }, { status: 500 });
   }
 }

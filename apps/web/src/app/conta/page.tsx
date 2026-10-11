@@ -283,6 +283,58 @@ function ContaContent() {
         </form>
       )}
 
+      {tab === "dados" && (
+        <div className="mt-6 space-y-4 rounded-xl border border-ink/10 bg-white p-6">
+          <p className="text-sm font-semibold text-ink">Privacidade (LGPD)</p>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const res = await fetch("/api/auth/me/exportar");
+                if (!res.ok) {
+                  setErr("Erro ao exportar dados");
+                  return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "meus-dados.json";
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Baixar meus dados
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (
+                  !confirm(
+                    "Excluir sua conta? Seus dados pessoais serão apagados (pedidos mantidos por obrigação fiscal, sem identificação)."
+                  )
+                )
+                  return;
+                if (!confirm("Confirmar exclusão definitiva da conta?")) return;
+                const res = await fetch("/api/auth/me", { method: "DELETE" });
+                if (!res.ok) {
+                  setErr("Erro ao excluir conta");
+                  return;
+                }
+                router.push("/");
+                router.refresh();
+              }}
+            >
+              Excluir minha conta
+            </Button>
+          </div>
+        </div>
+      )}
+
       {tab === "enderecos" && (
         <div className="mt-6 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
