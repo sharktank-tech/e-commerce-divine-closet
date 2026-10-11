@@ -230,23 +230,25 @@ export const POST = comErro(async (req: NextRequest) => {
       calcularTotalCentavos(subtotalCentavos, descontoCentavos, freteCentavos)
     );
 
-    const address = await prisma.address.create({
-      data: {
-        userId: session?.sub || null,
-        label: addr.label || "Principal",
-        street: addr.street,
-        number: addr.number,
-        complement: addr.complement || null,
-        neighborhood: addr.neighborhood,
-        city: addr.city,
-        state: addr.state.toUpperCase(),
-        zipCode: addr.zipCode,
-      },
-    });
+    // Criação atômica: endereço + pedido + itens nascem juntos ou nada nasce.
+    const { order } = await prisma.$transaction(async (tx) => {
+      const address = await tx.address.create({
+        data: {
+          userId: session?.sub || null,
+          label: addr.label || "Principal",
+          street: addr.street,
+          number: addr.number,
+          complement: addr.complement || null,
+          neighborhood: addr.neighborhood,
+          city: addr.city,
+          state: addr.state.toUpperCase(),
+          zipCode: addr.zipCode,
+        },
+      });
 
-    const order = await prisma.order.create({
-      data: {
-        number: orderNumber(),
+      const order = await tx.order.create({
+        data: {
+          number: orderNumber(),
         userId: session?.sub || null,
         guestEmail,
         guestName,
@@ -278,6 +280,9 @@ export const POST = comErro(async (req: NextRequest) => {
         },
       },
       include: { items: true },
+    });
+
+      return { order };
     });
 
     const result = await processPayment({
@@ -338,6 +343,10 @@ export const POST = comErro(async (req: NextRequest) => {
     );
   } catch (err) {
     console.error("[pedidos:create]", err);
+    // Perdeu a corrida pelo último item: 409 claro em vez de 500 genérico.
+    if (err instanceof Error && err.message.startsWith("Estoque insuficiente")) {
+      return NextResponse.json({ error: "Estoque insuficiente para um ou mais itens" }, { status: 409 });
+    }
     return NextResponse.json({ error: "Erro ao finalizar pedido" }, { status: 500 });
   }
 }, { rota: "pedidos" });

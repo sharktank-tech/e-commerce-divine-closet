@@ -1,8 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 
-function bancoFake(statusPagamento: string | null) {
+function bancoFake(statusPagamento: string | null, estoque = 10) {
+  const tx = {
+    $queryRawUnsafe: vi.fn(async () => []),
+    order: { update: vi.fn(async () => ({})) },
+    coupon: { update: vi.fn(async () => ({})) },
+    product: {
+      findMany: vi.fn(async () => [
+        { id: "prod-1", stock: estoque, variations: [] },
+      ]),
+      update: vi.fn(async () => ({})),
+    },
+    productVariation: { update: vi.fn(async () => ({})) },
+  };
   return {
+    $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     order: {
       findUnique: vi.fn(async () =>
         statusPagamento == null
@@ -24,14 +37,8 @@ function bancoFake(statusPagamento: string | null) {
               ],
             }
       ),
-      update: vi.fn(async () => ({})),
     },
-    coupon: { update: vi.fn(async () => ({})) },
-    product: { update: vi.fn(async () => ({})) },
-    productVariation: {
-      findMany: vi.fn(async () => []),
-      update: vi.fn(async () => ({})),
-    },
+    __tx: tx,
   };
 }
 
@@ -40,27 +47,36 @@ describe("finalizarPedidoPago", () => {
     const db = bancoFake("PENDING");
     const r = await finalizarPedidoPago("ped-1", "pay-1", db);
     expect(r).toEqual({ ok: true, jaFinalizado: false });
-    expect(db.order.update).toHaveBeenCalledWith({
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(db.__tx.order.update).toHaveBeenCalledWith({
       where: { id: "ped-1" },
       data: { status: "PAID", paymentStatus: "PAID", paymentId: "pay-1" },
     });
-    expect(db.coupon.update).toHaveBeenCalledTimes(1);
-    expect(db.product.update).toHaveBeenCalledTimes(1);
+    expect(db.__tx.coupon.update).toHaveBeenCalledTimes(1);
+    expect(db.__tx.product.update).toHaveBeenCalledTimes(1);
   });
 
   it("já PAID: idempotente, sem escrita", async () => {
     const db = bancoFake("PAID");
     const r = await finalizarPedidoPago("ped-1", "pay-1", db);
     expect(r).toEqual({ ok: true, jaFinalizado: true });
-    expect(db.order.update).not.toHaveBeenCalled();
-    expect(db.coupon.update).not.toHaveBeenCalled();
-    expect(db.product.update).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("pedido inexistente: ok false", async () => {
     const db = bancoFake(null);
     const r = await finalizarPedidoPago("x", "pay-1", db);
     expect(r).toEqual({ ok: false, jaFinalizado: false });
+  });
+
+  it("estoque insuficiente na finalização: falha sem escrever", async () => {
+    const db = bancoFake("PENDING", 1);
+    await expect(finalizarPedidoPago("ped-1", "pay-1", db)).rejects.toThrow(
+      "Estoque insuficiente"
+    );
+    expect(db.__tx.order.update).not.toHaveBeenCalled();
+    expect(db.__tx.coupon.update).not.toHaveBeenCalled();
+    expect(db.__tx.product.update).not.toHaveBeenCalled();
   });
 });
 
