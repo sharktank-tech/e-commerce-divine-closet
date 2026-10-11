@@ -3,6 +3,7 @@ import { z } from "zod";
 import { sendEmail } from "@/lib/email";
 import { getEmpresa } from "@/lib/config-loja";
 import { validarEmail, validarNome } from "@/lib/validacao";
+import { chaveIp, respostaLimite, verificarLimite } from "@/lib/rate-limit";
 import { comErro } from "@/lib/erros";
 
 // Formulário de contato da loja: entrega a mensagem no e-mail da empresa
@@ -33,6 +34,12 @@ export const POST = comErro(async (req: NextRequest) => {
   }
 
   const empresa = await getEmpresa();
+  // 3 envios/hora por IP: endpoint público que dispara e-mail.
+  const limite = verificarLimite(chaveIp(req, "contato"), {
+    janelaMs: 3_600_000,
+    maximo: 3,
+  });
+  if (!limite.permitido) return respostaLimite(limite.resetEmMs);
   try {
     await sendEmail({
       to: empresa.email,

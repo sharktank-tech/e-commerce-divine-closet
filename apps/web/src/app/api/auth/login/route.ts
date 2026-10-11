@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { setSession, verifyPassword } from "@/lib/auth";
+import { chaveIp, respostaLimite, verificarLimite } from "@/lib/rate-limit";
 
 const schema = z.object({
   email: z.string().email(),
@@ -11,6 +12,10 @@ const schema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    // 5 tentativas/min por IP contra força bruta.
+    const limite = verificarLimite(chaveIp(req, "login"), { janelaMs: 60_000, maximo: 5 });
+    if (!limite.permitido) return respostaLimite(limite.resetEmMs);
+
     const body = await req.json();
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
