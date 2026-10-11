@@ -34,6 +34,40 @@ type CartData = {
   subtotal: number;
 };
 
+type MercadoPagoSdk = {
+  fields: {
+    createCardToken(params: {
+      cardholderName: string;
+      cardNumber: string;
+      cardExpirationMonth: string;
+      cardExpirationYear: string;
+      securityCode: string;
+    }): Promise<{ id: string }>;
+  };
+  getPaymentMethods(params: { bin: string }): Promise<{
+    results: Array<{ id: string }>;
+  }>;
+};
+
+declare global {
+  interface Window {
+    MercadoPago?: new (publicKey: string, opts?: { locale?: string }) => MercadoPagoSdk;
+  }
+}
+
+function carregarSdkMp(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.MercadoPago) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://sdk.mercadopago.com/js/v2";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("sdk"));
+    document.head.appendChild(s);
+  });
+}
+
 type MeUser = { email: string; name: string } | null;
 
 const STEPS = ["Identificação", "Endereço", "Frete", "Pagamento"];
@@ -65,7 +99,28 @@ export default function CheckoutPage() {
   } | null>(null);
 
   const [method, setMethod] = useState<"card" | "pix" | "boleto">("card");
+  const [parcelas, setParcelas] = useState("1");
+  const [mpKey, setMpKey] = useState<string | null>(null);
+  const [mpPronto, setMpPronto] = useState(false);
   const [cfgLoja, setCfgLoja] = useState<ConfigLoja | null>(null);
+
+  // Modo Mercado Pago: public key presente → tokeniza o cartão no front
+  // (o PAN nunca chega ao nosso servidor). Ausente → fluxo mock legado.
+  useEffect(() => {
+    fetch("/api/pagamentos/public-key")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.publicKey) {
+          setMpKey(d.publicKey);
+          carregarSdkMp()
+            .then(() => setMpPronto(true))
+            .catch(() => setMpPronto(false));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const mpAtivo = mpKey !== null;
 
   // Frete e formas de pagamento do painel; defaults locais até carregar.
   useEffect(() => {
@@ -234,12 +289,56 @@ export default function CheckoutPage() {
     }
   }
 
+  async function tokenizarCartao(): Promise<{ token: string; bandeira: string }> {
+    if (!mpKey || !window.MercadoPago) {
+      throw new Error("Mercado Pago indisponível. Tente novamente.");
+    }
+    const numero = form.cardNumber.replace(/\D/g, "");
+    const [mes, ano] = form.cardExpiry.split("/");
+    if (numero.length < 13 || !mes || !ano) {
+      throw new Error("Verifique número e validade do cartão.");
+    }
+    const mp = new window.MercadoPago(mpKey, { locale: "pt-BR" });
+    const metodos = await mp.getPaymentMethods({ bin: numero.slice(0, 6) });
+    const bandeira = metodos.results?.[0]?.id;
+    if (!bandeira) throw new Error("Bandeira não identificada para este cartão.");
+    const anoCompleto = ano.length === 2 ? `20${ano}` : ano;
+    const { id } = await mp.fields.createCardToken({
+      cardholderName: form.cardName,
+      cardNumber: numero,
+      cardExpirationMonth: mes,
+      cardExpirationYear: anoCompleto,
+      securityCode: form.cardCvv.replace(/\D/g, ""),
+    });
+    if (!id) throw new Error("Falha ao tokenizar o cartão.");
+    return { token: id, bandeira };
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSubmitting(true);
 
     try {
+      // No modo MP, o cartão vai tokenizado (nunca o número cru).
+      let pagamentoExtra = {};
+      if (method === "card" && mpAtivo) {
+        if (!mpPronto) {
+          setError("Carregando Mercado Pago, aguarde e tente de novo.");
+          return;
+        }
+        try {
+          const { token, bandeira } = await tokenizarCartao();
+          pagamentoExtra = {
+            cardToken: token,
+            installments: Number(parcelas) || 1,
+            paymentMethodId: bandeira,
+          };
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Cartão inválido.");
+          return;
+        }
+      }
       const res = await fetch("/api/pedidos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -255,9 +354,10 @@ export default function CheckoutPage() {
           },
           payment: {
             method,
-            ...(method === "card"
+            ...(method === "card" && !mpAtivo
               ? { card: { number: form.cardNumber, name: form.cardName } }
               : {}),
+            ...pagamentoExtra,
           },
           couponCode: coupon?.code || null,
           notes: form.notes || null,
@@ -505,10 +605,17 @@ export default function CheckoutPage() {
 
                 {method === "card" && (
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <p className="sm:col-span-2 text-xs text-ink-mute">
-                      Use um cartão iniciado em <strong>4000</strong> para simular recusa.
-                      Qualquer outro número aprova.
-                    </p>
+                    {mpAtivo ? (
+                      <p className="sm:col-span-2 text-xs text-ink-mute">
+                        Pagamento processado pelo Mercado Pago. O número do cartão
+                        é tokenizado no seu navegador e nunca passa pelos nossos servidores.
+                      </p>
+                    ) : (
+                      <p className="sm:col-span-2 text-xs text-ink-mute">
+                        Use um cartão iniciado em <strong>4000</strong> para simular recusa.
+                        Qualquer outro número aprova.
+                      </p>
+                    )}
                     <div className="sm:col-span-2">
                       <Input label="Nome no cartão" required value={form.cardName} onChange={(v) => set("cardName", v)} />
                     </div>
@@ -523,6 +630,24 @@ export default function CheckoutPage() {
                     </div>
                     <Input label="Validade" required placeholder="MM/AA" value={form.cardExpiry} onChange={(v) => set("cardExpiry", v)} />
                     <Input label="CVV" required placeholder="123" value={form.cardCvv} onChange={(v) => set("cardCvv", v)} />
+                    {mpAtivo && (
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block text-xs font-medium text-ink-soft">
+                          Parcelas
+                        </label>
+                        <select
+                          value={parcelas}
+                          onChange={(e) => setParcelas(e.target.value)}
+                          className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm outline-none focus:border-ink/40"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((n) => (
+                            <option key={n} value={n}>
+                              {n}x
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
 
