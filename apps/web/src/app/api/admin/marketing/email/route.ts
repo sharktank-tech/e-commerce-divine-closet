@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
@@ -36,6 +37,8 @@ export async function POST(req: NextRequest) {
 
     await prisma.auditLog.create({
       data: {
+        // id explícito: a coluna no banco está sem default (ver upload).
+        id: randomUUID(),
         userId: session.sub,
         action: "email_marketing_test",
         entity: "Setting",
