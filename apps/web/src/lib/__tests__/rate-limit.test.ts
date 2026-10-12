@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chaveIp, verificarLimite } from "@/lib/rate-limit";
+import { chaveIp, naVez, verificarLimite } from "@/lib/rate-limit";
 
 describe("verificarLimite", () => {
   it("permite até o máximo e bloqueia depois", () => {
@@ -30,8 +30,7 @@ describe("verificarLimite", () => {
   });
 });
 
-describe("chaveIp", () => {
-  const req = (headers: Record<string, string>) =>
+describe("chaveIp", () => {  const req = (headers: Record<string, string>) =>
     ({ headers: { get: (k: string) => headers[k] ?? null } }) as unknown as Request;
 
   it("prefere x-forwarded-for (primeiro IP)", () => {
@@ -42,5 +41,47 @@ describe("chaveIp", () => {
 
   it("cai para desconhecido sem headers", () => {
     expect(chaveIp(req({}), "login")).toBe("login:desconhecido");
+  });
+});
+
+describe("naVez", () => {
+  it("serializa tarefas da mesma chave (check-then-act sem corrida)", async () => {
+    let vistos: number[] = [];
+    let contador = 0;
+    const tarefa = () =>
+      naVez("fila-teste", async () => {
+        const lido = contador;
+        await new Promise((r) => setTimeout(r, 5));
+        contador = lido + 1;
+        vistos.push(contador);
+        return contador;
+      });
+    const resultados = await Promise.all(Array.from({ length: 10 }, tarefa));
+    expect(contador).toBe(10);
+    expect(resultados).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("erro numa tarefa não trava a fila", async () => {
+    const boom = () =>
+      naVez("fila-erro", async () => {
+        throw new Error("x");
+      });
+    await expect(boom()).rejects.toThrow("x");
+    expect(await naVez("fila-erro", async () => 42)).toBe(42);
+  });
+
+  it("chaves diferentes não se bloqueiam", async () => {
+    const ordem: string[] = [];
+    const lenta = () =>
+      naVez("lenta", async () => {
+        await new Promise((r) => setTimeout(r, 30));
+        ordem.push("lenta");
+      });
+    const rapida = () =>
+      naVez("rapida", async () => {
+        ordem.push("rapida");
+      });
+    await Promise.all([lenta(), rapida()]);
+    expect(ordem).toEqual(["rapida", "lenta"]);
   });
 });

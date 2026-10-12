@@ -55,3 +55,27 @@ export function chaveIp(req: Request, sufixo: string): string {
     "desconhecido";
   return `${sufixo}:${ip}`;
 }
+
+// Fila por chave: serializa tarefas assíncronas da mesma chave (uma
+// instância). Usado onde check-then-act precisa ver escritas anteriores
+// (ex.: cota) — sem isso, rajadas paralelas passam todas pelo count antes
+// de qualquer insert commitar. Entre instâncias distintas resta janela
+// residual (documentado); para rigidez total, contador com CHECK no banco.
+const filas = new Map<string, Promise<void>>();
+
+export async function naVez<T>(chave: string, fn: () => Promise<T>): Promise<T> {
+  const anterior = filas.get(chave) ?? Promise.resolve();
+  let liberar!: () => void;
+  const atual = new Promise<void>((resolve) => {
+    liberar = resolve;
+  });
+  const encadeada = anterior.then(() => atual);
+  filas.set(chave, encadeada);
+  await anterior.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    liberar();
+    if (filas.get(chave) === encadeada) filas.delete(chave);
+  }
+}
