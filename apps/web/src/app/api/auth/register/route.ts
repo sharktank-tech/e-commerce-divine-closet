@@ -18,7 +18,7 @@ const schema = z.object({
     .string()
     .email("E-mail inválido")
     .refine((v) => validarEmail(v) === "OK", "E-mail inválido"),
-  password: z.string().min(6, "Senha deve ter ao menos 6 caracteres"),
+  password: z.string().min(10, "Senha deve ter ao menos 10 caracteres"),
   phone: z
     .string()
     .optional()

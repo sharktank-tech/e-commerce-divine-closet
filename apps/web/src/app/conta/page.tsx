@@ -263,7 +263,7 @@ function ContaContent() {
             <p className="text-sm font-semibold text-ink">Alterar senha</p>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <Input label="Senha atual" type="password" value={pwd.current} onChange={(v) => setPwd((p) => ({ ...p, current: v }))} />
-              <Input label="Nova senha (mín. 6)" type="password" value={pwd.next} onChange={(v) => setPwd((p) => ({ ...p, next: v }))} />
+              <Input label="Nova senha (mín. 10)" type="password" value={pwd.next} onChange={(v) => setPwd((p) => ({ ...p, next: v }))} />
             </div>
           </div>
 

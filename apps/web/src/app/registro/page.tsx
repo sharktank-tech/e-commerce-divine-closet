@@ -72,7 +72,7 @@ export default function RegistroPage() {
           value={form.password}
           onChange={(v) => setForm({ ...form, password: v })}
           autoComplete="new-password"
-          placeholder="Mínimo 6 caracteres"
+          placeholder="Mínimo 10 caracteres"
         />
 
         {error && (

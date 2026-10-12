@@ -5,7 +5,7 @@ import { hashPassword } from "@/lib/auth";
 
 const schema = z.object({
   token: z.string().min(10, "Link inválido"),
-  password: z.string().min(6, "Nova senha deve ter ao menos 6 caracteres"),
+  password: z.string().min(10, "Nova senha deve ter ao menos 10 caracteres"),
 });
 
 export async function POST(req: NextRequest) {

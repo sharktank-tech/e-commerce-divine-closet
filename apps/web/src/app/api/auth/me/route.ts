@@ -39,7 +39,7 @@ const schema = z.object({
       "Telefone inválido"
     ),
   currentPassword: z.string().optional(),
-  newPassword: z.string().min(6, "Nova senha deve ter ao menos 6 caracteres").optional(),
+  newPassword: z.string().min(10, "Nova senha deve ter ao menos 10 caracteres").optional(),
 });
 
 export async function PATCH(req: NextRequest) {
