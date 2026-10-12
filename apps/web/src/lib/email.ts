@@ -95,10 +95,6 @@ export const emails = {
     subject: "Bem-vinda(o) à Divine Closet 💫",
     text: `Olá ${name}, sua conta foi criada com sucesso. Bom shopping!`,
   }),
-  orderCreated: (number: string, total: string) => ({
-    subject: `Pedido ${number} recebido`,
-    text: `Recebemos seu pedido ${number} no valor de ${total}. Assim que o pagamento for confirmado, você receberá uma nova atualização.`,
-  }),
   orderPaid: (number: string) => ({
     subject: `Pedido ${number} pago com sucesso`,
     text: `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
