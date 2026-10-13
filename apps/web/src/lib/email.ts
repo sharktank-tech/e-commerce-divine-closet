@@ -99,8 +99,7 @@ export const emails = {
     subject: `Pedido ${number} pago com sucesso`,
     text: `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
   }),
-  reviewRequest: (orderNumber: string, items: { name: string; url: string }[]) => ({
-    subject: `Como foi sua compra ${orderNumber}? Conte pra gente 💫`,
+  reviewRequest: (orderNumber: string, items: { name: string; url: string }[]) => ({    subject: `Como foi sua compra ${orderNumber}? Conte pra gente 💫`,
     text: [
       "Olá!",
       "",
@@ -164,5 +163,22 @@ export const emails = {
     Divine Closet — Moda que eleva o seu dia
   </div>
 </div>`,
+  }),
+  carrinhoAbandonado: (
+    name: string,
+    items: { name: string; quantity: number }[],
+    linkCarrinho: string
+  ) => ({
+    subject: "Seu carrinho te espera 🛍️",
+    text: [
+      `Olá ${name}!`,
+      "",
+      "Você deixou estes itens no carrinho:",
+      ...items.map((i) => `• ${i.quantity}× ${i.name}`),
+      "",
+      `Retome aqui: ${linkCarrinho}`,
+      "",
+      "Obrigado por comprar na Divine Closet!",
+    ].join("\n"),
   }),
 };

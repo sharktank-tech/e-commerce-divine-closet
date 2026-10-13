@@ -220,6 +220,8 @@ model Cart {
   couponCode String?
   updatedAt  DateTime @updatedAt
   createdAt  DateTime @default(now())
+  // Lembrete de abandono enviado em (null = nunca) — item 1 pós-Fase 3.
+  lembradoEm DateTime?
 
   items CartItem[]
 }
@@ -234,6 +236,7 @@ model CartItem {
   unitPrice Decimal @db.Decimal(10, 2)
   size      String?
   color     String?
+  createdAt DateTime @default(now())
 
   @@unique([cartId, productId, size, color])
 }
