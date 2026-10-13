@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { emails, sendEmail } from "@/lib/email";
 import { invalidarCupom } from "@/lib/cupom-cache";
+import { notificarErp } from "@/lib/erp";
 
 // Pós-aprovação do pedido — caminho único para confirmação síncrona
 // (mock/cartão aprovado na hora) e assíncrona (Pix via webhook do MP).
@@ -19,11 +20,15 @@ type BancoFinalizar = {
       paymentStatus: string;
       guestEmail: string | null;
       couponCode: string | null;
+      total: unknown;
+      paymentMethod: string;
       user: { email: string } | null;
       items: Array<{
         quantity: number;
         size: string | null;
         color: string | null;
+        productName: string;
+        unitPrice: unknown;
         product: { id: string };
       }>;
     } | null>;
@@ -65,6 +70,8 @@ export async function finalizarPedidoPago(
   });
   if (!order) return { ok: false, jaFinalizado: false };
   if (order.paymentStatus !== "PENDING") return { ok: true, jaFinalizado: true };
+
+  const estoquesNovos = new Map<string, number>();
 
   await db.$transaction(async (tx) => {
     const ids = [...new Set(order.items.map((i) => i.product.id))];
@@ -118,6 +125,10 @@ export async function finalizarPedidoPago(
         data: { stock: { decrement: item.quantity } },
       });
       const prod = porId.get(item.product.id);
+      estoquesNovos.set(
+        item.product.id,
+        Math.max(0, (prod?.stock ?? 0) - item.quantity)
+      );
       const bySize = (prod?.variations ?? []).filter((v) => v.size === item.size);
       const match =
         bySize.find((v) => (v.color ?? null) === (item.color ?? null)) ??
@@ -137,6 +148,22 @@ export async function finalizarPedidoPago(
     subject: mail.subject,
     text: mail.text,
   }).catch((err) => console.error("[finalizar:email]", err));
+
+  void notificarErp("pedido_pago", {
+    numero: order.number,
+    total: Number(String(order.total)),
+    metodo_pagamento: order.paymentMethod,
+    cupom: order.couponCode,
+    itens: order.items.map((i) => ({
+      produto_id: i.product.id,
+      nome: i.productName,
+      qtd: i.quantity,
+      preco_unit: Number(String(i.unitPrice)),
+    })),
+  });
+  for (const [produto_id, estoque] of estoquesNovos) {
+    void notificarErp("estoque_atualizado", { produto_id, estoque });
+  }
 
   return { ok: true, jaFinalizado: false };
 }

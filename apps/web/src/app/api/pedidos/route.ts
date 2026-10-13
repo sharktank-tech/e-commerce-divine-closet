@@ -13,6 +13,7 @@ import {
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 import { getFrete, getPagamento } from "@/lib/config-loja";
+import { notificarErp } from "@/lib/erp";
 import { obterCupom } from "@/lib/cupom-cache";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
@@ -285,6 +286,23 @@ export const POST = comErro(async (req: NextRequest) => {
       return { order };
     });
 
+    // ERP próprio (análise de vendas): fire-and-forget, nunca bloqueia.
+    void notificarErp("pedido_criado", {
+      numero: order.number,
+      total,
+      subtotal: centavosParaReais(subtotalCentavos),
+      desconto: discount,
+      frete: shipping,
+      cupom: appliedCouponCode,
+      metodo_pagamento: paymentMethod,
+      itens: cart.items.map((i) => ({
+        produto_id: i.product.id,
+        nome: i.product.name,
+        qtd: i.quantity,
+        preco_unit: Number(i.product.price),
+      })),
+    });
+
     const result = await processPayment({
       orderId: order.id,
       amount: total,
@@ -313,6 +331,10 @@ export const POST = comErro(async (req: NextRequest) => {
           paymentStatus: "FAILED",
           paymentId: result.paymentId,
         },
+      });
+      void notificarErp("pedido_cancelado", {
+        numero: order.number,
+        motivo: result.message,
       });
     }
 

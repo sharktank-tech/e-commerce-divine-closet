@@ -5,6 +5,7 @@ import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { normalizarCustoCsv, temOrigemCusto, adicionarSemCusto } from "@/lib/import-csv";
 import { registrarMudancaPreco } from "@/lib/historico-preco";
+import { notificarErp } from "@/lib/erp";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { calcularSnapshot } from "@/lib/precificacao-server";
 
@@ -219,6 +220,13 @@ export async function POST(req: NextRequest) {
         });
         created++;
         adicionarSemCusto(semCusto, name, Object.keys(snapshotData).length > 0);
+        void notificarErp("produto_criado", {
+          id: criado.id,
+          nome: name,
+          preco: price,
+          estoque: stock,
+          categoria_id: categoryId,
+        });
       } catch (e) {
         errors.push(`Linha ${li + 1}: ${e instanceof Error ? e.message : "erro"}`);
       }

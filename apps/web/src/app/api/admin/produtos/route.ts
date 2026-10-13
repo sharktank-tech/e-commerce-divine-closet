@@ -5,6 +5,7 @@ import { requireAuth, forbidden } from "@/lib/auth";
 import { slugify } from "@/lib/utils";
 import { normalizeImageMeta } from "@/lib/imagens";
 import { calcularSnapshot } from "@/lib/precificacao-server";
+import { notificarErp } from "@/lib/erp";
 
 const variationSchema = z.array(
   z.object({
@@ -185,6 +186,14 @@ export async function POST(req: NextRequest) {
           : {}),
       },
       include: { category: true, variations: true },
+    });
+
+    void notificarErp("produto_criado", {
+      id: product.id,
+      nome: product.name,
+      preco: Number(data.price),
+      estoque: product.stock,
+      categoria_id: product.categoryId,
     });
 
     return NextResponse.json({ product }, { status: 201 });

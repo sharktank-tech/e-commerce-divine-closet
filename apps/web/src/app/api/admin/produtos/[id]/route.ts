@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { aplicarExclusaoProduto } from "@/lib/produto-exclusao";
 import { registrarMudancaPreco } from "@/lib/historico-preco";
+import { notificarErp } from "@/lib/erp";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
 import { normalizeImageMeta } from "@/lib/imagens";
 import { calcularSnapshot } from "@/lib/precificacao-server";
@@ -90,7 +91,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     const antes = await prisma.product.findUnique({
       where: { id },
-      select: { price: true },
+      select: { price: true, stock: true, isActive: true },
     });
     if (!antes) {
       return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
@@ -221,6 +222,32 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         precoNovoCentavos: reaisParaCentavos(product.price),
         origem: "edicao_manual",
       });
+    }
+
+    // ERP próprio: produto e/ou estoque mudados.
+    if (product) {
+      const mudouPreco =
+        rest.price !== undefined &&
+        reaisParaCentavos(antes.price) !== reaisParaCentavos(product.price);
+      const mudouEstoque =
+        rest.stock !== undefined && antes.stock !== product.stock;
+      const mudouAtivo =
+        rest.isActive !== undefined && antes.isActive !== product.isActive;
+      if (mudouPreco || mudouEstoque || mudouAtivo) {
+        void notificarErp("produto_atualizado", {
+          id: product.id,
+          nome: product.name,
+          preco: Number(String(product.price)),
+          estoque: product.stock,
+          ativo: product.isActive,
+        });
+      }
+      if (mudouEstoque) {
+        void notificarErp("estoque_atualizado", {
+          produto_id: product.id,
+          estoque: product.stock,
+        });
+      }
     }
 
     return NextResponse.json({ product });

@@ -26,12 +26,16 @@ function bancoFake(statusPagamento: string | null, estoque = 10) {
               paymentStatus: statusPagamento,
               guestEmail: "c@c.com",
               couponCode: "CUPOM10",
+              total: 199.9,
+              paymentMethod: "PIX",
               user: null,
               items: [
                 {
                   quantity: 2,
                   size: "M",
                   color: null,
+                  productName: "Blusa",
+                  unitPrice: 99.95,
                   product: { id: "prod-1" },
                 },
               ],
