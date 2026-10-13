@@ -6,6 +6,7 @@ import { ProductCard } from "@/components/loja/ProductCard";
 import { ProductSlideshow } from "@/components/loja/ProductSlideshow";
 import { FreteEstimator } from "@/components/loja/FreteEstimator";
 import { WishlistButton } from "@/components/loja/WishlistButton";
+import { TextoRico } from "@/components/loja/TextoRico";
 import { shipping, features, institutional } from "@/config/defaults";
 import { formatBRL } from "@/lib/utils";
 import { estadoEstoque, textoEstoque } from "@/lib/estoque";
@@ -297,9 +298,7 @@ export default async function ProdutoDetalhePage({
                 Descrição
               </summary>
               <div className="border-t border-ink/10 px-4 py-3">
-                <p className="whitespace-pre-line text-sm leading-relaxed text-ink-soft">
-                  {product.description}
-                </p>
+                <TextoRico texto={product.description} />
                 {(product.comprimento || product.caimento || product.ocasiao) && (
                   <dl className="mt-3 space-y-1.5 text-sm">
                     {product.comprimento && (

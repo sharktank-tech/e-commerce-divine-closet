@@ -58,6 +58,12 @@ describe("buildProductDescription", () => {
   it("nunca retorna vazio quebrado", () => {
     expect(buildProductDescription(null, null)).toBe("");
   });
+
+  it("remove markdown da descrição (snippets limpos)", () => {
+    expect(
+      buildProductDescription(null, "> O conjunto que esgotou *tudo* em horas!")
+    ).not.toMatch(/[>*_#]/);
+  });
 });
 
 describe("absoluteUrl", () => {

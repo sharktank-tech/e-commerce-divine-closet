@@ -42,7 +42,18 @@ export function buildProductDescription(
   descricao?: string | null
 ): string {
   if (metaDescription && metaDescription.trim() !== "") {
-    return truncate(metaDescription, 160);
+    return truncate(tirarMarkdown(metaDescription), 160);
   }
-  return truncate(descricao || "", 150);
+  return truncate(tirarMarkdown(descricao || ""), 150);
+}
+
+// Meta/OG não renderizam markdown: remove símbolos para não vazar
+// `>`, `*`, `#` nos snippets do Google/redes.
+export function tirarMarkdown(texto: string): string {
+  return texto
+    .replace(/^[>\s]+/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/[*_#`~|-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
