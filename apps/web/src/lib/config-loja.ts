@@ -10,6 +10,7 @@ export type EmpresaConfig = {
   email: string;
   phone: string;
   whatsapp: string;
+  whatsappMensagem: string;
   address: string;
   logoUrl: string;
 };
@@ -32,6 +33,7 @@ const EMPRESA_PADRAO: EmpresaConfig = {
   email: "contato@divinecloset.com",
   phone: "(11) 3000-0000",
   whatsapp: "",
+  whatsappMensagem: "Olá! Vim pelo site da Divine Closet.",
   address: "",
   logoUrl: "",
 };

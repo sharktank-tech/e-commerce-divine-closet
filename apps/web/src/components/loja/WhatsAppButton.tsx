@@ -7,23 +7,30 @@ import { usePathname } from "next/navigation";
 // (/admin/configuracoes → empresa.whatsapp). Sem número, não renderiza.
 export function WhatsAppButton() {
   const pathname = usePathname();
-  const [whatsapp, setWhatsapp] = useState<string | null>(null);
+  const [contato, setContato] = useState<{ whatsapp: string; mensagem: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/config-loja")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const numero = String(d?.empresa?.whatsapp || "").replace(/\D/g, "");
-        if (numero) setWhatsapp(numero);
+        if (numero) {
+          setContato({
+            whatsapp: numero,
+            mensagem:
+              String(d?.empresa?.whatsappMensagem || "") ||
+              "Olá! Vim pelo site da Divine Closet.",
+          });
+        }
       })
       .catch(() => {});
   }, []);
 
-  if (pathname.startsWith("/admin") || !whatsapp) return null;
+  if (pathname.startsWith("/admin") || !contato) return null;
 
   return (
     <a
-      href={`https://wa.me/55${whatsapp}?text=${encodeURIComponent("Olá! Vim pelo site da Divine Closet.")}`}
+      href={`https://wa.me/55${contato.whatsapp}?text=${encodeURIComponent(contato.mensagem)}`}
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Conversar no WhatsApp"

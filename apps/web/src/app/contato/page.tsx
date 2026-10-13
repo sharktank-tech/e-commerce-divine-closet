@@ -10,6 +10,7 @@ type EmpresaContato = {
   email: string;
   phone: string;
   whatsapp: string;
+  whatsappMensagem: string;
   address: string;
 };
 
@@ -35,8 +36,11 @@ export default function ContatoPage() {
     email: institutional.contact.email,
     phone: institutional.contact.phone,
     whatsapp: institutional.contact.whatsapp,
+    whatsappMensagem: "Olá! Vim pelo site da Divine Closet.",
     address: institutional.contact.address,
   };
+  const mensagemWa =
+    contato.whatsappMensagem || `Olá! Vim pelo site da ${contato.name}.`;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -79,7 +83,7 @@ export default function ContatoPage() {
             <p className="text-xs uppercase tracking-wide text-ink-mute">WhatsApp</p>
             <p className="mt-1 text-sm font-medium">
               <a
-                href={`https://wa.me/55${contato.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(`Olá! Vim pelo site da ${contato.name}.`)}`}
+                href={`https://wa.me/55${contato.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(mensagemWa)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary-700 hover:underline"
