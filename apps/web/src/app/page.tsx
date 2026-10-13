@@ -63,6 +63,9 @@ async function getData() {
     const categories = await prisma.category.findMany({
       where: { status: "ACTIVE", deletedAt: null, showInHome: true },
       orderBy: [{ menuOrder: "asc" }, { name: "asc" }],
+      include: {
+        _count: { select: { products: { where: { ...AVAILABLE } } } },
+      },
     });
 
     // 5. Banners
@@ -81,7 +84,21 @@ export default async function Home() {
   const { destaques, novidades, ofertas, categories, banners, offersCount, error } = await getData();
 
   // Filtrar categorias que têm produtos ativos
-  const catsWithProducts = categories;
+  const catsWithProducts: Array<{ id: string; name: string; slug: string; image: string | null }> = [];
+  for (const c of categories) {
+    if (c._count.products === 0) continue;
+    // Imagem da categoria; sem ela, usa a foto do produto mais recente.
+    let image: string | null = c.image || null;
+    if (!image) {
+      const primeiro = await prisma.product.findFirst({
+        where: { categoryId: c.id, ...AVAILABLE },
+        select: { images: true },
+        orderBy: { createdAt: "desc" },
+      });
+      image = primeiro?.images?.[0] ?? null;
+    }
+    catsWithProducts.push({ id: c.id, name: c.name, slug: c.slug, image });
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
