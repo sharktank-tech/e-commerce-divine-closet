@@ -216,21 +216,46 @@ export default async function Home() {
               Conhecer a marca
             </Button>
           </div>
-          <aside className="rounded-2xl border border-accent-200 bg-accent-50 p-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-accent-700">
-              Banner promocional
-            </p>
-            <p className="mt-2 font-display text-xl font-bold text-ink">
-              Nova coleção disponível
-            </p>
-            <p className="mt-1 text-sm text-ink-mute">
-              {/* TODO-CLIENTE: substituir por banners reais via admin */}
-              Imagem placeholder até o cliente enviar artes.
-            </p>
-            <Button href="/produtos" size="sm" className="mt-4">
-              Ver agora
-            </Button>
-          </aside>
+          {banners.length > 0 ? (
+            <aside className="rounded-2xl border border-accent-200 bg-accent-50 p-6">
+              <img
+                src={banners[0].imageUrl}
+                alt={banners[0].title || "Banner promocional"}
+                className="w-full h-48 object-cover rounded-t-xl mb-4"
+              />
+              <p className="text-xs font-semibold uppercase tracking-wide text-accent-700">
+                Banner promocional
+              </p>
+              <p className="mt-2 font-display text-xl font-bold text-ink">
+                {banners[0].title}
+              </p>
+              {banners[0].linkUrl && (
+                <Button
+                  href={banners[0].linkUrl}
+                  variant="outline"
+                  className="mt-4"
+                >
+                  Ver agora
+                </Button>
+              )}
+            </aside>
+          ) : (
+            <aside className="rounded-2xl border border-accent-200 bg-accent-50 p-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-accent-700">
+                Banner promocional
+              </p>
+              <p className="mt-2 font-display text-xl font-bold text-ink">
+                Nova coleção disponível
+              </p>
+              <p className="mt-1 text-sm text-ink-mute">
+                {/* TODO-CLIENTE: substituir por banners reais via admin */}
+                Imagem placeholder até o cliente enviar artes.
+              </p>
+              <Button href="/produtos" size="sm" className="mt-4">
+                Ver agora
+              </Button>
+            </aside>
+          )}
         </div>
       </section>
     </div>
