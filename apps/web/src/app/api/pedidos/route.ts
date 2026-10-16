@@ -15,6 +15,7 @@ import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 import { getFrete, getPagamento } from "@/lib/config-loja";
 import { notificarErp } from "@/lib/erp";
 import { obterCupom } from "@/lib/cupom-cache";
+import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { cookies } from "next/headers";
@@ -107,27 +108,31 @@ export const POST = comErro(async (req: NextRequest) => {
     if (session) cartWhere.push({ userId: session.sub });
     if (guestId) cartWhere.push({ guestId });
 
+    // Convidado + logado podem coexistir: busca todos e prefere o que
+    // tem itens (findFirst puro devolvia o vazio → "Carrinho vazio" falso).
     const cart = cartWhere.length
-      ? await prisma.cart.findFirst({
-          where: { OR: cartWhere },
-          include: {
-            items: {
-              include: {
-                product: {
-                  select: {
-                    id: true,
-                    name: true,
-                    slug: true,
-                    price: true,
-                    stock: true,
-                    isActive: true,
-                    images: true,
+      ? escolherCarrinho(
+          await prisma.cart.findMany({
+            where: { OR: cartWhere },
+            include: {
+              items: {
+                include: {
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      slug: true,
+                      price: true,
+                      stock: true,
+                      isActive: true,
+                      images: true,
+                    },
                   },
                 },
               },
             },
-          },
-        })
+          })
+        )
       : null;
 
     if (!cart || cart.items.length === 0) {
@@ -311,16 +316,30 @@ export const POST = comErro(async (req: NextRequest) => {
       })),
     });
 
-    const result = await processPayment({
-      orderId: order.id,
-      amount: total,
-      method: payment.method || "card",
-      card: payment.card,
-      cardToken: payment.cardToken ?? undefined,
-      installments: payment.installments ?? undefined,
-      paymentMethodId: payment.paymentMethodId ?? undefined,
-      payerEmail: session?.email || guestEmail || undefined,
-    });
+    let result;
+    try {
+      result = await processPayment({
+        orderId: order.id,
+        amount: total,
+        method: payment.method || "card",
+        card: payment.card,
+        cardToken: payment.cardToken ?? undefined,
+        installments: payment.installments ?? undefined,
+        paymentMethodId: payment.paymentMethodId ?? undefined,
+        payerEmail: session?.email || guestEmail || undefined,
+      });
+    } catch (err) {
+      // Gateway estourou sem resposta: não deixa PENDING órfão — cancela
+      // e devolve a mensagem real (o carrinho fica intacto p/ retry).
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLED", paymentStatus: "FAILED" },
+      });
+      if (err instanceof PaymentError) {
+        return NextResponse.json({ error: err.message }, { status: 502 });
+      }
+      throw err;
+    }
 
     if (result.status === "PENDING") {
       // Pix aguardando: pedido continua PENDING com o id do pagamento; a
