@@ -11,6 +11,8 @@ type Props = {
   placeholder?: string;
   required?: boolean;
   error?: string;
+  hint?: string;
+  onBlur?: (v: string) => void;
   className?: string;
   textarea?: boolean;
   rows?: number;
@@ -30,6 +32,8 @@ export function Input({
   placeholder,
   required,
   error,
+  hint,
+  onBlur,
   className,
   textarea,
   rows = 4,
@@ -60,6 +64,7 @@ export function Input({
           disabled={disabled}
           placeholder={placeholder}
           onChange={(e) => onChange?.(e.target.value)}
+          onBlur={(e) => onBlur?.(e.target.value)}
           className={cn(base, "min-h-[96px] resize-y")}
         />
       ) : (
@@ -75,9 +80,11 @@ export function Input({
           min={min}
           maxLength={maxLength}
           onChange={(e) => onChange?.(e.target.value)}
+          onBlur={(e) => onBlur?.(e.target.value)}
           className={base}
         />
       )}
+      {hint && !error && <span className="block text-[11px] text-ink-mute">{hint}</span>}
       {error && <span className="block text-xs text-red-600">{error}</span>}
     </label>
   );

@@ -10,6 +10,7 @@ import { formatBRL } from "@/lib/utils";
 import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics } from "@/lib/analytics";
+import { useAutofillCep } from "@/hooks/useAutofillCep";
 
 type ConfigLoja = {
   frete: { fixed: number; freeFrom: number };
@@ -202,6 +203,12 @@ export default function CheckoutPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  // CEP → endereço (ViaCEP): preenche só campos vazios; número fica manual.
+  const { buscandoCep, erroCep, cepOk, preencherCep } = useAutofillCep(
+    () => ({ street: form.street, neighborhood: form.neighborhood, city: form.city, state: form.state }),
+    (patch) => setForm((f) => ({ ...f, ...patch }))
+  );
+
   async function aceitarPreco(itemId: string) {
     const res = await fetch("/api/carrinho", {
       method: "PATCH",
@@ -226,10 +233,11 @@ export default function CheckoutPage() {
 
   const subtotal = cart?.subtotal || 0;
   const couponFreeShipping = !!coupon?.freeShipping;
+  // Frete exibido = o da API (fonte única, já com cupom). Fallback local
+  // só antes do primeiro cálculo — o cobrado vem do mesmo pipeline.
   const shipping =
-    couponFreeShipping || subtotal >= freteCfg.freeFrom
-      ? 0
-      : frete?.price ?? freteCfg.fixed;
+    frete?.price ??
+    (couponFreeShipping || subtotal >= freteCfg.freeFrom ? 0 : freteCfg.fixed);
   const discount = coupon?.discount || 0;
   const total = Math.max(0, subtotal - discount) + shipping;
 
@@ -248,12 +256,16 @@ export default function CheckoutPage() {
     return true;
   }
 
-  async function calcFrete() {
+  // codigoCupom omitido = usa o cupom atual do estado; null = sem cupom.
+  async function calcFrete(codigoCupom?: string | null) {
     setFreteError("");
     setFreteLoading(true);
     try {
       const cep = (form.zipCode || "").replace(/\D/g, "");
-      const res = await fetch(`/api/frete?cep=${cep}&subtotal=${subtotal}`);
+      const cupom = codigoCupom === undefined ? (coupon?.code ?? null) : codigoCupom;
+      const qs = new URLSearchParams({ cep, subtotal: String(subtotal) });
+      if (cupom) qs.set("cupom", cupom);
+      const res = await fetch(`/api/frete?${qs.toString()}`);
       const data = await res.json();
       if (!res.ok) {
         setFrete(null);
@@ -288,6 +300,8 @@ export default function CheckoutPage() {
         discount: data.discount,
         freeShipping: data.freeShipping,
       });
+      // Cupom muda o frete: recalcula se já havia cálculo.
+      if (frete) void calcFrete(data.coupon.code);
     } catch {
       setCouponError("Erro ao validar cupom");
     }
@@ -511,6 +525,22 @@ export default function CheckoutPage() {
             <section className="rounded-xl border border-ink/10 bg-white p-6">
               <h2 className="font-display text-lg font-bold text-ink">Endereço de entrega</h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-6">
+                <div className="sm:col-span-2">
+                  <Input
+                    label="CEP"
+                    required
+                    placeholder="00000-000"
+                    value={form.zipCode}
+                    onChange={(v) => set("zipCode", v)}
+                    onBlur={(v) => void preencherCep(v)}
+                    hint="Digite seu CEP para preencher o endereço automaticamente."
+                  />
+                  {buscandoCep && <p className="mt-1 text-[11px] text-ink-mute">Buscando endereço...</p>}
+                  {erroCep && <p className="mt-1 text-[11px] text-red-600">{erroCep}</p>}
+                  {cepOk && !erroCep && (
+                    <p className="mt-1 text-[11px] text-emerald-700">Endereço preenchido. Confira o número.</p>
+                  )}
+                </div>
                 <div className="sm:col-span-4">
                   <Input label="Rua" required value={form.street} onChange={(v) => set("street", v)} />
                 </div>
@@ -528,9 +558,6 @@ export default function CheckoutPage() {
                 </div>
                 <div className="sm:col-span-1">
                   <Input label="UF" required maxLength={2} value={form.state} onChange={(v) => set("state", v.toUpperCase())} />
-                </div>
-                <div className="sm:col-span-2">
-                  <Input label="CEP" required placeholder="00000-000" value={form.zipCode} onChange={(v) => set("zipCode", v)} />
                 </div>
               </div>
             </section>
@@ -803,6 +830,7 @@ export default function CheckoutPage() {
               onClick={() => {
                 setCoupon(null);
                 setCouponInput("");
+                if (frete) void calcFrete(null);
               }}
               className="mt-4 text-xs text-ink-mute underline"
             >

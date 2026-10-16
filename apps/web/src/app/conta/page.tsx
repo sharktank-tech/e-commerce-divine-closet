@@ -10,6 +10,7 @@ import { ProductCard } from "@/components/loja/ProductCard";
 import { features } from "@/config/defaults";
 import { formatDate, orderStatusLabel } from "@/lib/utils";
 import { formatBRL } from "@/lib/utils";
+import { useAutofillCep } from "@/hooks/useAutofillCep";
 
 type Session = { name: string; email: string; role: string; phone?: string };
 type Order = {
@@ -64,6 +65,12 @@ function ContaContent() {
   const [addrForm, setAddrForm] = useState({ ...emptyAddress });
   const [addrEditing, setAddrEditing] = useState<string | null>(null);
   const [addrMsg, setAddrMsg] = useState("");
+
+  // CEP → endereço (ViaCEP): preenche só campos vazios; número fica manual.
+  const { buscandoCep, erroCep, cepOk, preencherCep } = useAutofillCep(
+    () => ({ street: addrForm.street, neighborhood: addrForm.neighborhood, city: addrForm.city, state: addrForm.state }),
+    (patch) => setAddrForm((f) => ({ ...f, ...patch }))
+  );
 
   const [wishlist, setWishlist] = useState<WishProduct[]>([]);
 
@@ -410,7 +417,20 @@ function ContaContent() {
                 <Input label="UF" required maxLength={2} value={addrForm.state} onChange={(v) => setAddrForm((f) => ({ ...f, state: v.toUpperCase() }))} />
               </div>
               <div className="sm:col-span-2">
-                <Input label="CEP" required placeholder="00000-000" value={addrForm.zipCode} onChange={(v) => setAddrForm((f) => ({ ...f, zipCode: v }))} />
+                <Input
+                  label="CEP"
+                  required
+                  placeholder="00000-000"
+                  value={addrForm.zipCode}
+                  onChange={(v) => setAddrForm((f) => ({ ...f, zipCode: v }))}
+                  onBlur={(v) => void preencherCep(v)}
+                  hint="Digite seu CEP para preencher o endereço automaticamente."
+                />
+                {buscandoCep && <p className="mt-1 text-[11px] text-ink-mute">Buscando endereço...</p>}
+                {erroCep && <p className="mt-1 text-[11px] text-red-600">{erroCep}</p>}
+                {cepOk && !erroCep && (
+                  <p className="mt-1 text-[11px] text-emerald-700">Endereço preenchido. Confira o número.</p>
+                )}
               </div>
             </div>
             {addrMsg && <p className="mt-3 text-sm text-ink-soft">{addrMsg}</p>}
