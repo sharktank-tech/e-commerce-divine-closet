@@ -133,7 +133,11 @@ export default function CheckoutPage() {
   }, []);
 
   const freteCfg = cfgLoja?.frete ?? shippingConfig;
-  const metodosAtivos = METODOS.filter((m) => cfgLoja?.pagamento[m.id] ?? true);
+  // O driver Mercado Pago só cobre cartão e Pix — boleto some da lista
+  // quando o MP está ativo (evita o 500 "método não suportado").
+  const metodosAtivos = METODOS.filter(
+    (m) => (cfgLoja?.pagamento[m.id] ?? true) && (m.id !== "boleto" || !mpAtivo)
+  );
 
   // Se o painel desabilitou a forma atual, migra para a primeira ativa.
   useEffect(() => {
@@ -659,12 +663,13 @@ export default function CheckoutPage() {
 
                 {method === "pix" && (
                   <div className="mt-4 rounded-lg bg-primary-50 p-4 text-sm text-ink-soft">
-                    O QR Code Pix será gerado após a confirmação (sandbox: aprovação
-                    automática, sem transação real).
+                    {mpAtivo
+                      ? "O QR Code Pix será gerado após a confirmação. Pague no app do seu banco para concluir o pedido."
+                      : "O QR Code Pix será gerado após a confirmação (sandbox: aprovação automática, sem transação real)."}
                   </div>
                 )}
 
-                {method === "boleto" && (
+                {method === "boleto" && !mpAtivo && (
                   <div className="mt-4 rounded-lg bg-primary-50 p-4 text-sm text-ink-soft">
                     O boleto será enviado por e-mail após a confirmação (sandbox:
                     aprovação automática, sem emissão real).

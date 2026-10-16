@@ -149,4 +149,15 @@ describe("processPayment (driver)", () => {
     vi.unstubAllGlobals();
     Object.assign(process.env, envAnterior);
   });
+
+  it("falhas do gateway: PaymentError (vira 502 com mensagem, não 500 genérico)", async () => {
+    for (const k of ["PAYMENT_DRIVER", "MP_ACCESS_TOKEN"]) delete process.env[k];
+    Object.assign(process.env, { PAYMENT_DRIVER: "mercadopago" });
+    vi.resetModules();
+    const mod = await import("@/lib/pagamento");
+    await expect(
+      mod.processPayment({ orderId: "p", amount: 10, method: "pix", payerEmail: "c@c.com" })
+    ).rejects.toBeInstanceOf(mod.PaymentError);
+    Object.assign(process.env, envAnterior);
+  });
 });

@@ -28,6 +28,15 @@ export type PaymentParams = {
   payerEmail?: string;
 };
 
+/** Erro do gateway real (config/MP): vira 502 com mensagem acionável. */
+export class PaymentError extends Error {
+  statusCode = 502;
+  constructor(message: string) {
+    super(message);
+    this.name = "PaymentError";
+  }
+}
+
 function urlNotificacao(): string {
   const base =
     process.env.MP_NOTIFICATION_URL ||
@@ -40,12 +49,12 @@ function urlNotificacao(): string {
 async function processarMp(params: PaymentParams): Promise<PaymentResult> {
   const token = process.env.MP_ACCESS_TOKEN;
   if (!token) {
-    throw new Error(
-      "MP_ACCESS_TOKEN não configurado. Defina o token de teste/produção ou volte PAYMENT_DRIVER para mock."
+    throw new PaymentError(
+      "MP_ACCESS_TOKEN não configurado na Vercel. Adicione a variável e faça redeploy."
     );
   }
   if (!params.payerEmail) {
-    throw new Error("E-mail do pagador é obrigatório no Mercado Pago.");
+    throw new PaymentError("E-mail do pagador é obrigatório no Mercado Pago.");
   }
   const notificacao = urlNotificacao();
   const base = {
@@ -57,7 +66,12 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
   };
 
   if (params.method === "pix") {
-    const pag = await criarPagamentoPix(token, base);
+    let pag;
+    try {
+      pag = await criarPagamentoPix(token, base);
+    } catch (err) {
+      throw new PaymentError(err instanceof Error ? err.message : "Falha no Pix (Mercado Pago).");
+    }
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {
       return { success: true, paymentId: pag.id, status: "PAID", message: "Pix aprovado." };
@@ -76,16 +90,21 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
 
   if (params.method === "card") {
     if (!params.cardToken) {
-      throw new Error(
-        "Cartão via Mercado Pago exige tokenização no front (MP_PUBLIC_KEY). O servidor nunca recebe o PAN."
+      throw new PaymentError(
+        "Cartão via Mercado Pago exige tokenização no front (MP_PUBLIC_KEY ausente ou SDK não carregou). Confira a public key na Vercel e recarregue o checkout."
       );
     }
-    const pag = await criarPagamentoCartao(token, {
-      ...base,
-      token: params.cardToken,
-      parcelas: params.installments ?? 1,
-      bandeira: params.paymentMethodId || "visa",
-    });
+    let pag;
+    try {
+      pag = await criarPagamentoCartao(token, {
+        ...base,
+        token: params.cardToken,
+        parcelas: params.installments ?? 1,
+        bandeira: params.paymentMethodId || "visa",
+      });
+    } catch (err) {
+      throw new PaymentError(err instanceof Error ? err.message : "Falha no cartão (Mercado Pago).");
+    }
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {
       return { success: true, paymentId: pag.id, status: "PAID", message: "Pagamento aprovado." };
@@ -93,7 +112,7 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
     return { success: false, paymentId: pag.id, status: "FAILED", message: `Pagamento não aprovado (${pag.statusDetail || pag.status}).` };
   }
 
-  throw new Error(`Método não suportado no Mercado Pago: ${params.method}`);
+  throw new PaymentError(`Método não suportado no Mercado Pago: ${params.method}`);
 }
 
 /**

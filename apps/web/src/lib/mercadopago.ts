@@ -57,7 +57,7 @@ export function montarPix(input: {
   email: string;
   referenciaExterna: string;
   descricao: string;
-  urlNotificacao: string;
+  urlNotificacao?: string | null;
 }): Record<string, unknown> {
   return {
     transaction_amount: Math.round(input.valor * 100) / 100,
@@ -65,7 +65,8 @@ export function montarPix(input: {
     payment_method_id: "pix",
     payer: { email: input.email },
     external_reference: input.referenciaExterna,
-    notification_url: input.urlNotificacao,
+    // notification_url vazia ("") é rejeitada pela API do MP — omite.
+    ...(input.urlNotificacao ? { notification_url: input.urlNotificacao } : {}),
   };
 }
 
@@ -77,7 +78,7 @@ export function montarCartao(input: {
   email: string;
   referenciaExterna: string;
   descricao: string;
-  urlNotificacao: string;
+  urlNotificacao?: string | null;
 }): Record<string, unknown> {
   return {
     token: input.token,
@@ -87,7 +88,7 @@ export function montarCartao(input: {
     payer: { email: input.email },
     external_reference: input.referenciaExterna,
     description: input.descricao.slice(0, 128),
-    notification_url: input.urlNotificacao,
+    ...(input.urlNotificacao ? { notification_url: input.urlNotificacao } : {}),
   };
 }
 

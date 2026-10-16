@@ -61,6 +61,18 @@ describe("montarPix / montarCartao", () => {
     });
     expect((p.description as string).length).toBe(128);
   });
+
+  it("sem url de notificação: omite notification_url (MP rejeita string vazia)", () => {
+    expect(
+      montarPix({ valor: 1, email: "c@c.com", referenciaExterna: "p", descricao: "d" })
+    ).not.toHaveProperty("notification_url");
+    expect(
+      montarPix({ valor: 1, email: "c@c.com", referenciaExterna: "p", descricao: "d", urlNotificacao: "" })
+    ).not.toHaveProperty("notification_url");
+    expect(
+      montarCartao({ token: "t", valor: 1, parcelas: 1, bandeira: "visa", email: "c@c.com", referenciaExterna: "p", descricao: "d", urlNotificacao: "" })
+    ).not.toHaveProperty("notification_url");
+  });
 });
 
 describe("criarPagamentoPix", () => {

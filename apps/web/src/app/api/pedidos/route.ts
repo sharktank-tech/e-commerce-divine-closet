@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
-import { processPayment } from "@/lib/pagamento";
+import { PaymentError, processPayment } from "@/lib/pagamento";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 import { orderNumber, formatBRL } from "@/lib/utils";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
@@ -200,6 +200,14 @@ export const POST = comErro(async (req: NextRequest) => {
     if (!formas[formaId]) {
       return NextResponse.json({ error: "Forma de pagamento indisponível" }, { status: 400 });
     }
+    // O driver Mercado Pago só cobre cartão e Pix — barra o boleto aqui
+    // (400 claro) em vez de criar o pedido e falhar no gateway (500).
+    if (process.env.PAYMENT_DRIVER === "mercadopago" && payment.method === "boleto") {
+      return NextResponse.json(
+        { error: "Boleto indisponível com Mercado Pago. Escolha cartão ou Pix." },
+        { status: 400 }
+      );
+    }
 
     // Cupom — revalidado no servidor. Cálculo único em
     // lib/pedidos/calculo-total.ts — mesmo módulo que /api/cupom usa
@@ -368,6 +376,10 @@ export const POST = comErro(async (req: NextRequest) => {
     // Perdeu a corrida pelo último item: 409 claro em vez de 500 genérico.
     if (err instanceof Error && err.message.startsWith("Estoque insuficiente")) {
       return NextResponse.json({ error: "Estoque insuficiente para um ou mais itens" }, { status: 409 });
+    }
+    // Erro do gateway real: 502 com a mensagem acionável (sem stack).
+    if (err instanceof PaymentError) {
+      return NextResponse.json({ error: err.message }, { status: 502 });
     }
     return NextResponse.json({ error: "Erro ao finalizar pedido" }, { status: 500 });
   }
