@@ -4,6 +4,7 @@ import {
   criarPagamentoCartao,
   criarPagamentoPix,
   mapearStatusMp,
+  traduzirErroMp,
   type QrPix,
 } from "./mercadopago";
 
@@ -70,7 +71,7 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
     try {
       pag = await criarPagamentoPix(token, base);
     } catch (err) {
-      throw new PaymentError(err instanceof Error ? err.message : "Falha no Pix (Mercado Pago).");
+      throw new PaymentError(traduzirErroMp(err instanceof Error ? err.message : "Falha no Pix (Mercado Pago)."));
     }
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {
@@ -103,7 +104,7 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
         bandeira: params.paymentMethodId || "visa",
       });
     } catch (err) {
-      throw new PaymentError(err instanceof Error ? err.message : "Falha no cartão (Mercado Pago).");
+      throw new PaymentError(traduzirErroMp(err instanceof Error ? err.message : "Falha no cartão (Mercado Pago)."));
     }
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {

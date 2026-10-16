@@ -7,6 +7,7 @@ import {
   mapearStatusMp,
   montarCartao,
   montarPix,
+  traduzirErroMp,
   verificarAssinaturaWebhook,
 } from "@/lib/mercadopago";
 
@@ -120,6 +121,22 @@ describe("criarPagamentoCartao / buscarPagamento", () => {
     mockFetch({ id: 7, status: "approved", external_reference: "ped-9" });
     const r = await buscarPagamento("tok", "7");
     expect(r).toEqual({ id: "7", status: "approved", referenciaExterna: "ped-9" });
+  });
+});
+
+describe("traduzirErroMp", () => {
+  it("live credentials com dados de teste → orientação teste x produção", () => {
+    const msg = traduzirErroMp("Mercado Pago: Unauthorized use of live credentials");
+    expect(msg).toMatch(/TEST-/);
+    expect(msg).not.toMatch(/Unauthorized/);
+  });
+
+  it("token inválido → orientação de redeploy", () => {
+    expect(traduzirErroMp("Mercado Pago: invalid_token")).toMatch(/redeploy/);
+  });
+
+  it("desconhecido → mensagem original", () => {
+    expect(traduzirErroMp("Mercado Pago: xyz-123")).toBe("Mercado Pago: xyz-123");
   });
 });
 

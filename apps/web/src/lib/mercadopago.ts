@@ -52,6 +52,24 @@ export function mapearStatusMp(status: string): "PAID" | "PENDING" | "FAILED" {
   return "FAILED";
 }
 
+/**
+ * Traduz erros conhecidos da API do MP para mensagem acionável (sem vazar
+ * detalhe interno). Desconhecido: devolve a mensagem original.
+ */
+export function traduzirErroMp(mensagem: string): string {
+  if (/unauthorized use of live credentials/i.test(mensagem)) {
+    return (
+      "Credenciais de produção (APP_USR) usadas com dados de teste. " +
+      "Para testar, troque as duas chaves pelas de TESTE (TEST-...) no painel do Mercado Pago " +
+      "e use cartões/usuários de teste; para cobrar de verdade, use dados reais."
+    );
+  }
+  if (/invalid_token|bad token|token.*expir/i.test(mensagem)) {
+    return "Token do Mercado Pago inválido ou expirado. Confira o MP_ACCESS_TOKEN na Vercel e faça redeploy.";
+  }
+  return mensagem;
+}
+
 export function montarPix(input: {
   valor: number;
   email: string;
