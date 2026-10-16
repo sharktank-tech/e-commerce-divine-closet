@@ -576,9 +576,15 @@ export default function CheckoutPage() {
               <section className="rounded-xl border border-ink/10 bg-white p-6">
                 <div className="flex items-center justify-between">
                   <h2 className="font-display text-lg font-bold text-ink">Pagamento</h2>
-                  <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold uppercase text-amber-800">
-                    Sandbox / Mock
-                  </span>
+                  {mpAtivo ? (
+                    <span className="rounded-full bg-primary-100 px-3 py-1 text-[11px] font-bold uppercase text-primary-700">
+                      Mercado Pago
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold uppercase text-amber-800">
+                      Sandbox / Mock
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-4 grid grid-cols-3 gap-2">
