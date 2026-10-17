@@ -19,8 +19,13 @@ export const POST = comErro(async (req: NextRequest) => {
     data?: { id?: string | number };
   } | null;
 
-  const tipo = body?.type || (body?.action || "").split(".")[0];
-  const dataId = body?.data?.id != null ? String(body.data.id) : "";
+  // MP envia `?data.id=...&type=...` na query E o mesmo no body; o
+  // manifesto da assinatura é calculado sobre o data.id da query — ler
+  // query primeiro e cair para o body mantém os dois formatos válidos.
+  const query = req.nextUrl.searchParams;
+  const dataId = query.get("data.id") || (body?.data?.id != null ? String(body.data.id) : "");
+  const tipo =
+    query.get("type") || body?.type || (body?.action || "").split(".")[0];
   if (tipo !== "payment" || !dataId) {
     return NextResponse.json({ received: true });
   }
