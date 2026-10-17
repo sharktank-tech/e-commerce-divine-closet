@@ -172,12 +172,29 @@ describe("assinatura do webhook", () => {
     expect(extrairAssinatura("ts=123")).toBeNull();
   });
 
-  it("HMAC válido passa; errado/ausente falha", async () => {
+  it("manifesto OFICIAL do MP: id:...;request-id:...;ts:...; — HMAC válido passa", async () => {
     const { createHmac } = await import("crypto");
-    const base = "99;req-1;1700000000";
-    const v1 = createHmac("sha256", "segredo").update(base).digest("hex");
+    const manifest = "id:99;request-id:req-1;ts:1700000000;";
+    const v1 = createHmac("sha256", "segredo").update(manifest).digest("hex");
     expect(verificarAssinaturaWebhook("99", "req-1", "1700000000", v1, "segredo")).toBe(true);
     expect(verificarAssinaturaWebhook("99", "req-1", "1700000000", "00", "segredo")).toBe(false);
     expect(verificarAssinaturaWebhook("99", "req-1", "1700000000", v1, null)).toBe(false);
+  });
+
+  it("data.id alfanumérico entra em minúsculas; request-id sem prefixo errado", async () => {
+    const { createHmac } = await import("crypto");
+    const manifest = "id:b33fnb4gc4d3w5w75;request-id:ReQ-9;ts:1700000000;";
+    const v1 = createHmac("sha256", "segredo").update(manifest).digest("hex");
+    expect(verificarAssinaturaWebhook("B33FNB4GC4D3W5W75", "ReQ-9", "1700000000", v1, "segredo")).toBe(true);
+    // formato antigo (sem prefixos) NÃO é aceito
+    const antigo = createHmac("sha256", "segredo").update("b33fnb4gc4d3w5w75;ReQ-9;1700000000").digest("hex");
+    expect(verificarAssinaturaWebhook("B33FNB4GC4D3W5W75", "ReQ-9", "1700000000", antigo, "segredo")).toBe(false);
+  });
+
+  it("x-request-id ausente → par omitido do manifesto (comportamento dos SDKs oficiais)", async () => {
+    const { createHmac } = await import("crypto");
+    const manifest = "id:99;ts:1700000000;";
+    const v1 = createHmac("sha256", "segredo").update(manifest).digest("hex");
+    expect(verificarAssinaturaWebhook("99", "", "1700000000", v1, "segredo")).toBe(true);
   });
 });

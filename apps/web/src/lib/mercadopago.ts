@@ -175,9 +175,11 @@ export async function buscarPagamento(
 }
 
 /**
- * Verifica `x-signature: ts=...,v1=...` do webhook (HMAC-SHA256 de
- * `${dataId};${requestId};${ts}` com o segredo do app). Sem segredo
- * configurado, retorna false (o chamador decide: em produção, exigir).
+ * Verifica `x-signature: ts=...,v1=...` do webhook. Manifesto OFICIAL do
+ * Mercado Pago (SDKs oficiais): `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`
+ * — HMAC-SHA256 em hex com o segredo do app; pares vazios são omitidos;
+ * só o `data.id` vai em minúsculas. Sem segredo configurado, retorna
+ * false (o chamador decide: em produção, exigir).
  */
 export function verificarAssinaturaWebhook(
   dataId: string,
@@ -186,8 +188,11 @@ export function verificarAssinaturaWebhook(
   v1: string,
   segredo: string | null | undefined
 ): boolean {
-  if (!segredo || !dataId || !requestId || !ts || !v1) return false;
-  const base = `${dataId.toLowerCase()};${requestId.toLowerCase()};${ts}`;
+  if (!segredo || !dataId || !ts || !v1) return false;
+  const partes: string[] = [`id:${dataId.toLowerCase()}`];
+  if (requestId) partes.push(`request-id:${requestId}`);
+  partes.push(`ts:${ts}`);
+  const base = `${partes.join(";")};`;
   const esperado = createHmac("sha256", segredo).update(base).digest("hex");
   try {
     return timingSafeEqual(Buffer.from(esperado), Buffer.from(v1.toLowerCase()));
