@@ -11,10 +11,16 @@ import {
   verificarAssinaturaWebhook,
 } from "@/lib/mercadopago";
 
+let ultimaChamada: { url: string; init?: RequestInit } | null = null;
+
 function mockFetch(resposta: unknown, ok = true) {
+  ultimaChamada = null;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ ok, json: async () => resposta }))
+    vi.fn(async (url: string, init?: RequestInit) => {
+      ultimaChamada = { url, init };
+      return { ok, json: async () => resposta };
+    })
   );
 }
 
@@ -103,6 +109,25 @@ describe("criarPagamentoPix", () => {
         descricao: "d", urlNotificacao: "u",
       })
     ).rejects.toThrow("Mercado Pago: invalid_token");
+  });
+
+  it("POST envia X-Idempotency-Key (MP exige em criar pagamento)", async () => {
+    mockFetch({ id: 1, status: "pending" });
+    await criarPagamentoPix("tok", {
+      valor: 5, email: "c@c.com", referenciaExterna: "p",
+      descricao: "d", urlNotificacao: "u",
+    });
+    const h = (ultimaChamada?.init?.headers || {}) as Record<string, string>;
+    expect(h["X-Idempotency-Key"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
+
+  it("GET não envia o header", async () => {
+    mockFetch({ id: 7, status: "approved" });
+    await buscarPagamento("tok", "7");
+    const h = (ultimaChamada?.init?.headers || {}) as Record<string, string>;
+    expect(h["X-Idempotency-Key"]).toBeUndefined();
   });
 });
 

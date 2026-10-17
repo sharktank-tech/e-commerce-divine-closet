@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 
 // Cliente HTTP da API do Mercado Pago (Checkout Transparente) — sem SDK,
 // só fetch. Cobertura: Pix + cartão via token (tokenizado no front com a
@@ -27,11 +27,15 @@ async function mpFetch(
   caminho: string,
   init?: RequestInit
 ): Promise<unknown> {
+  const ehPost = String(init?.method || "GET").toUpperCase() === "POST";
   const r = await fetch(`${MP_API}${caminho}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      // POST exige chave de idempotência: repetir a mesma chave em retry
+      // não duplica pagamento (UUID novo a cada requisição).
+      ...(ehPost ? { "X-Idempotency-Key": randomUUID() } : {}),
       ...(init?.headers || {}),
     },
     signal: AbortSignal.timeout(15000),
