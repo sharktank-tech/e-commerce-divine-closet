@@ -95,9 +95,25 @@ export const emails = {
     subject: "Bem-vinda(o) à Divine Closet 💫",
     text: `Olá ${name}, sua conta foi criada com sucesso. Bom shopping!`,
   }),
-  orderPaid: (number: string) => ({
+  orderPaid: (number: string, linkAcompanhar?: string | null) => ({
     subject: `Pedido ${number} pago com sucesso`,
-    text: `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
+    text: [
+      `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
+      ...(linkAcompanhar
+        ? ["", "Acompanhe seu pedido (link privado, válido por 30 dias):", linkAcompanhar]
+        : []),
+    ].join("\n"),
+  }),
+  acompanharPedidos: (links: { numero: string; url: string }[]) => ({
+    subject: "Links de acompanhamento dos seus pedidos",
+    text: [
+      "Olá!",
+      "",
+      "Novos links para acompanhar seus pedidos (válidos por 30 dias):",
+      ...links.map((l) => `• Pedido ${l.numero}: ${l.url}`),
+      "",
+      "Guarde este e-mail — os links são privados.",
+    ].join("\n"),
   }),
   reviewRequest: (orderNumber: string, items: { name: string; url: string }[]) => ({    subject: `Como foi sua compra ${orderNumber}? Conte pra gente 💫`,
     text: [

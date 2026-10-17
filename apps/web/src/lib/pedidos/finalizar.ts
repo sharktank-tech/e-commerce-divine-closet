@@ -2,6 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { emails, sendEmail } from "@/lib/email";
 import { invalidarCupom } from "@/lib/cupom-cache";
 import { notificarErp } from "@/lib/erp";
+import {
+  criarTokenAcompanhamento,
+  linkAcompanhamento,
+} from "@/lib/pedidos/acompanhar";
 
 // Pós-aprovação do pedido — caminho único para confirmação síncrona
 // (mock/cartão aprovado na hora) e assíncrona (Pix via webhook do MP).
@@ -13,6 +17,17 @@ import { notificarErp } from "@/lib/erp";
 
 type BancoFinalizar = {
   $transaction(fn: (tx: TxFinalizar) => Promise<unknown>): Promise<unknown>;
+  // opcional: fakes de teste podem omitir (link de convidado é best-effort)
+  orderTrackToken?: {
+    findUnique(args: unknown): Promise<{
+      tokenHash: string;
+      expiresAt: Date;
+      revokedAt: Date | null;
+    } | null>;
+    create(args: unknown): Promise<unknown>;
+    update(args: unknown): Promise<unknown>;
+  };
+
   order: {
     findUnique(args: unknown): Promise<{
       id: string;
@@ -142,7 +157,23 @@ export async function finalizarPedidoPago(
     }
   });
 
-  const mail = emails.orderPaid(order.number);
+  // Pedido de CONVIDADO: cria link privado de acompanhamento (só se não
+  // existe ativo) e inclui no e-mail de confirmação. Best-effort: falha de
+  // token nunca derruba a finalização.
+  let linkAcompanhar: string | null = null;
+  if (!order.user && order.guestEmail && db.orderTrackToken) {
+    try {
+      const token = await criarTokenAcompanhamento(
+        { orderId: order.id, sentTo: order.guestEmail },
+        db as unknown as Parameters<typeof criarTokenAcompanhamento>[1]
+      );
+      if (token) linkAcompanhar = linkAcompanhamento(token);
+    } catch (err) {
+      console.error("[finalizar:tracktoken]", err);
+    }
+  }
+
+  const mail = emails.orderPaid(order.number, linkAcompanhar);
   sendEmail({
     to: order.user?.email || order.guestEmail || "",
     subject: mail.subject,
