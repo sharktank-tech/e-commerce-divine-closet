@@ -260,7 +260,9 @@ model Order {
   discount      Decimal       @default(0) @db.Decimal(10, 2)
   total         Decimal       @db.Decimal(10, 2)
   notes         String?
-  trackingCode  String?
+  trackingCode     String?
+  trackingCarrier String?
+  trackingUrl      String?
   utmSource     String?
   utmMedium     String?
   utmCampaign   String?
