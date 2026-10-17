@@ -11,6 +11,7 @@ import { features } from "@/config/defaults";
 import { formatDate, orderStatusLabel } from "@/lib/utils";
 import { formatBRL } from "@/lib/utils";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
+import { linkRastreio, mensagemSemRastreio, rotuloTransportadora } from "@/lib/rastreio";
 
 type Session = { name: string; email: string; role: string; phone?: string };
 type Order = {
@@ -20,6 +21,9 @@ type Order = {
   paymentStatus: string;
   total: string | number;
   createdAt: string;
+  trackingCode?: string | null;
+  trackingCarrier?: string | null;
+  trackingUrl?: string | null;
   items: Array<{ id: string; productName: string; quantity: number; size?: string | null }>;
 };
 type Address = {
@@ -73,6 +77,18 @@ function ContaContent() {
   );
 
   const [wishlist, setWishlist] = useState<WishProduct[]>([]);
+  const [copiado, setCopiado] = useState<string | null>(null);
+
+  async function copiarCodigo(o: Order) {
+    if (!o.trackingCode) return;
+    try {
+      await navigator.clipboard.writeText(o.trackingCode);
+      setCopiado(o.id);
+      setTimeout(() => setCopiado((c) => (c === o.id ? null : c)), 2000);
+    } catch {
+      /* clipboard indisponível — silencioso */
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -252,6 +268,36 @@ function ContaContent() {
                     </li>
                   ))}
                 </ul>
+                <div className="mt-3 border-t border-ink/5 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-mute">Rastreamento</p>
+                  {o.trackingCode ? (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
+                      {rotuloTransportadora(o.trackingCarrier) && (
+                        <span className="text-ink-mute">{rotuloTransportadora(o.trackingCarrier)}</span>
+                      )}
+                      <span className="rounded bg-ink/5 px-2 py-0.5 font-mono text-ink">{o.trackingCode}</span>
+                      <button
+                        type="button"
+                        onClick={() => copiarCodigo(o)}
+                        className="rounded-full border border-ink/15 px-3 py-1 text-xs font-medium text-ink-soft hover:bg-ink/5"
+                      >
+                        {copiado === o.id ? "Copiado!" : "Copiar código"}
+                      </button>
+                      {linkRastreio(o) && (
+                        <a
+                          href={linkRastreio(o) as string}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-semibold text-primary-700 underline-offset-2 hover:underline"
+                        >
+                          Acompanhar entrega ↗
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-sm text-ink-mute">{mensagemSemRastreio(o.status)}</p>
+                  )}
+                </div>
               </div>
             ))
           )}

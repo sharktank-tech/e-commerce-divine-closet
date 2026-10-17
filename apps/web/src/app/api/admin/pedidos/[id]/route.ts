@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { orderStatusLabel } from "@/lib/utils";
+import { validarUrlRastreio } from "@/lib/rastreio";
 
 const schema = z.object({
   status: z.enum([
@@ -17,6 +18,10 @@ const schema = z.object({
   ]),
   paymentStatus: z.enum(["PENDING", "PAID", "FAILED", "REFUNDED"]).optional(),
   trackingCode: z.string().nullish(),
+  trackingCarrier: z.string().trim().max(80).nullish(),
+  // Link externo de rastreio: validado no servidor (HTTPS + allowlist);
+  // URL fora da regra é gravada como null (nunca exibida ao cliente).
+  trackingUrl: z.string().trim().max(2048).nullish(),
 });
 
 type Params = { params: Promise<{ id: string }> };
@@ -63,6 +68,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         ...(parsed.data.paymentStatus ? { paymentStatus: parsed.data.paymentStatus } : {}),
         ...(parsed.data.trackingCode !== undefined
           ? { trackingCode: parsed.data.trackingCode || null }
+          : {}),
+        ...(parsed.data.trackingCarrier !== undefined
+          ? { trackingCarrier: parsed.data.trackingCarrier || null }
+          : {}),
+        ...(parsed.data.trackingUrl !== undefined
+          ? { trackingUrl: parsed.data.trackingUrl ? validarUrlRastreio(parsed.data.trackingUrl) : null }
           : {}),
         // marca a entrega (base do convite de avaliação pós-compra)
         ...(parsed.data.status === "DELIVERED" ? { entregueEm: new Date() } : {}),

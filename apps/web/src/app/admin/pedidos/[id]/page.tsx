@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatBRL, formatDate, orderStatusLabel } from "@/lib/utils";
 import { features } from "@/config/defaults";
+import { TRANSPORTADORAS } from "@/lib/rastreio";
 
 type Order = {
   id: string;
@@ -19,6 +20,8 @@ type Order = {
   total: string | number;
   notes?: string | null;
   trackingCode?: string | null;
+  trackingCarrier?: string | null;
+  trackingUrl?: string | null;
   couponCode?: string | null;
   createdAt: string;
   guestName?: string | null;
@@ -57,6 +60,8 @@ export default function AdminPedidoDetalhePage({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [tracking, setTracking] = useState("");
+  const [trackingCarrier, setTrackingCarrier] = useState("");
+  const [trackingUrl, setTrackingUrl] = useState("");
 
   async function load() {
     const res = await fetch(`/api/admin/pedidos/${id}`);
@@ -67,6 +72,8 @@ export default function AdminPedidoDetalhePage({
     const data = await res.json();
     setOrder(data.order);
     setTracking(data.order?.trackingCode || "");
+    setTrackingCarrier(data.order?.trackingCarrier || "");
+    setTrackingUrl(data.order?.trackingUrl || "");
   }
 
   useEffect(() => {
@@ -97,7 +104,12 @@ export default function AdminPedidoDetalhePage({
       const res = await fetch(`/api/admin/pedidos/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: order.status, trackingCode: tracking }),
+        body: JSON.stringify({
+          status: order.status,
+          trackingCode: tracking,
+          trackingCarrier: trackingCarrier || null,
+          trackingUrl: trackingUrl || null,
+        }),
       });
       if (res.ok) await load();
       else alert("Erro ao salvar rastreio");
@@ -219,6 +231,29 @@ export default function AdminPedidoDetalhePage({
                 Salvar rastreio
               </Button>
             </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <select
+                value={trackingCarrier}
+                onChange={(e) => setTrackingCarrier(e.target.value)}
+                className="rounded-lg border border-ink/15 px-3 py-2 text-sm"
+              >
+                <option value="">Transportadora (sem identificação)</option>
+                {TRANSPORTADORAS.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.nome}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={trackingUrl}
+                onChange={(e) => setTrackingUrl(e.target.value)}
+                placeholder="Link de rastreio (opcional, HTTPS)"
+                className="min-w-0 rounded-lg border border-ink/15 px-3 py-2 text-sm"
+              />
+            </div>
+            <p className="mt-1 text-xs text-ink-mute">
+              Link aceito apenas de transportadoras permitidas (HTTPS) — inválido é descartado.
+            </p>
             {order.trackingCode && (
               <p className="mt-2 text-xs text-ink-mute">
                 Atual: <span className="font-mono">{order.trackingCode}</span>
