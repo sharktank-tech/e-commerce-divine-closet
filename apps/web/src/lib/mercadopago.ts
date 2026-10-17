@@ -214,3 +214,108 @@ export function extrairAssinatura(
   if (!partes.ts || !partes.v1) return null;
   return { ts: partes.ts, v1: partes.v1 };
 }
+
+// ---------------------------------------------------------------------------
+// Estorno de pagamento (refund)
+// ---------------------------------------------------------------------------
+
+export type RespostaRefundMp =
+  | { ok: true; refund: { id: string; status: string; amount: number | null } }
+  // incerto = rede/timeout/5xx: o provedor PODE ter processado — o chamador
+  // não deve assumir falha nem sucesso; deve reconciliar antes de reenviar.
+  | { ok: false; motivo: string; httpStatus?: number; incerto?: boolean };
+
+/**
+ * Solicita estorno INTEGRAL (sem `amount` no corpo) de um pagamento.
+ * Headers obrigatórios da API: `X-Idempotency-Key` fixa por tentativa
+ * (reenvio com a mesma chave devolve o mesmo resultado — nunca duplica)
+ * e `X-Render-In-Process-Refunds` para o Pix aceitar o pedido (201
+ * `in_process` em vez de 400 quando a devolução exige render).
+ */
+export async function criarEstornoMp(
+  token: string,
+  pagamentoId: string,
+  idempotencyKey: string
+): Promise<RespostaRefundMp> {
+  try {
+    const r = await fetch(
+      `${MP_API}/v1/payments/${encodeURIComponent(pagamentoId)}/refunds`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": idempotencyKey,
+          "X-Render-In-Process-Refunds": "true",
+        },
+        body: "{}",
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+    const corpo = (await r.json().catch(() => null)) as {
+      id?: unknown;
+      status?: unknown;
+      amount?: unknown;
+      message?: string;
+    } | null;
+    if (r.ok) {
+      return {
+        ok: true,
+        refund: {
+          id: String(corpo?.id ?? ""),
+          status: String(corpo?.status ?? "in_process"),
+          amount: corpo?.amount != null ? Number(corpo.amount) : null,
+        },
+      };
+    }
+    return {
+      ok: false,
+      httpStatus: r.status,
+      motivo: corpo?.message || `HTTP ${r.status}`,
+    };
+  } catch (err) {
+    // Timeout, DNS, TLS, corpo ilegível: estado desconhecido no provedor.
+    return { ok: false, incerto: true, motivo: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Lista os refunds de um pagamento — usada para reconciliar tentativas
+ * com resposta perdida/timeout e para o botão "Verificar status".
+ */
+export async function listarEstornosMp(
+  token: string,
+  pagamentoId: string
+): Promise<
+  | { ok: true; refunds: Array<{ id: string; status: string; amount: number | null }> }
+  | { ok: false; motivo: string }
+> {
+  try {
+    const r = await fetch(
+      `${MP_API}/v1/payments/${encodeURIComponent(pagamentoId)}/refunds`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+    if (!r.ok) {
+      const corpo = (await r.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, motivo: corpo?.message || `HTTP ${r.status}` };
+    }
+    const corpo = (await r.json()) as { data?: unknown };
+    const lista = Array.isArray(corpo.data) ? corpo.data : [];
+    return {
+      ok: true,
+      refunds: lista.map((raw) => {
+        const c = raw as { id?: unknown; status?: unknown; amount?: unknown };
+        return {
+          id: String(c.id ?? ""),
+          status: String(c.status ?? ""),
+          amount: c.amount != null ? Number(c.amount) : null,
+        };
+      }),
+    };
+  } catch (err) {
+    return { ok: false, motivo: err instanceof Error ? err.message : String(err) };
+  }
+}

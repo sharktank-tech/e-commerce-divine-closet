@@ -271,6 +271,7 @@ model Order {
   deletedAt     DateTime?
 
   items             OrderItem[]
+  refund            Refund?
   reviews           Review[]
   reviewRequestedAt DateTime?
   entregueEm        DateTime?
@@ -278,6 +279,40 @@ model Order {
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+}
+
+
+enum RefundStatus {
+  REQUESTED
+  IN_PROCESS
+  APPROVED
+  REJECTED
+}
+
+// Estorno integral de um pedido via Mercado Pago (1:1 — só um estorno por
+// pedido). status muda SOMENTE com confirmação real do provedor:
+// REQUESTED = chamada ao MP em curso/incerta; IN_PROCESS = refund aceito,
+// aguardando liquidação; APPROVED/REJECTED = resolvido. O pedido só vira
+// REFUNDED após APPROVED (nunca apenas por tentativa).
+model Refund {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId        String        @unique @db.Uuid
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentId      String
+  amount         Decimal       @db.Decimal(10, 2)
+  status         RefundStatus  @default(REQUESTED)
+  mpRefundId     String?
+  attempt        Int           @default(1)
+  idempotencyKey String        @unique
+  requestedBy    String?       @db.Uuid // admin que solicitou; null = sistema (reconciliação)
+  requestedAt    DateTime      @default(now())
+  resolvedAt     DateTime?
+  lastError      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([status])
+  @@index([paymentId])
 }
 
 model OrderItem {
