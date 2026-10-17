@@ -5,6 +5,7 @@ import {
   listarEstornosMp,
   traduzirErroMp,
 } from "@/lib/mercadopago";
+import { notificarErp } from "@/lib/erp";
 
 // Orquestração de estorno INTEGRAL via Mercado Pago.
 // Regra de ouro: o pedido só passa a REFUNDED/APPROVED quando o provedor
@@ -78,8 +79,8 @@ function paraRegistro(r: {
  * SHIPPED/DELIVERED/CANCELLED). Idempotente — reprocessos não mudam nada.
  * ATENÇÃO: não devolve estoque (estorno não é devolução automática).
  */
-async function atualizarPedidoEstornado(db: Db, orderId: string): Promise<void> {
-  await db.order.updateMany({
+async function atualizarPedidoEstornado(db: Db, orderId: string): Promise<boolean> {
+  const mudou = await db.order.updateMany({
     where: { id: orderId, paymentStatus: "PAID" },
     data: { paymentStatus: "REFUNDED" },
   });
@@ -87,6 +88,25 @@ async function atualizarPedidoEstornado(db: Db, orderId: string): Promise<void> 
     where: { id: orderId, status: { in: ["PENDING", "PAID", "PROCESSING"] } },
     data: { status: "REFUNDED" },
   });
+  return (mudou.count ?? 0) > 0;
+}
+
+/** ERP: só quando o pedido efetivamente passou a REFUNDED (não em reprocessos). */
+async function avisarEstornoConfirmado(db: Db, orderId: string): Promise<void> {
+  try {
+    const o = await db.order.findUnique({
+      where: { id: orderId },
+      select: { number: true, total: true },
+    });
+    if (o) {
+      void notificarErp("pedido_estornado", {
+        numero: o.number,
+        total: Number(o.total),
+      });
+    }
+  } catch (err) {
+    console.error("[estorno:erp]", err);
+  }
 }
 
 /**
@@ -102,7 +122,7 @@ export async function confirmarEstornoNotificado(
   if (!orderId) return;
   const order = await db.order.findUnique({
     where: { id: orderId },
-    select: { id: true, total: true },
+    select: { id: true, number: true, total: true },
   });
   if (!order) return;
 
@@ -134,7 +154,13 @@ export async function confirmarEstornoNotificado(
     }
   }
 
-  await atualizarPedidoEstornado(db, orderId);
+  const mudou = await atualizarPedidoEstornado(db, orderId);
+  if (mudou) {
+    void notificarErp("pedido_estornado", {
+      numero: order.number,
+      total: Number(order.total),
+    });
+  }
 }
 
 async function aplicarResultado(
@@ -155,7 +181,8 @@ async function aplicarResultado(
       },
     });
     if (orderId) {
-      await atualizarPedidoEstornado(db, orderId);
+      const mudou = await atualizarPedidoEstornado(db, orderId);
+      if (mudou) await avisarEstornoConfirmado(db, orderId);
     }
   } else if (refund.status === "in_process") {
     await db.refund.updateMany({

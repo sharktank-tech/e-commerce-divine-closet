@@ -241,6 +241,34 @@ model CartItem {
   @@unique([cartId, productId, size, color])
 }
 
+
+enum ErpEventStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  DEAD
+}
+
+// Fila persistente de eventos loja → ERP. A PK é o event_id do envelope
+// (reenfileirar o mesmo evento não duplica). Entrega tentada na hora
+// (fire-and-forget) e drenada no cron com backoff exponencial; DEAD após
+// esgotar tentativas. Payload nunca sai daqui sem assinatura.
+model ErpEvent {
+  id             String         @id @db.Uuid // = event_id do envelope
+  version        Int            @default(1)
+  tipo           String
+  payload        Json
+  status         ErpEventStatus @default(PENDING)
+  attempt        Int            @default(0)
+  nextAttemptAt  DateTime       @default(now())
+  lastStatusCode Int?
+  lastError      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([status, nextAttemptAt])
+}
+
 model Order {
   id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   number        String        @unique

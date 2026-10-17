@@ -3,12 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { emails, sendEmail } from "@/lib/email";
 import { HORAS_ABANDONO, precisaLembrete } from "@/lib/carrinho-abandonado";
 import { reconciliarPixPendentes } from "@/lib/reconciliar-pix";
+import { drenarEventosErp } from "@/lib/erp";
 
 // Lembrete de carrinho abandonado (só logados — guest não tem e-mail).
 // Agendado via cron (vercel.json) com CRON_SECRET, mesma proteção da
 // rota de convite de avaliação.
 // Plano Hobby: no máximo 2 crons/dia — a reconciliação de Pix pendente
-// (rede de segurança do webhook) roda junto aqui, antes do lembrete.
+// (rede de segurança do webhook) e o dreno da fila de eventos ERP rodam
+// junto aqui, antes do lembrete.
 export async function GET(req: NextRequest) {
   try {
     const secret = process.env.CRON_SECRET;
@@ -24,6 +26,15 @@ export async function GET(req: NextRequest) {
       // não bloqueia o lembrete de carrinho
       console.error("[cron:carrinho:reconciliar-pix]", err);
       pix = { erro: true };
+    }
+
+    let erp;
+    try {
+      erp = await drenarEventosErp();
+    } catch (err) {
+      // não bloqueia o lembrete de carrinho
+      console.error("[cron:carrinho:erp]", err);
+      erp = { processados: 0, entregues: 0, erro: true };
     }
 
     const base = (process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin).replace(/\/$/, "");
@@ -81,7 +92,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ ok: true, pix, avaliados: carrinhos.length, enviados, pulados });
+    return NextResponse.json({ ok: true, pix, erp, avaliados: carrinhos.length, enviados, pulados });
   } catch (err) {
     console.error("[cron:carrinho]", err);
     return NextResponse.json({ error: "Erro no lembrete" }, { status: 500 });
