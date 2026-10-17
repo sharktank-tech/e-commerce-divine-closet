@@ -11,15 +11,19 @@ import { describe, expect, it } from "vitest";
 //
 // O teste simula o estado final de cada coluna `id` a partir do histórico de
 // migrations (CREATE + ALTERs posteriores) e exige UUID + DEFAULT — exceto
-// as tabelas legadas listadas, criadas antes do padrão atual e já corrigidas
-// diretamente no banco de produção (o histórico não é editável).
+// as tabelas legadas listadas, criadas antes do padrão atual (o histórico
+// não é editável). Ver DRIFT-BANCO-2026-10-17.md para a situação em
+// produção (uuid por push/manual, exceto AuditLog que segue TEXT).
 
 const PRISMA_DIR = join(__dirname, "..", "..", "..", "..", "..", "packages", "database", "prisma");
 const MIGRATIONS_DIR = join(PRISMA_DIR, "migrations");
 
-// Models com id TEXT no histórico de migrations (init/features anteriores ao
-// padrão UUID+DEFAULT). Produção já os possui uuid+default (ajuste manual);
-// quaisquer NOVAS tabelas devem seguir o padrão atual e não entrar aqui.
+// Models cujo id termina TEXT no histórico de migrations (init/features
+// anteriores ao padrão UUID+DEFAULT). Em produção: uuid+default (conversão
+// fora do histórico via push/manual) — EXCETO AuditLog, que permanece
+// TEXT+default (funciona porque o DEFAULT gera uuid; o tipo diverge do
+// schema @db.Uuid, divergência conhecida e documentada). Qualquer NOVA
+// tabela deve seguir o padrão atual e não entrar aqui.
 const LEGADO_TEXT_OK = new Set([
   "User",
   "Address",
@@ -35,7 +39,6 @@ const LEGADO_TEXT_OK = new Set([
   "Coupon",
   "Banner",
   "AuditLog",
-  "Payment",
 ]);
 
 type EstadoId = { tipo: "UUID" | "TEXT" | "AUSENTE"; temDefault: boolean };

@@ -254,7 +254,7 @@ enum ErpEventStatus {
 // (fire-and-forget) e drenada no cron com backoff exponencial; DEAD após
 // esgotar tentativas. Payload nunca sai daqui sem assinatura.
 model ErpEvent {
-  id             String         @id @db.Uuid // = event_id do envelope
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid // = event_id do envelope (app envia; default p/ inserts sem id)
   version        Int            @default(1)
   tipo           String
   payload        Json
