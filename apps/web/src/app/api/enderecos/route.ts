@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { enderecoSchema } from "@/lib/validacao";
+import { type DbEnderecos, definirPadrao } from "@/lib/enderecos";
 
 const addressSchema = enderecoSchema.extend({
   label: z.string().optional(),
@@ -39,29 +40,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const count = await prisma.address.count({ where: { userId: session.sub } });
-    const isDefault = parsed.data.isDefault || count === 0;
+    const data = {
+      street: parsed.data.street,
+      // number já normalizado pelo zod (vazio → "s/n").
+      number: parsed.data.number,
+      complement: parsed.data.complement || null,
+      neighborhood: parsed.data.neighborhood,
+      city: parsed.data.city,
+      state: parsed.data.state.toUpperCase(),
+      zipCode: parsed.data.zipCode,
+    };
 
-    if (isDefault) {
-      await prisma.address.updateMany({
-        where: { userId: session.sub },
-        data: { isDefault: false },
-      });
+    // Dedupe: confirmar o MESMO endereço de novo devolve o registro já
+    // existente (200) em vez de duplicar — inclusive no fluxo do checkout.
+    const existente = await prisma.address.findFirst({
+      where: { userId: session.sub, ...data },
+    });
+    if (existente) {
+      const total = await prisma.address.count({ where: { userId: session.sub } });
+      const querPadrao = parsed.data.isDefault || total === 0;
+      const address =
+        querPadrao && !existente.isDefault
+          ? await prisma.$transaction((tx) =>
+              definirPadrao(tx as DbEnderecos, session.sub, existente.id)
+            )
+          : existente;
+      return NextResponse.json({ address, existente: true }, { status: 200 });
     }
 
-    const address = await prisma.address.create({
-      data: {
-        userId: session.sub,
-        label: parsed.data.label || "Principal",
-        street: parsed.data.street,
-        number: parsed.data.number,
-        complement: parsed.data.complement || null,
-        neighborhood: parsed.data.neighborhood,
-        city: parsed.data.city,
-        state: parsed.data.state.toUpperCase(),
-        zipCode: parsed.data.zipCode,
-        isDefault,
-      },
+    const total = await prisma.address.count({ where: { userId: session.sub } });
+    // Primeiro endereço do usuário vira padrão automaticamente.
+    const querPadrao = parsed.data.isDefault || total === 0;
+
+    // Criação + padrão numa única transação (lock na linha do usuário).
+    const address = await prisma.$transaction(async (tx) => {
+      const db = tx as DbEnderecos;
+      const criado = await db.address.create({
+        data: {
+          userId: session.sub,
+          label: parsed.data.label || "Principal",
+          ...data,
+          isDefault: false,
+        },
+      });
+      if (!querPadrao) return criado;
+      return definirPadrao(db, session.sub, criado.id);
     });
 
     return NextResponse.json({ address }, { status: 201 });

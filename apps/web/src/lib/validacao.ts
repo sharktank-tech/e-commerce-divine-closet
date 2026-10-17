@@ -119,7 +119,13 @@ export function mascararTelefone(v: string): string {
 // Cada rota estende com seus campos próprios (label, isDefault).
 export const enderecoSchema = z.object({
   street: z.string().min(3),
-  number: z.string().min(1),
+  // Número é opcional (form e backend): vazio/ausente vira "s/n" — a
+  // gravação normaliza e a exibição (conta, pedido) mostra "s/n".
+  number: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v || "s/n"),
   complement: z.string().nullish(),
   neighborhood: z.string().min(2),
   city: z.string().min(2),
