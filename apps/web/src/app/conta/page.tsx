@@ -402,7 +402,7 @@ function ContaContent() {
                 <Input label="Rua" required value={addrForm.street} onChange={(v) => setAddrForm((f) => ({ ...f, street: v }))} />
               </div>
               <div className="sm:col-span-2">
-                <Input label="Número" required value={addrForm.number} onChange={(v) => setAddrForm((f) => ({ ...f, number: v }))} />
+                <Input label="Número" value={addrForm.number} onChange={(v) => setAddrForm((f) => ({ ...f, number: v }))} hint={'Opcional — deixe vazio para exibir "s/n".'} />
               </div>
               <div className="sm:col-span-2">
                 <Input label="Complemento" value={addrForm.complement} onChange={(v) => setAddrForm((f) => ({ ...f, complement: v }))} />

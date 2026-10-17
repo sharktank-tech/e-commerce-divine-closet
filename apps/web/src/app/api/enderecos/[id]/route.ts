@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { Address } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth";
+import { getSession, type SessionPayload } from "@/lib/auth";
 import { enderecoSchema } from "@/lib/validacao";
+import { type DbEnderecos, definirPadrao } from "@/lib/enderecos";
 
 const patchSchema = enderecoSchema.partial().extend({
   label: z.string().optional(),
   isDefault: z.boolean().optional(),
 });
 
-async function own(req: NextRequest, id: string) {
+// NextResponse = falha de acesso; objeto = endereço já verificado como do dono.
+async function own(
+  req: NextRequest,
+  id: string
+): Promise<NextResponse | { session: SessionPayload; address: Address }> {
   const session = await getSession(req);
-  if (!session) return { error: NextResponse.json({ error: "Não autenticado" }, { status: 401 }) };
+  if (!session) return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   const address = await prisma.address.findUnique({ where: { id } });
   if (!address || address.userId !== session.sub) {
-    return { error: NextResponse.json({ error: "Endereço não encontrado" }, { status: 404 }) };
+    return NextResponse.json({ error: "Endereço não encontrado" }, { status: 404 });
   }
   return { session, address };
 }
@@ -23,7 +29,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const check = await own(req, id);
-    if ("error" in check) return check.error;
+    if (check instanceof NextResponse) return check;
 
     const body = await req.json();
     const parsed = patchSchema.safeParse(body);
@@ -34,16 +40,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       );
     }
 
-    const data = { ...parsed.data };
-    if (data.state) data.state = data.state.toUpperCase();
-    if (data.isDefault) {
-      await prisma.address.updateMany({
-        where: { userId: check.session!.sub },
-        data: { isDefault: false },
-      });
-    }
+    const { ...campos } = parsed.data;
+    const data: Record<string, unknown> = { ...campos };
+    if (typeof data.state === "string") data.state = data.state.toUpperCase();
 
-    const address = await prisma.address.update({ where: { id }, data });
+    // Troca de padrão: atualização + limpeza dos demais na MESMA transação
+    // (com lock no usuário) — só um padrão por conta, mesmo concorrência.
+    // isDefault=false já vai em `data` (desmarcar não afeta os demais).
+    const address = await prisma.$transaction(async (tx) => {
+      const db = tx as DbEnderecos;
+      const atualizado = await db.address.update({ where: { id }, data });
+      if (parsed.data.isDefault !== true) return atualizado;
+      return definirPadrao(db, check.session.sub, id, true);
+    });
+
     return NextResponse.json({ address });
   } catch (err) {
     console.error("[endereco:patch]", err);
@@ -55,7 +65,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     const { id } = await params;
     const check = await own(req, id);
-    if ("error" in check) return check.error;
+    if (check instanceof NextResponse) return check;
 
     await prisma.address.delete({ where: { id } });
     return NextResponse.json({ ok: true });

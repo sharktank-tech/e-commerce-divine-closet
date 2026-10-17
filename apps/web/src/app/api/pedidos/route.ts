@@ -16,12 +16,16 @@ import { getFrete, getPagamento } from "@/lib/config-loja";
 import { notificarErp } from "@/lib/erp";
 import { obterCupom } from "@/lib/cupom-cache";
 import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
+import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { cookies } from "next/headers";
 
 const checkoutSchema = z.object({
   address: enderecoSchema.extend({ label: z.string().optional() }),
+  // Endereço já salvo na conta (checkout autenticado): o pedido reutiliza o
+  // registro — sem criar cópia duplicada a cada compra. Dono verificado no servidor.
+  addressId: z.string().nullish(),
   payment: z.object({
     method: z.enum(["card", "pix", "boleto"]).default("card"),
     card: z
@@ -246,18 +250,12 @@ export const POST = comErro(async (req: NextRequest) => {
 
     // Criação atômica: endereço + pedido + itens nascem juntos ou nada nasce.
     const { order } = await prisma.$transaction(async (tx) => {
-      const address = await tx.address.create({
-        data: {
-          userId: session?.sub || null,
-          label: addr.label || "Principal",
-          street: addr.street,
-          number: addr.number,
-          complement: addr.complement || null,
-          neighborhood: addr.neighborhood,
-          city: addr.city,
-          state: addr.state.toUpperCase(),
-          zipCode: addr.zipCode,
-        },
+      // addressId: reutiliza endereço salvo da própria conta (sem duplicar).
+      // ID de outra conta ou sem sessão → EnderecoInvalidoError (400 fora).
+      const address = await resolverEnderecoPedido(tx, {
+        session,
+        addressId: parsed.data.addressId ?? null,
+        dados: addr,
       });
 
       const order = await tx.order.create({
@@ -392,6 +390,10 @@ export const POST = comErro(async (req: NextRequest) => {
     );
   } catch (err) {
     console.error("[pedidos:create]", err);
+    // addressId de outra conta / sem sessão: 400 claro (não vaza existência).
+    if (err instanceof EnderecoInvalidoError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     // Perdeu a corrida pelo último item: 409 claro em vez de 500 genérico.
     if (err instanceof Error && err.message.startsWith("Estoque insuficiente")) {
       return NextResponse.json({ error: "Estoque insuficiente para um ou mais itens" }, { status: 409 });

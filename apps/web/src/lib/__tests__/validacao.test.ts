@@ -129,4 +129,30 @@ describe("enderecoSchema", () => {
     const r = enderecoSchema.safeParse({ ...base, street: "R" });
     expect(r.success).toBe(false);
   });
+
+  it("número vazio é aceito e normalizado para s/n", () => {
+    const r = enderecoSchema.safeParse({ ...base, number: "" });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.number).toBe("s/n");
+  });
+
+  it("número ausente é aceito e normalizado para s/n", () => {
+    const { number: _omitido, ...semNumero } = base;
+    const r = enderecoSchema.safeParse(semNumero);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.number).toBe("s/n");
+  });
+
+  it("número com espaços vira s/n; com valor é preservado", () => {
+    const espacos = enderecoSchema.safeParse({ ...base, number: "   " });
+    expect(espacos.success && espacos.data.number).toBe("s/n");
+    const valor = enderecoSchema.safeParse({ ...base, number: " 42 " });
+    expect(valor.success && valor.data.number).toBe("42");
+  });
+
+  it("demais campos continuam obrigatórios (CEP, bairro, cidade)", () => {
+    expect(enderecoSchema.safeParse({ ...base, zipCode: "123" }).success).toBe(false);
+    expect(enderecoSchema.safeParse({ ...base, neighborhood: "" }).success).toBe(false);
+    expect(enderecoSchema.safeParse({ ...base, city: "" }).success).toBe(false);
+  });
 });

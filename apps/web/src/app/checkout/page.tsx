@@ -11,6 +11,23 @@ import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics } from "@/lib/analytics";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
+import {
+  SESSAO_ENDERECO_FORM,
+  SESSAO_ENDERECO_ID,
+  apagarSessao,
+  chaveFrete,
+  deveCalcularFrete,
+  enderecoDoForm,
+  enderecoParaForm,
+  enderecoValido,
+  escolherEnderecoInicial,
+  formIgualEndereco,
+  freteCobreChave,
+  gravarSessao,
+  lerSessao,
+  type EnderecoSalvo,
+  type FormEndereco,
+} from "@/lib/checkout/enderecos-checkout";
 
 type ConfigLoja = {
   frete: { fixed: number; freeFrom: number };
@@ -147,9 +164,16 @@ export default function CheckoutPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cfgLoja]);
-  const [frete, setFrete] = useState<{ price: number; eta: string } | null>(null);
+  const [frete, setFrete] = useState<{ price: number; eta: string; chave: string } | null>(null);
   const [freteLoading, setFreteLoading] = useState(false);
   const [freteError, setFreteError] = useState("");
+  // Chave da última falha: bloqueia retry automático da MESMA combinação
+  // (loop de rede) — recalcular é manual (botão) ou por mudança de chave.
+  const [freteErroChave, setFreteErroChave] = useState<string | null>(null);
+  // Controle de requisições: seq descarta respostas antigas (troca de
+  // endereço no voo) e a chave deduplica cálculo idêntico.
+  const freteSeq = useRef(0);
+  const freteChaveAndamento = useRef<string | null>(null);
 
   const [form, setForm] = useState({
     street: "",
@@ -165,6 +189,14 @@ export default function CheckoutPage() {
     cardCvv: "",
     notes: "",
   });
+
+  // Endereços salvos (autenticado): null = carregando, [] = visitante.
+  const [enderecos, setEnderecos] = useState<EnderecoSalvo[] | null>(null);
+  const [enderecoId, setEnderecoId] = useState<string | null>(null);
+  const [modoNovo, setModoNovo] = useState(false);
+  const [usarPadrao, setUsarPadrao] = useState(false);
+  const [salvandoEndereco, setSalvandoEndereco] = useState(false);
+  const [erroEndereco, setErroEndereco] = useState("");
   const checkoutTracked = useRef(false);
 
   async function carregarCarrinho() {
@@ -203,10 +235,114 @@ export default function CheckoutPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  // Campos de endereço: editar manualmente a um endereço selecionado vira
+  // "novo endereço" (o salvo deixa de corresponder ao form).
+  function setEnderecoCampo(key: keyof FormEndereco, value: string) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setEnderecoId(null);
+    setModoNovo(true);
+    apagarSessao(SESSAO_ENDERECO_ID);
+  }
+
+  function aplicarEnderecoSalvo(a: EnderecoSalvo) {
+    setForm((f) => ({ ...f, ...enderecoParaForm(a) }));
+    setEnderecoId(a.id);
+    setModoNovo(false);
+    setUsarPadrao(a.isDefault);
+    apagarSessao(SESSAO_ENDERECO_FORM);
+    gravarSessao(SESSAO_ENDERECO_ID, a.id);
+  }
+
+  function escolherNovoEndereco() {
+    setEnderecoId(null);
+    setModoNovo(true);
+    setUsarPadrao((enderecos ?? []).length === 0);
+    apagarSessao(SESSAO_ENDERECO_ID);
+    setForm((f) => ({
+      ...f,
+      street: "",
+      number: "",
+      complement: "",
+      neighborhood: "",
+      city: "",
+      state: "",
+      zipCode: "",
+    }));
+  }
+
+  // Carrega os endereços da conta e aplica a seleção automática:
+  // escolha guardada desta compra → padrão → o único → exigir seleção.
+  useEffect(() => {
+    if (me === undefined) return;
+    if (!me) {
+      setEnderecos([]);
+      return;
+    }
+    let cancelado = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/enderecos");
+        if (!r.ok) {
+          if (!cancelado) setEnderecos([]);
+          return;
+        }
+        const d = await r.json();
+        if (cancelado) return;
+        const lista: EnderecoSalvo[] = d.addresses || [];
+        setEnderecos(lista);
+        const guardado = lerSessao(SESSAO_ENDERECO_ID);
+        const guardadoExiste = !!guardado && lista.some((a) => a.id === guardado);
+        if (guardado && !guardadoExiste) apagarSessao(SESSAO_ENDERECO_ID);
+        const escolhido = escolherEnderecoInicial(lista, guardadoExiste ? guardado : null);
+        if (escolhido) {
+          aplicarEnderecoSalvo(escolhido);
+          return;
+        }
+        // Sem seleção automática: restaura o form manual desta compra.
+        const formGuardado = lerSessao(SESSAO_ENDERECO_FORM);
+        if (formGuardado) {
+          try {
+            setForm((f) => ({ ...f, ...JSON.parse(formGuardado) }));
+            setModoNovo(true);
+          } catch {
+            /* snapshot corrompido — ignora */
+          }
+        }
+      } catch {
+        if (!cancelado) setEnderecos([]);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
+
+  // Persiste só os campos de endereço da compra atual (refresh mantém a
+  // escolha). Dados de cartão nunca são gravados.
+  useEffect(() => {
+    if (loading) return;
+    const t = setTimeout(() => {
+      if (form.street || form.zipCode || form.city) {
+        gravarSessao(SESSAO_ENDERECO_FORM, JSON.stringify(enderecoDoForm(form)));
+      } else {
+        apagarSessao(SESSAO_ENDERECO_FORM);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.street, form.number, form.complement, form.neighborhood, form.city, form.state, form.zipCode, loading]);
+
   // CEP → endereço (ViaCEP): preenche só campos vazios; número fica manual.
+  // Editar via autofill também tira o endereço salvo da seleção.
   const { buscandoCep, erroCep, cepOk, preencherCep } = useAutofillCep(
     () => ({ street: form.street, neighborhood: form.neighborhood, city: form.city, state: form.state }),
-    (patch) => setForm((f) => ({ ...f, ...patch }))
+    (patch) => {
+      setForm((f) => ({ ...f, ...patch }));
+      setEnderecoId(null);
+      setModoNovo(true);
+      apagarSessao(SESSAO_ENDERECO_ID);
+    }
   );
 
   async function aceitarPreco(itemId: string) {
@@ -233,51 +369,88 @@ export default function CheckoutPage() {
 
   const subtotal = cart?.subtotal || 0;
   const couponFreeShipping = !!coupon?.freeShipping;
-  // Frete exibido = o da API (fonte única, já com cupom). Fallback local
-  // só antes do primeiro cálculo — o cobrado vem do mesmo pipeline.
-  const shipping =
-    frete?.price ??
-    (couponFreeShipping || subtotal >= freteCfg.freeFrom ? 0 : freteCfg.fixed);
   const discount = coupon?.discount || 0;
-  const total = Math.max(0, subtotal - discount) + shipping;
+  const freteBase = Math.max(0, subtotal - discount);
+
+  const cep8 = form.zipCode.replace(/\D/g, "");
+  const chaveAtual = chaveFrete(cep8, subtotal, coupon?.code ?? null);
+  const enderecoOk = enderecoValido(form);
+  // Frete só "existe" se o resultado corresponde à combinação atual
+  // (cep + subtotal + cupom) — nunca um valor velho nem zero de falha.
+  const freteOk = freteCobreChave(frete, chaveAtual);
+  const shipping = freteOk && frete ? frete.price : null;
+  const total = shipping === null ? null : freteBase + shipping;
+
+  // Frete automático: dispara quando o endereço fica completo (inclusive
+  // ao carregar o padrão), o carrinho muda ou o cupom muda.
+  useEffect(() => {
+    if (
+      !deveCalcularFrete({
+        enderecoOk,
+        carrinhoCarregado: !loading,
+        chaveAtual,
+        frete,
+        emAndamento: freteLoading,
+        chaveEmAndamento: freteChaveAndamento.current,
+        falhaAtual: freteErroChave === chaveAtual,
+      })
+    ) {
+      return;
+    }
+    const t = setTimeout(() => {
+      void calcFrete();
+    }, 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveAtual, enderecoOk, frete, freteLoading, loading]);
 
   function stepValid(n: number): boolean {
     if (n === 0) return !!me || (guest.email.includes("@") && guest.name.trim().length >= 2);
-    if (n === 1)
-      return (
-        form.street.length >= 3 &&
-        form.number.length >= 1 &&
-        form.neighborhood.length >= 2 &&
-        form.city.length >= 2 &&
-        form.state.length === 2 &&
-        form.zipCode.replace(/\D/g, "").length === 8
-      );
-    if (n === 2) return shipping === 0 || frete !== null;
+    if (n === 1) return enderecoValido(form); // número não é obrigatório
+    if (n === 2) return freteOk && !freteError;
     return true;
   }
 
-  // codigoCupom omitido = usa o cupom atual do estado; null = sem cupom.
-  async function calcFrete(codigoCupom?: string | null) {
-    setFreteError("");
+  // forcar: retry manual (botões) — ignora dedupe do cache de chave.
+  async function calcFrete(opcoes?: { forcar?: boolean }) {
+    const forcar = opcoes?.forcar ?? false;
+    const cupom = coupon?.code ?? null;
+    const chave = chaveFrete(cep8, subtotal, cupom);
+    if (!forcar) {
+      if (freteCobreChave(frete, chave)) return; // já calculado p/ esta chave
+      if (freteChaveAndamento.current === chave) return; // idêntica em voo
+    }
+    const seq = ++freteSeq.current;
+    freteChaveAndamento.current = chave;
     setFreteLoading(true);
+    setFreteError("");
+    setFreteErroChave(null);
     try {
-      const cep = (form.zipCode || "").replace(/\D/g, "");
-      const cupom = codigoCupom === undefined ? (coupon?.code ?? null) : codigoCupom;
-      const qs = new URLSearchParams({ cep, subtotal: String(subtotal) });
+      const qs = new URLSearchParams({ cep: cep8, subtotal: String(subtotal) });
       if (cupom) qs.set("cupom", cupom);
       const res = await fetch(`/api/frete?${qs.toString()}`);
       const data = await res.json();
+      // Resposta antiga (usuário trocou de endereço no voo) → descarta.
+      if (seq !== freteSeq.current) return;
       if (!res.ok) {
         setFrete(null);
         setFreteError(data.error || "Erro ao calcular frete");
+        setFreteErroChave(chave);
         return;
       }
       const d = data.delivery[0];
-      setFrete({ price: d.price, eta: d.eta });
+      setFrete({ price: d.price, eta: d.eta, chave });
     } catch {
-      setFreteError("Erro de conexão");
+      if (seq === freteSeq.current) {
+        setFrete(null);
+        setFreteError("Erro de conexão");
+        setFreteErroChave(chave);
+      }
     } finally {
-      setFreteLoading(false);
+      if (seq === freteSeq.current) {
+        setFreteLoading(false);
+        freteChaveAndamento.current = null;
+      }
     }
   }
 
@@ -300,10 +473,61 @@ export default function CheckoutPage() {
         discount: data.discount,
         freeShipping: data.freeShipping,
       });
-      // Cupom muda o frete: recalcula se já havia cálculo.
-      if (frete) void calcFrete(data.coupon.code);
+      // Cupom entra na chave do frete — o efeito automático recalcula.
     } catch {
       setCouponError("Erro ao validar cupom");
+    }
+  }
+
+  // Confirma o endereço no passo 1 (autenticado): salva ANTES do pagamento
+  // — falha aqui não avança (o endereço fica salvo na conta mesmo que a
+  // compra não conclua). Visitante segue sem salvar (fluxo convidado ok).
+  async function confirmarEndereco(): Promise<boolean> {
+    if (!me) return true;
+    setErroEndereco("");
+
+    const selecionado = enderecoId
+      ? (enderecos || []).find((a) => a.id === enderecoId) || null
+      : null;
+    const semMudanca =
+      !!selecionado &&
+      formIgualEndereco(form, selecionado) &&
+      usarPadrao === selecionado.isDefault;
+    if (semMudanca) return true;
+
+    setSalvandoEndereco(true);
+    try {
+      const res = await fetch(enderecoId ? `/api/enderecos/${enderecoId}` : "/api/enderecos", {
+        method: enderecoId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...enderecoDoForm(form), isDefault: usarPadrao }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErroEndereco(data.error || "Erro ao salvar o endereço");
+        return false;
+      }
+      const salvo = data.address as EnderecoSalvo;
+      setEnderecoId(salvo.id);
+      setModoNovo(false);
+      setUsarPadrao(salvo.isDefault);
+      gravarSessao(SESSAO_ENDERECO_ID, salvo.id);
+      setEnderecos((prev) => {
+        const lista = prev || [];
+        const i = lista.findIndex((a) => a.id === salvo.id);
+        if (i >= 0) {
+          const copia = [...lista];
+          copia[i] = salvo;
+          return copia;
+        }
+        return [...lista, salvo];
+      });
+      return true;
+    } catch {
+      setErroEndereco("Erro de conexão ao salvar o endereço. Tente novamente.");
+      return false;
+    } finally {
+      setSalvandoEndereco(false);
     }
   }
 
@@ -338,6 +562,31 @@ export default function CheckoutPage() {
     setSubmitting(true);
 
     try {
+      // Revalida o frete no servidor antes de concluir (fonte única
+      // /api/frete): falha aqui bloqueia o pedido com frete inválido.
+      if (!freteOk || !frete) {
+        setError("Não foi possível confirmar o frete. Volte ao passo Frete e tente novamente.");
+        return;
+      }
+      try {
+        const qs = new URLSearchParams({ cep: cep8, subtotal: String(subtotal) });
+        if (coupon?.code) qs.set("cupom", coupon.code);
+        const rr = await fetch(`/api/frete?${qs.toString()}`);
+        const rd = await rr.json();
+        if (!rr.ok || !rd.delivery?.length) throw new Error("frete");
+        setFrete({
+          price: rd.delivery[0].price,
+          eta: rd.delivery[0].eta,
+          chave: chaveAtual,
+        });
+      } catch {
+        setFrete(null);
+        setFreteError("Falha ao revalidar o frete no servidor.");
+        setFreteErroChave(chaveAtual); // trava retry automático; manual p/ sair
+        setError("Não foi possível revalidar o frete. Tente novamente.");
+        return;
+      }
+
       // No modo MP, o cartão vai tokenizado (nunca o número cru).
       let pagamentoExtra = {};
       if (method === "card" && mpAtivo) {
@@ -370,6 +619,9 @@ export default function CheckoutPage() {
             state: form.state,
             zipCode: form.zipCode,
           },
+          // Endereço salvo confirmado no passo 1 → pedido reutiliza o
+          // registro (sem duplicar); servidor valida a posse do id.
+          ...(enderecoId ? { addressId: enderecoId } : {}),
           payment: {
             method,
             ...(method === "card" && !mpAtivo
@@ -386,6 +638,10 @@ export default function CheckoutPage() {
       const data = await res.json();
 
       if (res.ok && data.ok) {
+        // Compra confirmada: limpa a escolha desta compra — a próxima
+        // volta a usar o endereço padrão (autofill).
+        apagarSessao(SESSAO_ENDERECO_ID);
+        apagarSessao(SESSAO_ENDERECO_FORM);
         // Pix aguardando: exibe o QR em vez de ir ao sucesso.
         if (data.pendente && data.payment?.qr) {
           setQr({
@@ -524,6 +780,75 @@ export default function CheckoutPage() {
           {step === 1 && (
             <section className="rounded-xl border border-ink/10 bg-white p-6">
               <h2 className="font-display text-lg font-bold text-ink">Endereço de entrega</h2>
+
+              {me && enderecos === null && (
+                <p className="mt-3 text-sm text-ink-mute">Carregando seus endereços...</p>
+              )}
+
+              {me && enderecos && enderecos.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {enderecos.map((a) => (
+                    <label
+                      key={a.id}
+                      className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm ${
+                        enderecoId === a.id
+                          ? "border-ink bg-ink/5"
+                          : "border-ink/15 hover:border-ink/40"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="endereco-salvo"
+                        checked={enderecoId === a.id}
+                        onChange={() => aplicarEnderecoSalvo(a)}
+                        className="mt-1"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold text-ink">{a.label}</span>
+                          {a.isDefault && (
+                            <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-semibold text-primary-700">
+                              Padrão
+                            </span>
+                          )}
+                        </span>
+                        <span className="mt-0.5 block text-ink-soft">
+                          {a.street}, {a.number}
+                          {a.complement ? ` — ${a.complement}` : ""}
+                        </span>
+                        <span className="block text-ink-mute">
+                          {a.neighborhood} — {a.city}/{a.state} · CEP {a.zipCode}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                  <label
+                    className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${
+                      modoNovo ? "border-ink bg-ink/5" : "border-ink/15 hover:border-ink/40"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="endereco-salvo"
+                      checked={modoNovo}
+                      onChange={() => escolherNovoEndereco()}
+                      className="mt-0"
+                    />
+                    <span className="font-semibold text-ink">Cadastrar novo endereço</span>
+                  </label>
+
+                  {enderecos.length > 1 &&
+                    !enderecos.some((a) => a.isDefault) &&
+                    !enderecoId &&
+                    !modoNovo && (
+                      <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+                        Você tem vários endereços salvos. Selecione um para esta compra
+                        (ou cadastre um novo) e marque o padrão.
+                      </p>
+                    )}
+                </div>
+              )}
+
               <div className="mt-4 grid gap-4 sm:grid-cols-6">
                 <div className="sm:col-span-2">
                   <Input
@@ -531,7 +856,7 @@ export default function CheckoutPage() {
                     required
                     placeholder="00000-000"
                     value={form.zipCode}
-                    onChange={(v) => set("zipCode", v)}
+                    onChange={(v) => setEnderecoCampo("zipCode", v)}
                     onBlur={(v) => void preencherCep(v)}
                     hint="Digite seu CEP para preencher o endereço automaticamente."
                   />
@@ -542,24 +867,44 @@ export default function CheckoutPage() {
                   )}
                 </div>
                 <div className="sm:col-span-4">
-                  <Input label="Rua" required value={form.street} onChange={(v) => set("street", v)} />
+                  <Input label="Rua" required value={form.street} onChange={(v) => setEnderecoCampo("street", v)} />
                 </div>
                 <div className="sm:col-span-2">
-                  <Input label="Número" required value={form.number} onChange={(v) => set("number", v)} />
+                  <Input
+                    label="Número"
+                    value={form.number}
+                    onChange={(v) => setEnderecoCampo("number", v)}
+                    hint={'Opcional — deixe vazio para exibir "s/n".'}
+                  />
                 </div>
                 <div className="sm:col-span-3">
-                  <Input label="Complemento" value={form.complement} onChange={(v) => set("complement", v)} />
+                  <Input label="Complemento" value={form.complement} onChange={(v) => setEnderecoCampo("complement", v)} />
                 </div>
                 <div className="sm:col-span-3">
-                  <Input label="Bairro" required value={form.neighborhood} onChange={(v) => set("neighborhood", v)} />
+                  <Input label="Bairro" required value={form.neighborhood} onChange={(v) => setEnderecoCampo("neighborhood", v)} />
                 </div>
                 <div className="sm:col-span-3">
-                  <Input label="Cidade" required value={form.city} onChange={(v) => set("city", v)} />
+                  <Input label="Cidade" required value={form.city} onChange={(v) => setEnderecoCampo("city", v)} />
                 </div>
                 <div className="sm:col-span-1">
-                  <Input label="UF" required maxLength={2} value={form.state} onChange={(v) => set("state", v.toUpperCase())} />
+                  <Input label="UF" required maxLength={2} value={form.state} onChange={(v) => setEnderecoCampo("state", v.toUpperCase())} />
                 </div>
               </div>
+
+              {me && (
+                <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-ink-soft">
+                  <input
+                    type="checkbox"
+                    checked={usarPadrao}
+                    onChange={(e) => setUsarPadrao(e.target.checked)}
+                  />
+                  Usar como endereço padrão
+                </label>
+              )}
+
+              {erroEndereco && (
+                <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{erroEndereco}</p>
+              )}
             </section>
           )}
 
@@ -567,7 +912,7 @@ export default function CheckoutPage() {
             <section className="rounded-xl border border-ink/10 bg-white p-6">
               <h2 className="font-display text-lg font-bold text-ink">Frete</h2>
               <p className="mt-1 text-xs text-ink-mute">
-                Prazo e valor estimados para o CEP do endereço informado.
+                Prazo e valor calculados automaticamente para o CEP do endereço.
               </p>
               <div className="mt-4 flex flex-wrap items-end gap-3">
                 <div className="w-44">
@@ -575,25 +920,50 @@ export default function CheckoutPage() {
                     label="CEP"
                     placeholder="00000-000"
                     value={form.zipCode}
-                    onChange={(v) => set("zipCode", v)}
+                    onChange={(v) => setEnderecoCampo("zipCode", v)}
                   />
                 </div>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={calcFrete}
-                  disabled={freteLoading || form.zipCode.replace(/\D/g, "").length !== 8}
+                  onClick={() => void calcFrete({ forcar: true })}
+                  disabled={freteLoading || cep8.length !== 8}
                 >
                   {freteLoading ? "Calculando..." : "Calcular frete"}
                 </Button>
               </div>
-              {freteError && <p className="mt-2 text-xs text-red-600">{freteError}</p>}
-              {frete && (
-                <div className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                  Entrega padrão · {frete.eta} ·{" "}
-                  {frete.price === 0 || shipping === 0 ? "Grátis" : formatBRL(frete.price)}
+
+              {freteLoading && !freteOk && (
+                <p className="mt-4 text-sm text-ink-mute">Calculando frete...</p>
+              )}
+
+              {freteError && (
+                <div className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-700">
+                  <p>Não foi possível calcular o frete: {freteError}</p>
+                  <button
+                    type="button"
+                    className="mt-1 font-semibold underline"
+                    onClick={() => void calcFrete({ forcar: true })}
+                    disabled={freteLoading}
+                  >
+                    {freteLoading ? "Tentando..." : "Tentar novamente"}
+                  </button>
                 </div>
               )}
+
+              {freteOk && frete && (
+                <div className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                  Entrega padrão · {frete.eta} ·{" "}
+                  {frete.price === 0 ? "Grátis" : formatBRL(frete.price)}
+                </div>
+              )}
+
+              {!freteOk && !freteError && !freteLoading && (
+                <p className="mt-4 text-sm text-ink-mute">
+                  Informe um endereço completo para calcular o frete.
+                </p>
+              )}
+
               {shipping === 0 && (
                 <p className="mt-3 text-xs text-ink-mute">
                   Este pedido tem frete grátis {couponFreeShipping ? "(cupom)" : "acima de " + formatBRL(freteCfg.freeFrom)}.
@@ -729,10 +1099,17 @@ export default function CheckoutPage() {
             {step < STEPS.length - 1 && (
               <Button
                 type="button"
-                onClick={() => setStep((s) => s + 1)}
-                disabled={!stepValid(step)}
+                onClick={async () => {
+                  if (step === 1) {
+                    // Passo Endereço: salva na conta antes de avançar.
+                    const ok = await confirmarEndereco();
+                    if (!ok) return;
+                  }
+                  setStep((s) => s + 1);
+                }}
+                disabled={!stepValid(step) || (step === 1 && salvandoEndereco)}
               >
-                Continuar
+                {step === 1 && salvandoEndereco ? "Salvando..." : "Continuar"}
               </Button>
             )}
           </div>
@@ -801,11 +1178,19 @@ export default function CheckoutPage() {
             )}
             <div className="flex justify-between">
               <dt className="text-ink-mute">Frete</dt>
-              <dd>{shipping === 0 ? "Grátis" : formatBRL(shipping)}</dd>
+              <dd>
+                {shipping === null
+                  ? freteError
+                    ? "não calculado"
+                    : "—"
+                  : shipping === 0
+                    ? "Grátis"
+                    : formatBRL(shipping)}
+              </dd>
             </div>
             <div className="flex justify-between border-t border-ink/10 pt-3 text-base font-bold">
               <dt>Total</dt>
-              <dd>{formatBRL(total)}</dd>
+              <dd>{total === null ? "—" : formatBRL(total)}</dd>
             </div>
           </dl>
 
@@ -830,7 +1215,7 @@ export default function CheckoutPage() {
               onClick={() => {
                 setCoupon(null);
                 setCouponInput("");
-                if (frete) void calcFrete(null);
+                // Remover cupom muda a chave do frete → efeito recalcula.
               }}
               className="mt-4 text-xs text-ink-mute underline"
             >
@@ -843,8 +1228,13 @@ export default function CheckoutPage() {
           )}
 
           {step === STEPS.length - 1 && (
-            <Button type="submit" className="mt-5 w-full" size="lg" disabled={submitting || avisos.length > 0 || metodosAtivos.length === 0}>
-              {submitting ? "Processando..." : `Pagar ${formatBRL(total)}`}
+            <Button
+              type="submit"
+              className="mt-5 w-full"
+              size="lg"
+              disabled={submitting || avisos.length > 0 || metodosAtivos.length === 0 || total === null}
+            >
+              {submitting ? "Processando..." : total !== null ? `Pagar ${formatBRL(total)}` : "Pagar"}
             </Button>
           )}
           {avisos.length > 0 && (
