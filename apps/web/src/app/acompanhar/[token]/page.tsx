@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { formatBRL, formatDate, orderStatusLabel } from "@/lib/utils";
@@ -86,9 +87,9 @@ export default async function AcompanharPedidoPage({
 
       <p className="mt-6 text-xs text-ink-mute">
         Este link é privado e expira em 30 dias. Peça um novo em{" "}
-        <a href="/acompanhar" className="underline">
+        <Link href="/acompanhar" className="underline">
           Acompanhar pedido
-        </a>{" "}
+        </Link>{" "}
         se ele parar de funcionar.
       </p>
     </main>
