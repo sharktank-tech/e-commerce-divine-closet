@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
+import { orderStatusLabel } from "@/lib/utils";
 
 type SendEmailInput = {
   to: string;
@@ -100,10 +101,96 @@ export const emails = {
     text: [
       `Pagamento confirmado para o pedido ${number}. Estamos preparando seu envio.`,
       ...(linkAcompanhar
-        ? ["", "Acompanhe seu pedido (link privado, válido por 30 dias):", linkAcompanhar]
+        ? [
+            "",
+            "Acompanhe seu pedido:",
+            linkAcompanhar,
+            "",
+            "Guarde este e-mail — o link é privado.",
+          ]
         : []),
     ].join("\n"),
   }),
+  // E-mail por STATUS REAL do pedido — disparado quando o status muda
+  // (admin, reconciliação Pix, cancelamento) ou quando o rastreio é
+  // divulgado pela 1ª vez. Anti-duplicado na chamada (deveNotificarStatus).
+  statusPedido: (
+    number: string,
+    status: string,
+    opts: {
+      link?: string | null;
+      linkNota?: string | null;
+      tracking?: {
+        codigo: string;
+        transportadora?: string | null;
+        url?: string | null;
+      } | null;
+    } = {}
+  ) => {
+    const label = orderStatusLabel(status);
+    const frases: Record<string, string> = {
+      PENDING: "Aguardando a confirmação do pagamento.",
+      PAID: "Pagamento confirmado — estamos preparando seu envio.",
+      PROCESSING: "Seu pedido está em preparação.",
+      SHIPPED: "Seu pedido foi enviado!",
+      DELIVERED: "Seu pedido foi entregue. Obrigado por comprar com a gente!",
+      CANCELLED: "Seu pedido foi cancelado.",
+      REFUNDED:
+        "Seu pedido foi estornado — o valor volta conforme o prazo da sua forma de pagamento.",
+    };
+    const frasesTracked: Record<string, string> = {
+      SHIPPED: "Seu pedido foi enviado e já pode ser rastreado:",
+    };
+    const frase =
+      frasesTracked[status] || frases[status] || `Status do pedido: ${label}.`;
+    const linhas = [
+      `Pedido ${number} — ${label}`,
+      "",
+      frase,
+      ...(opts.tracking
+        ? [
+            "",
+            `Rastreio: ${opts.tracking.codigo}` +
+              (opts.tracking.transportadora
+                ? ` (${opts.tracking.transportadora})`
+                : ""),
+            ...(opts.tracking.url ? [opts.tracking.url] : []),
+          ]
+        : []),
+      ...(opts.link ? ["", "Acompanhe seu pedido:", opts.link] : []),
+      ...(opts.linkNota ? ["", opts.linkNota] : []),
+    ];
+    const botao = opts.link
+      ? `<p style="margin:24px 0"><a href="${opts.link}" style="display:inline-block;background:#9E2BBA;color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;padding:12px 28px;border-radius:8px">Acompanhar pedido</a></p>`
+      : "";
+    const blocoTracking = opts.tracking
+      ? `<p style="font-size:14px;margin:0 0 8px"><strong>Rastreio:</strong> ${opts.tracking.codigo}${
+          opts.tracking.transportadora ? ` (${opts.tracking.transportadora})` : ""
+        }</p>` +
+        (opts.tracking.url
+          ? `<p style="font-size:13px;margin:0 0 8px"><a href="${opts.tracking.url}" style="color:#B08D57">${opts.tracking.url}</a></p>`
+          : "")
+      : "";
+    const blocoNota = opts.linkNota
+      ? `<p style="font-size:12px;color:#6b7280">${opts.linkNota}</p>`
+      : "";
+    const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1f2937">
+  <div style="background:#9E2BBA;padding:24px 32px;text-align:center">
+    <span style="font-family:Georgia,serif;font-size:24px;font-weight:bold;color:#ffffff">Divine Closet</span>
+  </div>
+  <div style="padding:32px;background:#ffffff">
+    <h1 style="font-size:20px;color:#9E2BBA;margin:0 0 16px">Pedido ${number}: ${label}</h1>
+    <p style="font-size:14px;line-height:1.6;margin:0 0 12px">${frase}</p>
+    ${blocoTracking}
+    ${botao}
+    ${blocoNota}
+  </div>
+  <div style="background:#f3f4f6;padding:16px 32px;text-align:center;font-size:11px;color:#9ca3af">
+    Divine Closet — Moda que eleva o seu dia
+  </div>
+</div>`;
+    return { subject: `Pedido ${number}: ${label}`, text: linhas.join("\n"), html };
+  },
   acompanharPedidos: (links: { numero: string; url: string }[]) => ({
     subject: "Links de acompanhamento dos seus pedidos",
     text: [

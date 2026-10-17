@@ -2,10 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { emails, sendEmail } from "@/lib/email";
 import { invalidarCupom } from "@/lib/cupom-cache";
 import { notificarErp } from "@/lib/erp";
-import {
-  criarTokenAcompanhamento,
-  linkAcompanhamento,
-} from "@/lib/pedidos/acompanhar";
+import { montarLinkAcompanhamento } from "@/lib/pedidos/notificar-status";
 
 // Pós-aprovação do pedido — caminho único para confirmação síncrona
 // (mock/cartão aprovado na hora) e assíncrona (Pix via webhook do MP).
@@ -33,6 +30,7 @@ type BancoFinalizar = {
       id: string;
       number: string;
       paymentStatus: string;
+      userId: string | null;
       guestEmail: string | null;
       couponCode: string | null;
       total: unknown;
@@ -157,20 +155,18 @@ export async function finalizarPedidoPago(
     }
   });
 
-  // Pedido de CONVIDADO: cria link privado de acompanhamento (só se não
-  // existe ativo) e inclui no e-mail de confirmação. Best-effort: falha de
-  // token nunca derruba a finalização.
+  // Link de acompanhamento no e-mail de confirmação: logado → /conta;
+  // convidado → link privado novo (só se não existe token ativo).
+  // Best-effort: falha de link nunca derruba a finalização.
   let linkAcompanhar: string | null = null;
-  if (!order.user && order.guestEmail && db.orderTrackToken) {
-    try {
-      const token = await criarTokenAcompanhamento(
-        { orderId: order.id, sentTo: order.guestEmail },
-        db as unknown as Parameters<typeof criarTokenAcompanhamento>[1]
-      );
-      if (token) linkAcompanhar = linkAcompanhamento(token);
-    } catch (err) {
-      console.error("[finalizar:tracktoken]", err);
-    }
+  try {
+    const { link } = await montarLinkAcompanhamento(
+      { id: order.id, userId: order.userId ?? null, guestEmail: order.guestEmail },
+      db as unknown as Parameters<typeof montarLinkAcompanhamento>[1]
+    );
+    linkAcompanhar = link;
+  } catch (err) {
+    console.error("[finalizar:link-acompanhar]", err);
   }
 
   const mail = emails.orderPaid(order.number, linkAcompanhar);

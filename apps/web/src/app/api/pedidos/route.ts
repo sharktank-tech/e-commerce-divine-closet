@@ -14,6 +14,7 @@ import {
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 import { getFrete, getPagamento } from "@/lib/config-loja";
 import { notificarErp } from "@/lib/erp";
+import { enviarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 import { obterCupom } from "@/lib/cupom-cache";
 import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
@@ -361,6 +362,10 @@ export const POST = comErro(async (req: NextRequest) => {
         numero: order.number,
         motivo: result.message,
       });
+      void enviarEmailStatusPedido({
+        orderId: order.id,
+        status: "CANCELLED",
+      }).catch((err) => console.error("[pedidos:cancel-email]", err));
     }
 
     await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });

@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
-import { sendEmail } from "@/lib/email";
-import { orderStatusLabel } from "@/lib/utils";
 import { validarUrlRastreio } from "@/lib/rastreio";
+import {
+  deveNotificarStatus,
+  enviarEmailStatusPedido,
+} from "@/lib/pedidos/notificar-status";
 
 const schema = z.object({
   status: z.enum([
@@ -62,6 +64,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Status inválido" }, { status: 400 });
     }
 
+    // Estado anterior p/ anti-duplicado: só notifica quando o status muda
+    // ou quando o rastreio é divulgado pela 1ª vez.
+    const anterior = await prisma.order.findUnique({
+      where: { id },
+      select: { status: true, trackingCode: true },
+    });
+
     const order = await prisma.order.update({
       where: { id },
       data: {
@@ -85,12 +94,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       },
     });
 
-    if (order.user?.email) {
+    if (
+      deveNotificarStatus(
+        anterior,
+        { status: order.status, trackingCode: order.trackingCode }
+      )
+    ) {
+      // template do status REAL (não mais "atualizado" genérico);
       // notificação não bloqueia a atualização do pedido
-      sendEmail({
-        to: order.user.email,
-        subject: `Pedido ${order.number} atualizado`,
-        text: `Seu pedido ${order.number} agora está: ${orderStatusLabel(order.status)}.`,
+      void enviarEmailStatusPedido({
+        orderId: order.id,
+        status: order.status,
       }).catch((err) => console.error("[admin:pedido:email]", err));
     }
 

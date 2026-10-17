@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { buscarPagamento } from "@/lib/mercadopago";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 import { notificarErp } from "@/lib/erp";
+import { enviarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 
 // Reconciliação de Pix pendente — rede de segurança do webhook do MP.
 // Roda 1x/dia no cron de carrinho-abandonado (plano Hobby: no máximo 2
@@ -101,6 +102,10 @@ export async function reconciliarPixPendentes(opcoes?: {
             numero: pedido.number,
             motivo: `Pix não confirmado (${pagamento.status})`,
           });
+          void enviarEmailStatusPedido({
+            orderId: pedido.id,
+            status: "CANCELLED",
+          }).catch((err) => console.error("[reconciliar-pix:email]", err));
         } else {
           resumo.mantidos++;
         }

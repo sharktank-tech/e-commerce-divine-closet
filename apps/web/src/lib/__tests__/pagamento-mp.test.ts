@@ -24,6 +24,7 @@ function bancoFake(statusPagamento: string | null, estoque = 10) {
               id: "ped-1",
               number: "DC-1",
               paymentStatus: statusPagamento,
+              userId: null,
               guestEmail: "c@c.com",
               couponCode: "CUPOM10",
               total: 199.9,
