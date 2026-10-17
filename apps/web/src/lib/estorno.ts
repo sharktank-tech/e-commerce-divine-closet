@@ -6,6 +6,10 @@ import {
   traduzirErroMp,
 } from "@/lib/mercadopago";
 import { notificarErp } from "@/lib/erp";
+import {
+  enfileirarEmailStatusPedido,
+  processarEmailOutbox,
+} from "@/lib/email-outbox";
 
 // Orquestração de estorno INTEGRAL via Mercado Pago.
 // Regra de ouro: o pedido só passa a REFUNDED/APPROVED quando o provedor
@@ -110,6 +114,23 @@ async function avisarEstornoConfirmado(db: Db, orderId: string): Promise<void> {
 }
 
 /**
+ * E-mail do estado REFUNDED (template de estorno). Chamado SÓ na transição
+ * efetiva PAID→REFUNDED (o guard de updateMany impede duplicado). Grava no
+ * outbox (payload imutável + dedupeKey) e já tenta um envio — falha
+ * transitória fica PENDING para o cron; não bloqueia a orquestração.
+ */
+function enviarEmailRefundConfirmado(orderId: string): void {
+  void (async () => {
+    try {
+      const id = await enfileirarEmailStatusPedido(orderId, "REFUNDED");
+      if (id) await processarEmailOutbox(id);
+    } catch (err) {
+      console.error("[estorno:email]", err);
+    }
+  })();
+}
+
+/**
  * Quando o provedor confirma o pagamento como refunded (webhook/manual):
  * registra/aprova o estorno (1:1) e marca o pedido REFUNDED.
  * Idempotente — notificações repetidas não alteram nada.
@@ -160,6 +181,7 @@ export async function confirmarEstornoNotificado(
       numero: order.number,
       total: Number(order.total),
     });
+    enviarEmailRefundConfirmado(orderId);
   }
 }
 
@@ -182,7 +204,10 @@ async function aplicarResultado(
     });
     if (orderId) {
       const mudou = await atualizarPedidoEstornado(db, orderId);
-      if (mudou) await avisarEstornoConfirmado(db, orderId);
+      if (mudou) {
+        await avisarEstornoConfirmado(db, orderId);
+        enviarEmailRefundConfirmado(orderId);
+      }
     }
   } else if (refund.status === "in_process") {
     await db.refund.updateMany({

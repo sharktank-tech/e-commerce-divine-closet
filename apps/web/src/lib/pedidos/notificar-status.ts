@@ -71,18 +71,17 @@ export function deveNotificarStatus(
 }
 
 /**
- * Envia o e-mail do status atual do pedido (não bloqueia quem chama).
- * Retorno true só quando efetivamente houve envio programado.
+ * Renderiza o e-mail do status (sem enviar). É o payload que o outbox grava
+ * UMA vez — imutável entre tentativas, exigência da chave Idempotency-Key
+ * do Resend. Retorno null = sem pedido ou sem destinatário (nada a notificar).
  */
-export async function enviarEmailStatusPedido(
+export async function montarEmailStatusPedido(
   input: { orderId: string; status: string },
   deps: {
     db?: Db;
-    send?: typeof sendEmail;
   } = {}
-): Promise<boolean> {
+): Promise<{ to: string; subject: string; text: string; html: string | null } | null> {
   const db = deps.db ?? (prisma as unknown as Db);
-  const send = deps.send ?? sendEmail;
 
   const order = await db.order.findUnique({
     where: { id: input.orderId },
@@ -98,10 +97,10 @@ export async function enviarEmailStatusPedido(
       user: { select: { email: true } },
     },
   });
-  if (!order) return false;
+  if (!order) return null;
 
   const para = order.user?.email || order.guestEmail;
-  if (!para) return false;
+  if (!para) return null;
 
   const { link, nota } = await montarLinkAcompanhamento(
     { id: order.id, userId: order.userId, guestEmail: order.guestEmail },
@@ -120,11 +119,30 @@ export async function enviarEmailStatusPedido(
       : null,
   });
 
+  return { to: para, subject: mail.subject, text: mail.text, html: mail.html ?? null };
+}
+
+/**
+ * Envia o e-mail do status atual do pedido (não bloqueia quem chama).
+ * Retorno true só quando efetivamente houve envio programado.
+ */
+export async function enviarEmailStatusPedido(
+  input: { orderId: string; status: string },
+  deps: {
+    db?: Db;
+    send?: typeof sendEmail;
+  } = {}
+): Promise<boolean> {
+  const send = deps.send ?? sendEmail;
+
+  const mail = await montarEmailStatusPedido(input, deps);
+  if (!mail) return false;
+
   try {
-    await send({ to: para, subject: mail.subject, text: mail.text, html: mail.html });
+    await send({ to: mail.to, subject: mail.subject, text: mail.text, html: mail.html ?? undefined });
     return true;
   } catch (err) {
-    console.error("[status-email]", order.number, err);
+    console.error("[status-email]", input.orderId, err);
     return false;
   }
 }

@@ -543,3 +543,35 @@ model HistoricoPreco {
   @@index([produto_id, criado_em])
   @@map("historico_preco")
 }
+
+// Outbox de e-mail transacional com retentativa persistente (estorno e demais
+// status). Payload renderizado UMA vez na enfileiração (imutável → o Resend
+// deduplica pelo header Idempotency-Key, janela de 24h — ver
+// EMAIL-ESTORNO-RETENTATIVA.md). SENT = aceito pelo provedor (nunca antes);
+// FAILED = falha definitiva (configuração/validação ou tentativas esgotadas).
+// orderId sem FK de propósito (mesmo critério de auditoria do ErpEvent).
+enum EmailOutboxStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model EmailOutbox {
+  id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dedupeKey     String           @unique
+  kind          String
+  orderId       String?          @db.Uuid
+  recipient     String
+  subject       String
+  text          String?
+  html          String?
+  status        EmailOutboxStatus @default(PENDING)
+  attempt       Int              @default(0)
+  nextAttemptAt DateTime         @default(now())
+  lastError     String?
+  sentAt        DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([status, nextAttemptAt])
+}
