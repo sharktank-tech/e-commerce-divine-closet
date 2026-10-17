@@ -2,12 +2,33 @@ import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import { orderStatusLabel } from "@/lib/utils";
 
-type SendEmailInput = {
+export type SendEmailInput = {
   to: string;
   subject: string;
   html?: string;
   text?: string;
+  /**
+   * Chave de idempotência (Resend: header Idempotency-Key, janela de 24h).
+   * Com o payload IMUTÁVEL do outbox, repetir a mesma chave é seguro:
+   * tentativa incerta (rede/timeout) não duplica o e-mail.
+   */
+  idempotencyKey?: string;
 };
+
+/** Resultado do envio: resolvido = ACEITO pelo provedor. */
+export type ResultadoEnvio = { id?: string };
+
+/**
+ * Provedor não aceitou (ou aceitou condicionalmente). `retryable` decide se o
+ * outbox repete com backoff (rede/429/5xx) ou marca FAILED (configuração,
+ * validação, chave idempotente incompatível).
+ */
+export class EmailNaoAceito extends Error {
+  constructor(message: string, public readonly retryable: boolean) {
+    super(message);
+    this.name = "EmailNaoAceito";
+  }
+}
 
 /**
  * E-mail transacional.
@@ -15,7 +36,7 @@ type SendEmailInput = {
  * - EMAIL_DRIVER=smtp   → envio via SMTP (Zoho Mail; bloqueado a partir da Vercel)
  * - EMAIL_DRIVER=resend → envio via API Resend (produção; funciona de qualquer IP)
  */
-export async function sendEmail(input: SendEmailInput): Promise<void> {
+export async function sendEmail(input: SendEmailInput): Promise<ResultadoEnvio> {
   const driver = process.env.EMAIL_DRIVER || "mock";
 
   if (driver === "mock") {
@@ -26,7 +47,7 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     console.log(`Assunto: ${input.subject}`);
     console.log(input.text || stripHtml(input.html || ""));
     console.log("────────────────────────────────────────");
-    return;
+    return {};
   }
 
   if (driver === "smtp") {
@@ -34,8 +55,9 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
     if (!host || !user || !pass) {
-      throw new Error(
-        "SMTP não configurado (defina SMTP_HOST, SMTP_USER e SMTP_PASS)."
+      throw new EmailNaoAceito(
+        "SMTP não configurado (defina SMTP_HOST, SMTP_USER e SMTP_PASS).",
+        false
       );
     }
 
@@ -53,20 +75,33 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       auth: { user, pass },
     });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || user,
-      to: input.to,
-      subject: input.subject,
-      text: input.text,
-      html: input.html,
-    });
-    return;
+    try {
+      // SMTP não participa do Resend Idempotency-Key: sem chave, a
+      // repetição pode duplicar (limitação documentada no doc de pendências).
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || user,
+        to: input.to,
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+      });
+      return {};
+    } catch (err) {
+      // Erro de SMTP é tratado como transitório: vale retentar (rede/servidor).
+      throw new EmailNaoAceito(
+        `SMTP: ${(err as Error).message}`,
+        true
+      );
+    }
   }
 
   if (driver === "resend") {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) {
-      throw new Error("Resend não configurado (defina RESEND_API_KEY).");
+      throw new EmailNaoAceito(
+        "Resend não configurado (defina RESEND_API_KEY).",
+        false
+      );
     }
 
     const resend = new Resend(apiKey);
@@ -75,16 +110,42 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       to: input.to,
       subject: input.subject,
     };
-    const { error } = input.html
-      ? await resend.emails.send({ ...base, html: input.html })
-      : await resend.emails.send({ ...base, text: input.text ?? "" });
-    if (error) {
-      throw new Error(`Resend: ${error.message}`);
+    const payload = input.html
+      ? { ...base, html: input.html }
+      : { ...base, text: input.text ?? "" };
+
+    let resposta;
+    try {
+      resposta = await resend.emails.send(
+        payload,
+        input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
+      );
+    } catch (err) {
+      // Falha de rede/SDK sem resposta HTTP: transitória.
+      throw new EmailNaoAceito(`Resend: ${(err as Error).message}`, true);
     }
-    return;
+
+    const { data, error } = resposta;
+    if (error) {
+      // 4xx determinístico (validação/config/chave) não resolve repetindo;
+      // rede implícita (statusCode null), 408/429/5xx e concorrência na mesma
+      // chave sim — o outbox repete com a MESMA chave (dedupeKey imutável).
+      const s = error.statusCode;
+      const transitorio =
+        error.name === "concurrent_idempotent_requests" ||
+        error.name === "rate_limit_exceeded" ||
+        error.name === "internal_server_error" ||
+        error.name === "application_error" ||
+        s === null ||
+        s === 408 ||
+        s === 429 ||
+        s >= 500;
+      throw new EmailNaoAceito(`Resend: ${error.message}`, transitorio);
+    }
+    return { id: data?.id };
   }
 
-  throw new Error(`Driver de e-mail não suportado: ${driver}`);
+  throw new EmailNaoAceito(`Driver de e-mail não suportado: ${driver}`, false);
 }
 
 function stripHtml(html: string) {

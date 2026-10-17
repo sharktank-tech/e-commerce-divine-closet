@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Orquestração de estorno: o pedido só vira REFUNDED com confirmação real
 // do provedor; respostas incertas ficam REQUESTED + reconciliação; reenvio
 // reusa a chave de idempotência; erros 4xx = recusado.
-const { prismaMock, criarEstornoMock, listarEstornosMock, enviarEmailStatusMock } =
+const { prismaMock, criarEstornoMock, listarEstornosMock, enfileirarEmailMock, processarOutboxMock } =
   vi.hoisted(() => ({
     prismaMock: {
       order: { findUnique: vi.fn(), updateMany: vi.fn() },
@@ -11,7 +11,8 @@ const { prismaMock, criarEstornoMock, listarEstornosMock, enviarEmailStatusMock 
     },
     criarEstornoMock: vi.fn(),
     listarEstornosMock: vi.fn(),
-    enviarEmailStatusMock: vi.fn(),
+    enfileirarEmailMock: vi.fn(),
+    processarOutboxMock: vi.fn(),
   }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
@@ -20,8 +21,9 @@ vi.mock("@/lib/mercadopago", () => ({
   listarEstornosMp: listarEstornosMock,
   traduzirErroMp: (m: string) => m,
 }));
-vi.mock("@/lib/pedidos/notificar-status", () => ({
-  enviarEmailStatusPedido: enviarEmailStatusMock,
+vi.mock("@/lib/email-outbox", () => ({
+  enfileirarEmailStatusPedido: enfileirarEmailMock,
+  processarEmailOutbox: processarOutboxMock,
 }));
 
 import {
@@ -69,7 +71,8 @@ beforeEach(() => {
   prismaMock.refund.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.refund.create.mockResolvedValue(refundFake());
   listarEstornosMock.mockResolvedValue({ ok: true, refunds: [] });
-  enviarEmailStatusMock.mockResolvedValue(true);
+  enfileirarEmailMock.mockResolvedValue("outbox-1");
+  processarOutboxMock.mockResolvedValue("ENVIADO");
 });
 
 describe("solicitarEstorno — validações", () => {
@@ -305,11 +308,11 @@ describe("reconciliarEstorno", () => {
     expect(r.confirmado).toBe(true);
     expect(r.registro.status).toBe("APPROVED");
     expect(prismaMock.order.updateMany).toHaveBeenCalled();
-    expect(enviarEmailStatusMock).toHaveBeenCalledTimes(1);
-    expect(enviarEmailStatusMock).toHaveBeenCalledWith({
-      orderId: "order-1",
-      status: "REFUNDED",
-    });
+    expect(enfileirarEmailMock).toHaveBeenCalledTimes(1);
+    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(processarOutboxMock).toHaveBeenCalledTimes(1);
+    expect(processarOutboxMock).toHaveBeenCalledWith("outbox-1");
   });
 
   it("sem transição de estado (guard 0) → não repete e-mail REFUNDED", async () => {
@@ -325,7 +328,8 @@ describe("reconciliarEstorno", () => {
 
     const r = await reconciliarEstorno({ orderId: "order-1", token: TOKEN });
     expect(r.confirmado).toBe(true);
-    expect(enviarEmailStatusMock).not.toHaveBeenCalled();
+    expect(enfileirarEmailMock).not.toHaveBeenCalled();
+    expect(processarOutboxMock).not.toHaveBeenCalled();
   });
 
   it("APPROVED local → retorna sem consultar o provedor", async () => {
@@ -368,11 +372,11 @@ describe("confirmarEstornoNotificado (webhook refunded)", () => {
         data: { status: "REFUNDED" },
       })
     );
-    expect(enviarEmailStatusMock).toHaveBeenCalledTimes(1);
-    expect(enviarEmailStatusMock).toHaveBeenCalledWith({
-      orderId: "order-1",
-      status: "REFUNDED",
-    });
+    expect(enfileirarEmailMock).toHaveBeenCalledTimes(1);
+    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(processarOutboxMock).toHaveBeenCalledTimes(1);
+    expect(processarOutboxMock).toHaveBeenCalledWith("outbox-1");
   });
 
   it("notificação repetida (pedido já REFUNDED) → não reenvia e-mail", async () => {
@@ -384,7 +388,8 @@ describe("confirmarEstornoNotificado (webhook refunded)", () => {
 
     await confirmarEstornoNotificado({ paymentId: "111", orderId: "order-1" });
 
-    expect(enviarEmailStatusMock).not.toHaveBeenCalled();
+    expect(enfileirarEmailMock).not.toHaveBeenCalled();
+    expect(processarOutboxMock).not.toHaveBeenCalled();
   });
 
   it("sem registro local → cria histórico (chave estável mp:<paymentId>)", async () => {

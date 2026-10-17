@@ -4,13 +4,16 @@ import { emails, sendEmail } from "@/lib/email";
 import { HORAS_ABANDONO, precisaLembrete } from "@/lib/carrinho-abandonado";
 import { reconciliarPixPendentes } from "@/lib/reconciliar-pix";
 import { drenarEventosErp } from "@/lib/erp";
+import { drenarEmailsOutbox } from "@/lib/email-outbox";
 
 // Lembrete de carrinho abandonado (só logados — guest não tem e-mail).
 // Agendado via cron (vercel.json) com CRON_SECRET, mesma proteção da
 // rota de convite de avaliação.
-// Plano Hobby: no máximo 2 crons/dia — a reconciliação de Pix pendente
-// (rede de segurança do webhook) e o dreno da fila de eventos ERP rodam
-// junto aqui, antes do lembrete.
+// Plano Hobby: cada cron roda no máx. 1x/dia (expressões mais frequentes
+// falham no deploy). A reconciliação de Pix pendente (rede de segurança do
+// webhook), o dreno da fila de eventos ERP e o dreno do outbox de e-mails
+// rodam junto aqui, antes do lembrete (18h tem um 2º dreno em
+// /api/cron/emails).
 export async function GET(req: NextRequest) {
   try {
     const secret = process.env.CRON_SECRET;
@@ -35,6 +38,15 @@ export async function GET(req: NextRequest) {
       // não bloqueia o lembrete de carrinho
       console.error("[cron:carrinho:erp]", err);
       erp = { processados: 0, entregues: 0, erro: true };
+    }
+
+    let emailOutbox;
+    try {
+      emailOutbox = await drenarEmailsOutbox();
+    } catch (err) {
+      // não bloqueia o lembrete de carrinho
+      console.error("[cron:carrinho:email-outbox]", err);
+      emailOutbox = { processados: 0, enviados: 0, falhas: 0, erro: true };
     }
 
     const base = (process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin).replace(/\/$/, "");
@@ -92,7 +104,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ ok: true, pix, erp, avaliados: carrinhos.length, enviados, pulados });
+    return NextResponse.json({ ok: true, pix, erp, emailOutbox, avaliados: carrinhos.length, enviados, pulados });
   } catch (err) {
     console.error("[cron:carrinho]", err);
     return NextResponse.json({ error: "Erro no lembrete" }, { status: 500 });
