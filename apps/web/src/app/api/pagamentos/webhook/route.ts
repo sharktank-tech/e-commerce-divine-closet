@@ -8,6 +8,7 @@ import {
   mapearStatusMp,
   verificarAssinaturaWebhook,
 } from "@/lib/mercadopago";
+import { confirmarEstornoNotificado } from "@/lib/estorno";
 
 // Webhook do Mercado Pago (pagamentos assíncronos, ex.: Pix).
 // Configure a URL `https://<app>/api/pagamentos/webhook` no painel do MP.
@@ -58,6 +59,18 @@ export const POST = comErro(async (req: NextRequest) => {
   if (!pagamento.referenciaExterna) {
     return NextResponse.json({ received: true });
   }
+
+  // Pagamento estornado no provedor (ex.: estorno solicitado no admin +
+  // confirmação assíncrona, ou estorno feito fora daqui): registra/fecha o
+  // estorno local e marca o pedido REFUNDED (idempotente, guarda por status).
+  if (pagamento.status === "refunded") {
+    await confirmarEstornoNotificado({
+      paymentId: pagamento.id,
+      orderId: pagamento.referenciaExterna,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
   if (mapearStatusMp(pagamento.status) !== "PAID") {
     return NextResponse.json({ received: true });
   }

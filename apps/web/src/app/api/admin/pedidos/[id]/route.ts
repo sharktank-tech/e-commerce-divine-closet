@@ -36,6 +36,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       where: { id },
       include: {
         items: true,
+        refund: true,
         user: { select: { id: true, name: true, email: true, phone: true } },
         address: true,
       },

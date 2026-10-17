@@ -22,6 +22,15 @@ type Order = {
   trackingCode?: string | null;
   trackingCarrier?: string | null;
   trackingUrl?: string | null;
+  paymentId?: string | null;
+  refund?: {
+    id: string;
+    status: string;
+    mpRefundId?: string | null;
+    attempt: number;
+    lastError?: string | null;
+    resolvedAt?: string | null;
+  } | null;
   couponCode?: string | null;
   createdAt: string;
   guestName?: string | null;
@@ -113,6 +122,64 @@ export default function AdminPedidoDetalhePage({
       });
       if (res.ok) await load();
       else alert("Erro ao salvar rastreio");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function estornar() {
+    if (!order) return;
+    const total = formatBRL(Number(order.total));
+    const ok = window.confirm(
+      `Estornar integralmente ${total} do pedido ${order.number}?\n\n` +
+        "• Devolução feita pelo Mercado Pago (prazo da forma de pagamento).\n" +
+        "• O pedido só será marcado como ESTORNADO após confirmação do provedor.\n" +
+        "• Ação não pode ser desfeita."
+    );
+    if (!ok) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/pedidos/${order.id}/estornar`, { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        refund?: { status?: string };
+      };
+      if (res.ok) {
+        alert(
+          body.refund?.status === "APPROVED"
+            ? "Estorno confirmado pelo Mercado Pago."
+            : "Solicitação enviada. O pedido será estornado quando o Mercado Pago confirmar."
+        );
+        await load();
+      } else {
+        alert(body.error || "Erro ao solicitar estorno");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function verificarEstorno() {
+    if (!order) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/admin/pedidos/${order.id}/estorno/status`, {
+        method: "POST",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        confirmado?: boolean;
+      };
+      if (res.ok) {
+        alert(
+          body.confirmado
+            ? "Mercado Pago confirmou o estorno."
+            : "Ainda sem confirmação do Mercado Pago. Tente novamente em instantes."
+        );
+        await load();
+      } else {
+        alert(body.error || "Erro ao verificar status");
+      }
     } finally {
       setSaving(false);
     }
@@ -259,6 +326,57 @@ export default function AdminPedidoDetalhePage({
                 Atual: <span className="font-mono">{order.trackingCode}</span>
               </p>
             )}
+          </section>
+
+          <section className="rounded-xl border border-ink/10 bg-white p-5">
+            <h2 className="font-semibold text-ink">Pagamento e estorno</h2>
+            <div className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+              <p className="text-ink-soft">
+                Status: <span className="font-medium text-ink">{order.paymentStatus}</span> ·
+                Método: {order.paymentMethod} · Total: {formatBRL(Number(order.total))}
+              </p>
+              {order.paymentId && (
+                <p className="text-ink-soft">
+                  MP: <span className="font-mono text-xs">{order.paymentId}</span>
+                </p>
+              )}
+            </div>
+
+            {order.refund && (
+              <div className="mt-3 rounded-lg border border-ink/10 bg-ink/[0.03] p-3 text-sm">
+                <p>
+                  Estorno:{" "}
+                  <span className="font-medium">
+                    {{ REQUESTED: "solicitado (aguardando confirmação)", IN_PROCESS: "em processamento no MP", APPROVED: "aprovado", REJECTED: "recusado" }[
+                      order.refund.status
+                    ] || order.refund.status}
+                  </span>{" "}
+                  · tentativa {order.refund.attempt}
+                </p>
+                {order.refund.lastError && (
+                  <p className="mt-1 text-xs text-amber-700">{order.refund.lastError}</p>
+                )}
+              </div>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {order.paymentStatus === "PAID" &&
+                (!order.refund || order.refund.status === "REJECTED") && (
+                  <Button type="button" size="sm" disabled={saving} onClick={estornar}>
+                    Solicitar estorno integral
+                  </Button>
+                )}
+              {order.refund &&
+                (order.refund.status === "REQUESTED" || order.refund.status === "IN_PROCESS") && (
+                  <Button type="button" size="sm" variant="outline" disabled={saving} onClick={verificarEstorno}>
+                    Verificar status do estorno
+                  </Button>
+                )}
+            </div>
+            <p className="mt-2 text-xs text-ink-mute">
+              Apenas estorno integral. O pedido vira ESTORNADO só após confirmação do Mercado
+              Pago; estorno não devolve estoque automaticamente.
+            </p>
           </section>
 
           {order.notes && (
