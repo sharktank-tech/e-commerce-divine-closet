@@ -3,20 +3,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Orquestração de estorno: o pedido só vira REFUNDED com confirmação real
 // do provedor; respostas incertas ficam REQUESTED + reconciliação; reenvio
 // reusa a chave de idempotência; erros 4xx = recusado.
-const { prismaMock, criarEstornoMock, listarEstornosMock } = vi.hoisted(() => ({
-  prismaMock: {
-    order: { findUnique: vi.fn(), updateMany: vi.fn() },
-    refund: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
-  },
-  criarEstornoMock: vi.fn(),
-  listarEstornosMock: vi.fn(),
-}));
+const { prismaMock, criarEstornoMock, listarEstornosMock, enviarEmailStatusMock } =
+  vi.hoisted(() => ({
+    prismaMock: {
+      order: { findUnique: vi.fn(), updateMany: vi.fn() },
+      refund: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    },
+    criarEstornoMock: vi.fn(),
+    listarEstornosMock: vi.fn(),
+    enviarEmailStatusMock: vi.fn(),
+  }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/mercadopago", () => ({
   criarEstornoMp: criarEstornoMock,
   listarEstornosMp: listarEstornosMock,
   traduzirErroMp: (m: string) => m,
+}));
+vi.mock("@/lib/pedidos/notificar-status", () => ({
+  enviarEmailStatusPedido: enviarEmailStatusMock,
 }));
 
 import {
@@ -64,6 +69,7 @@ beforeEach(() => {
   prismaMock.refund.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.refund.create.mockResolvedValue(refundFake());
   listarEstornosMock.mockResolvedValue({ ok: true, refunds: [] });
+  enviarEmailStatusMock.mockResolvedValue(true);
 });
 
 describe("solicitarEstorno — validações", () => {
@@ -299,6 +305,27 @@ describe("reconciliarEstorno", () => {
     expect(r.confirmado).toBe(true);
     expect(r.registro.status).toBe("APPROVED");
     expect(prismaMock.order.updateMany).toHaveBeenCalled();
+    expect(enviarEmailStatusMock).toHaveBeenCalledTimes(1);
+    expect(enviarEmailStatusMock).toHaveBeenCalledWith({
+      orderId: "order-1",
+      status: "REFUNDED",
+    });
+  });
+
+  it("sem transição de estado (guard 0) → não repete e-mail REFUNDED", async () => {
+    prismaMock.refund.findUnique
+      .mockResolvedValueOnce(refundFake({ status: "IN_PROCESS" }))
+      .mockResolvedValue(refundFake({ status: "APPROVED" }));
+    prismaMock.order.findUnique.mockResolvedValue(orderFake());
+    prismaMock.order.updateMany.mockResolvedValue({ count: 0 });
+    listarEstornosMock.mockResolvedValue({
+      ok: true,
+      refunds: [{ id: "mp-1", status: "approved", amount: 100 }],
+    });
+
+    const r = await reconciliarEstorno({ orderId: "order-1", token: TOKEN });
+    expect(r.confirmado).toBe(true);
+    expect(enviarEmailStatusMock).not.toHaveBeenCalled();
   });
 
   it("APPROVED local → retorna sem consultar o provedor", async () => {
@@ -341,6 +368,23 @@ describe("confirmarEstornoNotificado (webhook refunded)", () => {
         data: { status: "REFUNDED" },
       })
     );
+    expect(enviarEmailStatusMock).toHaveBeenCalledTimes(1);
+    expect(enviarEmailStatusMock).toHaveBeenCalledWith({
+      orderId: "order-1",
+      status: "REFUNDED",
+    });
+  });
+
+  it("notificação repetida (pedido já REFUNDED) → não reenvia e-mail", async () => {
+    prismaMock.order.findUnique.mockResolvedValue(
+      orderFake({ status: "REFUNDED", paymentStatus: "REFUNDED" })
+    );
+    prismaMock.refund.findUnique.mockResolvedValue(refundFake({ status: "APPROVED" }));
+    prismaMock.order.updateMany.mockResolvedValue({ count: 0 });
+
+    await confirmarEstornoNotificado({ paymentId: "111", orderId: "order-1" });
+
+    expect(enviarEmailStatusMock).not.toHaveBeenCalled();
   });
 
   it("sem registro local → cria histórico (chave estável mp:<paymentId>)", async () => {
