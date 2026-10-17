@@ -29,6 +29,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/registro") ||
     pathname.startsWith("/conta") ||
     pathname.startsWith("/sucesso") ||
+    pathname.startsWith("/acompanhar") ||
     pathname.startsWith("/admin") ||
     pathname.startsWith("/api/")
   ) {
@@ -99,5 +100,7 @@ export const config = {
     "/login",
     "/registro",
     "/sucesso",
+    "/acompanhar",
+    "/acompanhar/:path*",
   ],
 };

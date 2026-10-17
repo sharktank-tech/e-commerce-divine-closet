@@ -272,6 +272,7 @@ model Order {
 
   items             OrderItem[]
   refund            Refund?
+  trackToken        OrderTrackToken?
   reviews           Review[]
   reviewRequestedAt DateTime?
   entregueEm        DateTime?
@@ -313,6 +314,26 @@ model Refund {
 
   @@index([status])
   @@index([paymentId])
+}
+
+// Link privado de acompanhamento para pedido de CONVIDADO (sem conta).
+// Só o hash SHA-256 fica no banco — o plaintext viaja apenas no e-mail.
+// Reenvio ROTACIONA o token (antigo deixa de funcionar) e respeita
+// limite (sendCount) + espera (lastSentAt) por pedido.
+model OrderTrackToken {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String    @unique @db.Uuid
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  sentTo      String?
+  sendCount   Int       @default(0)
+  lastSentAt  DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([expiresAt])
 }
 
 model OrderItem {
