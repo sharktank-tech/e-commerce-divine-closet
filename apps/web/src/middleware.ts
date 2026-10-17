@@ -73,9 +73,12 @@ async function handle(req: NextRequest) {
   }
 
   // Checkout é aberto a convidados (guest); /api/pedidos valida a identificação.
+  // /conta: qualquer sessão válida serve (cliente OU staff) — staff não tem
+  // cookie dc_session, e antes era redirecionado ao login mesmo logado.
   if (isAccount) {
-    const client = await readToken(req, "dc_session");
-    if (!client || client.role !== "CLIENT") {
+    const session =
+      (await readToken(req, "dc_session")) || (await readToken(req, "dc_admin_session"));
+    if (!session) {
       const url = req.nextUrl.clone();
       url.pathname = "/login";
       url.searchParams.set("next", pathname);

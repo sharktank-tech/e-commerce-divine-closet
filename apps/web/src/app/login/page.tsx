@@ -33,7 +33,10 @@ function LoginForm() {
         setError(data.error || "Erro ao entrar");
         return;
       }
-      router.push(data.user.role === "ADMIN" ? "/admin" : next);
+      // Sempre respeita o destino de origem (next) — antes staff era mandado
+      // ao /admin mesmo com next=/conta. Padrão: /conta (link "Admin" no
+      // header leva staff ao painel; /admin/login também continua valendo).
+      router.push(next);
       router.refresh();
     } catch {
       setError("Erro de conexão");
