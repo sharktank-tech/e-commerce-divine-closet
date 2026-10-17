@@ -81,7 +81,7 @@ describe("notificarErp", () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
   });
 
-  it("sem config: não envia (false), sem fetch, sem persistir", async () => {
+  it("sem config: não envia (false), sem fetch — mas PERSISTE na fila", async () => {
     delete process.env.ERP_WEBHOOK_URL;
     delete process.env.ERP_WEBHOOK_SECRET;
     delete process.env.NEXT_PUBLIC_APP_URL;
@@ -89,7 +89,10 @@ describe("notificarErp", () => {
     vi.stubGlobal("fetch", fetchSpy);
     expect(await notificarErp("pedido_criado", { numero: "1" })).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(erpEventMock.create).not.toHaveBeenCalled();
+    // fila é fonte de verdade mesmo com ERP desativado (histórico intacto;
+    // a entrega acontece quando houver URL+segredo, via dreno)
+    expect(erpEventMock.create).toHaveBeenCalledTimes(1);
+    expect([...fila.values()][0].status).toBe("PENDING");
   });
 
   it("sucesso de primeira: persiste na fila e envia 1x com assinatura", async () => {

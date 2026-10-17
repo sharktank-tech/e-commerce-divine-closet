@@ -30,6 +30,12 @@ function ligarFila() {
     if (fila.has(data.id as string)) {
       throw Object.assign(new Error("dup"), { code: "P2002" });
     }
+    if (
+      data.businessKey &&
+      [...fila.values()].some((l) => l.businessKey === data.businessKey)
+    ) {
+      throw Object.assign(new Error("businessKey dup"), { code: "P2002" });
+    }
     const linha = {
       ...data,
       lastStatusCode: null,
@@ -42,7 +48,14 @@ function ligarFila() {
     return linha;
   });
   erpEventMock.findUnique.mockImplementation(
-    async ({ where }: { where: { id: string } }) => fila.get(where.id) ?? null
+    async ({ where }: { where: { id?: string; businessKey?: string } }) => {
+      if (where.businessKey !== undefined) {
+        return (
+          [...fila.values()].find((l) => l.businessKey === where.businessKey) ?? null
+        );
+      }
+      return (where.id ? fila.get(where.id) : undefined) ?? null;
+    }
   );
   erpEventMock.updateMany.mockImplementation(
     async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
@@ -96,11 +109,19 @@ afterEach(() => {
 });
 
 describe("enfileirarEvento", () => {
-  it("sem configuração: não persiste nada (desativado é o normal)", async () => {
+  it("sem configuração: PERSISTE mesmo assim (fila guarda o histórico)", async () => {
     semConfig();
     expect(erpConfigurado()).toBe(false);
-    expect(await enfileirarEvento("pedido_pago", { numero: "1" })).toBeNull();
-    expect(erpEventMock.create).not.toHaveBeenCalled();
+    const id = await enfileirarEvento("pedido_pago", { numero: "1" });
+    expect(id).toBeTruthy();
+    expect(erpEventMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ tipo: "pedido_pago", status: "PENDING" }),
+      })
+    );
+    // entrega continua bloqueada sem config (nada sai sem URL+segredo)
+    expect(await entregarEvento(id as string)).toBe(false);
+    expect([...fila.values()][0].status).toBe("PENDING");
   });
 
   it("com config: grava PENDING e devolve o event_id", async () => {
@@ -121,6 +142,38 @@ describe("enfileirarEvento", () => {
     erpEventMock.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
     const deNovo = await enfileirarEvento("pedido_pago", {});
     expect(typeof deNovo).toBe("string");
+  });
+
+  it("businessKey repetida (reprocesso/concorrência) → devolve a linha existente", async () => {
+    definirConfig();
+    const chave = "pedido_estornado:ord-9";
+    const primeiro = await enfileirarEvento(
+      "pedido_estornado",
+      { numero: "DC-9" },
+      { businessKey: chave }
+    );
+    // simula corrida: o create desta vez perde pro índice único
+    erpEventMock.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    const segundo = await enfileirarEvento(
+      "pedido_estornado",
+      { numero: "DC-9" },
+      { businessKey: chave }
+    );
+    expect(primeiro).toBe(segundo);
+    // uma linha só na fila
+    expect(
+      [...fila.values()].filter((l) => l.businessKey === chave)
+    ).toHaveLength(1);
+  });
+
+  it("businessKey nova grava a chave na linha (unicidade por ocorrência)", async () => {
+    definirConfig();
+    await enfileirarEvento("pedido_cancelado", {}, { businessKey: "pedido_cancelado:ord-1" });
+    expect(erpEventMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ businessKey: "pedido_cancelado:ord-1" }),
+      })
+    );
   });
 });
 

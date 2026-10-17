@@ -1,19 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, notificarErp } = vi.hoisted(() => ({
-  findMany: vi.fn(),
-  updateMany: vi.fn(),
-  buscarPagamento: vi.fn(),
-  finalizarPedidoPago: vi.fn(),
-  notificarErp: vi.fn(),
-}));
+const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, enfileirarEvento, entregarEvento, prismaMock } =
+  vi.hoisted(() => {
+    const prismaMock = {
+      order: { findMany: vi.fn(), updateMany: vi.fn() },
+      $transaction: vi.fn(),
+    };
+    return {
+      findMany: prismaMock.order.findMany,
+      updateMany: prismaMock.order.updateMany,
+      buscarPagamento: vi.fn(),
+      finalizarPedidoPago: vi.fn(),
+      enfileirarEvento: vi.fn(),
+      entregarEvento: vi.fn(),
+      prismaMock,
+    };
+  });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: { order: { findMany, updateMany } },
-}));
+vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/mercadopago", () => ({ buscarPagamento }));
 vi.mock("@/lib/pedidos/finalizar", () => ({ finalizarPedidoPago }));
-vi.mock("@/lib/erp", () => ({ notificarErp }));
+vi.mock("@/lib/erp", () => ({ enfileirarEvento, entregarEvento }));
 
 import {
   HORAS_PARA_CANCELAR_PIX,
@@ -27,6 +34,15 @@ const pedido = (horas: number) => ({
   number: "DC-20261017-0001",
   paymentId: "184666023462",
   createdAt: new Date(AGORA.getTime() - horas * 3_600_000),
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  prismaMock.$transaction.mockImplementation(
+    async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock)
+  );
+  enfileirarEvento.mockResolvedValue("evt-1");
+  entregarEvento.mockResolvedValue(false);
 });
 
 describe("decidirReconciliacao", () => {
@@ -89,10 +105,18 @@ describe("reconciliarPixPendentes", () => {
       where: { id: "ord-1", paymentStatus: "PENDING" },
       data: { status: "CANCELLED", paymentStatus: "FAILED" },
     });
-    expect(notificarErp).toHaveBeenCalledWith("pedido_cancelado", {
-      numero: "DC-20261017-0001",
-      motivo: "Pix não confirmado (expired)",
-    });
+    expect(enfileirarEvento).toHaveBeenCalledWith(
+      "pedido_cancelado",
+      {
+        numero: "DC-20261017-0001",
+        motivo: "Pix não confirmado (expired)",
+      },
+      expect.objectContaining({
+        businessKey: "pedido_cancelado:ord-1",
+        db: prismaMock,
+      })
+    );
+    expect(entregarEvento).toHaveBeenCalledWith("evt-1");
     expect(r).toMatchObject({ cancelados: 1 });
   });
 
@@ -102,7 +126,8 @@ describe("reconciliarPixPendentes", () => {
     updateMany.mockResolvedValue({ count: 0 });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
-    expect(notificarErp).not.toHaveBeenCalled();
+    expect(enfileirarEvento).not.toHaveBeenCalled();
+    expect(entregarEvento).not.toHaveBeenCalled();
     expect(r).toMatchObject({ cancelados: 0, mantidos: 1 });
   });
 

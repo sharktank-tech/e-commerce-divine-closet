@@ -8,6 +8,8 @@ const { prismaMock, criarEstornoMock, listarEstornosMock, enfileirarEmailMock, p
     prismaMock: {
       order: { findUnique: vi.fn(), updateMany: vi.fn() },
       refund: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+      erpEvent: { create: vi.fn(), findUnique: vi.fn() },
+      $transaction: vi.fn(),
     },
     criarEstornoMock: vi.fn(),
     listarEstornosMock: vi.fn(),
@@ -70,6 +72,14 @@ beforeEach(() => {
   prismaMock.order.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.refund.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.refund.create.mockResolvedValue(refundFake());
+  prismaMock.$transaction.mockImplementation(
+    async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock)
+  );
+  prismaMock.erpEvent.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+    id: data.id,
+    ...data,
+  }));
+  prismaMock.erpEvent.findUnique.mockResolvedValue(null);
   listarEstornosMock.mockResolvedValue({ ok: true, refunds: [] });
   enfileirarEmailMock.mockResolvedValue("outbox-1");
   processarOutboxMock.mockResolvedValue("ENVIADO");
@@ -130,6 +140,17 @@ describe("solicitarEstorno — caminho feliz", () => {
     expect(prismaMock.order.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: { in: ["PENDING", "PAID", "PROCESSING"] } }),
+      })
+    );
+    // evento ERP persistido NA MESMA transição da transição (businessKey única)
+    expect(prismaMock.erpEvent.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.erpEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tipo: "pedido_estornado",
+          businessKey: "pedido_estornado:order-1",
+          status: "PENDING",
+        }),
       })
     );
     // chave de idempotência enviada ao provedor
@@ -330,6 +351,8 @@ describe("reconciliarEstorno", () => {
     expect(r.confirmado).toBe(true);
     expect(enfileirarEmailMock).not.toHaveBeenCalled();
     expect(processarOutboxMock).not.toHaveBeenCalled();
+    // sem transição → nenhum evento novo (businessKey não duplica)
+    expect(prismaMock.erpEvent.create).not.toHaveBeenCalled();
   });
 
   it("APPROVED local → retorna sem consultar o provedor", async () => {
@@ -390,6 +413,7 @@ describe("confirmarEstornoNotificado (webhook refunded)", () => {
 
     expect(enfileirarEmailMock).not.toHaveBeenCalled();
     expect(processarOutboxMock).not.toHaveBeenCalled();
+    expect(prismaMock.erpEvent.create).not.toHaveBeenCalled();
   });
 
   it("sem registro local → cria histórico (chave estável mp:<paymentId>)", async () => {

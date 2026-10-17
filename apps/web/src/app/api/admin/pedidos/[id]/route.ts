@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { validarUrlRastreio } from "@/lib/rastreio";
+import { enfileirarEvento, entregarEvento } from "@/lib/erp";
 import {
   deveNotificarStatus,
   enviarEmailStatusPedido,
@@ -71,28 +72,46 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       select: { status: true, trackingCode: true },
     });
 
-    const order = await prisma.order.update({
-      where: { id },
-      data: {
-        status: parsed.data.status,
-        ...(parsed.data.paymentStatus ? { paymentStatus: parsed.data.paymentStatus } : {}),
-        ...(parsed.data.trackingCode !== undefined
-          ? { trackingCode: parsed.data.trackingCode || null }
-          : {}),
-        ...(parsed.data.trackingCarrier !== undefined
-          ? { trackingCarrier: parsed.data.trackingCarrier || null }
-          : {}),
-        ...(parsed.data.trackingUrl !== undefined
-          ? { trackingUrl: parsed.data.trackingUrl ? validarUrlRastreio(parsed.data.trackingUrl) : null }
-          : {}),
-        // marca a entrega (base do convite de avaliação pós-compra)
-        ...(parsed.data.status === "DELIVERED" ? { entregueEm: new Date() } : {}),
-      },
-      include: {
-        items: true,
-        user: { select: { id: true, name: true, email: true } },
-      },
+    // Transição + evento ERP na MESMA transação (só ao entrar em CANCELLED;
+    // businessKey única — se outro caminho já registrou, não duplica).
+    const { order, eventoId: eventoCancelId } = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.update({
+        where: { id },
+        data: {
+          status: parsed.data.status,
+          ...(parsed.data.paymentStatus ? { paymentStatus: parsed.data.paymentStatus } : {}),
+          ...(parsed.data.trackingCode !== undefined
+            ? { trackingCode: parsed.data.trackingCode || null }
+            : {}),
+          ...(parsed.data.trackingCarrier !== undefined
+            ? { trackingCarrier: parsed.data.trackingCarrier || null }
+            : {}),
+          ...(parsed.data.trackingUrl !== undefined
+            ? { trackingUrl: parsed.data.trackingUrl ? validarUrlRastreio(parsed.data.trackingUrl) : null }
+            : {}),
+          // marca a entrega (base do convite de avaliação pós-compra)
+          ...(parsed.data.status === "DELIVERED" ? { entregueEm: new Date() } : {}),
+        },
+        include: {
+          items: true,
+          user: { select: { email: true, name: true } },
+        },
+      });
+      let eventoId: string | null = null;
+      if (order.status === "CANCELLED" && anterior?.status !== "CANCELLED") {
+        eventoId = await enfileirarEvento(
+          "pedido_cancelado",
+          { numero: order.number, motivo: "Cancelado pela administração" },
+          { db: tx, businessKey: `pedido_cancelado:${order.id}` }
+        );
+      }
+      return { order, eventoId };
     });
+    if (eventoCancelId) {
+      void entregarEvento(eventoCancelId).catch((err) =>
+        console.error("[admin:pedido:erp]", err)
+      );
+    }
 
     if (
       deveNotificarStatus(

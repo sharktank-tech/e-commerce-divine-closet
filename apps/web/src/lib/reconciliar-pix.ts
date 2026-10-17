@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { buscarPagamento } from "@/lib/mercadopago";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
-import { notificarErp } from "@/lib/erp";
+import { enfileirarEvento, entregarEvento } from "@/lib/erp";
 import { enviarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 
 // Reconciliação de Pix pendente — rede de segurança do webhook do MP.
@@ -91,17 +91,31 @@ export async function reconciliarPixPendentes(opcoes?: {
         if (!r.jaFinalizado) resumo.finalizados++;
         else resumo.mantidos++;
       } else if (decisao === "cancelar") {
-        // Guarda de corrida: só cancela se ainda estiver PENDING.
-        const { count } = await prisma.order.updateMany({
-          where: { id: pedido.id, paymentStatus: "PENDING" },
-          data: { status: "CANCELLED", paymentStatus: "FAILED" },
+        // Guarda de corrida + evento na MESMA transação: só cancela se ainda
+        // estiver PENDING e o evento de cancelamento nasce junto (businessKey
+        // única — outro caminho já tendo registrado não duplica).
+        const { count, eventoId } = await prisma.$transaction(async (tx) => {
+          const { count } = await tx.order.updateMany({
+            where: { id: pedido.id, paymentStatus: "PENDING" },
+            data: { status: "CANCELLED", paymentStatus: "FAILED" },
+          });
+          let id: string | null = null;
+          if (count === 1) {
+            id = await enfileirarEvento(
+              "pedido_cancelado",
+              { numero: pedido.number, motivo: `Pix não confirmado (${pagamento.status})` },
+              { db: tx, businessKey: `pedido_cancelado:${pedido.id}` }
+            );
+          }
+          return { count, eventoId: id };
         });
         if (count === 1) {
           resumo.cancelados++;
-          void notificarErp("pedido_cancelado", {
-            numero: pedido.number,
-            motivo: `Pix não confirmado (${pagamento.status})`,
-          });
+          if (eventoId) {
+            void entregarEvento(eventoId).catch((err) =>
+              console.error("[reconciliar-pix:erp]", err)
+            );
+          }
           void enviarEmailStatusPedido({
             orderId: pedido.id,
             status: "CANCELLED",

@@ -5,10 +5,13 @@ import { prisma } from "@/lib/prisma";
 // configurável (padrão: <APP_URL>/erp/hooks).
 //
 // Confiabilidade (fila persistente): cada evento é GRAVADO em ErpEvent
-// (PK = event_id → idempotente) antes de qualquer envio; a entrega tenta
-// na hora (fire-and-forget do fluxo do pedido) e o que falha volta com
-// backoff exponencial, drenado pelo cron diário. Sem URL ou sem segredo,
-// nada é persistido nem enviado (ERP não configurado = estado normal).
+// (PK = event_id → idempotente; businessKey = ocorrência de negócio, ex.:
+// pedido_estornado:{orderId}) ANTES de qualquer envio — SEMPRE, inclusive
+// com ERP desativado: a fila guarda o histórico e é entregue assim que
+// houver URL+segredo (dreno diário no cron). A entrega tenta na hora, pós-
+// commit da transição de negócio a que o evento pertence, e o que falha
+// volta com backoff exponencial. Sem URL ou sem segredo: nada é ENVIADO
+// (fila intacta — config ausente é estado normal, não perda de evento).
 
 export type EventoErp =
   | "pedido_criado"
@@ -30,7 +33,9 @@ export type EnvelopeErp = {
 
 export const ERP_MAX_TENTATIVAS = 5;
 
-type Db = Pick<typeof prisma, "erpEvent">;
+export type DbErp = Pick<typeof prisma, "erpEvent">;
+
+type Db = DbErp;
 
 type EventoLinha = {
   id: string;
@@ -127,30 +132,58 @@ function avisoSemConfig() {
   if (!avisoConfig) {
     avisoConfig = true;
     console.warn(
-      "[erp:webhook] ERP não configurado (ERP_WEBHOOK_URL/SECRET) — eventos não são persistidos"
+      "[erp:webhook] ERP não configurado (ERP_WEBHOOK_URL/SECRET) — eventos são persistidos; a entrega aguarda configuração"
     );
   }
 }
 
+export type EnfileirarOpcoes = {
+  /** Cliente transacional (mesma tx da transição de negócio) ou prisma. */
+  db?: Db;
+  /** Ocorrência de negócio única (ex.: pedido_pago:{orderId}) — P2002 = idempotente. */
+  businessKey?: string;
+};
+
 /**
- * Grava o evento na fila (idempotente pelo event_id). Sem config de ERP:
- * retorna null e NÃO persiste nada.
+ * Grava o evento na fila (idempotente). SEM depende de configuração:
+ * persiste mesmo com ERP desativado — o envio é responsabilidade da
+ * entrega (entregarEvento/drenar), que só roda com URL+segredo.
+ *
+ * Falha de banco que não é P2002 é PROPAGADA (não engole): nos fluxos
+ * transacionais o evento e a transição de negócio precisam falhar juntos
+ * (rollback → reconciliação reprocessa), nunca gravar transição sem evento.
  */
 export async function enfileirarEvento(
   tipo: EventoErp,
   dados: Record<string, unknown>,
-  db: Db = prisma
+  opcoes: EnfileirarOpcoes = {}
 ): Promise<string | null> {
-  if (!config()) return null;
+  const db = opcoes.db ?? prisma;
   const id = randomUUID();
   try {
     await db.erpEvent.create({
-      data: { id, tipo, payload: dados, status: "PENDING", attempt: 0 },
+      data: {
+        id,
+        tipo,
+        payload: dados,
+        status: "PENDING",
+        attempt: 0,
+        ...(opcoes.businessKey ? { businessKey: opcoes.businessKey } : {}),
+      },
     });
   } catch (err) {
-    if ((err as { code?: string })?.code === "P2002") return id;
-    console.error("[erp:fila:create]", err);
-    return null;
+    if ((err as { code?: string })?.code === "P2002") {
+      // ocorrência já enfileirada (businessKey única) → devolve a existente
+      // para a entrega pós-commit trabalhar na linha certa.
+      if (opcoes.businessKey) {
+        const existente = await db.erpEvent.findUnique({
+          where: { businessKey: opcoes.businessKey },
+        });
+        if (existente) return existente.id;
+      }
+      return id;
+    }
+    throw err;
   }
   return id;
 }
@@ -241,21 +274,28 @@ export async function drenarEventosErp(
 }
 
 /**
- * Dispara sem bloquear o fluxo do pedido: enfileira (persistência) e tenta
- * entregar já. Retorna false se ERP não configurado ou se a entrega
- * imediata falhou (a fila continua responsável pelas próximas tentativas).
+ * Enfileira (persistência SEMPRE) e tenta entregar já, sem bloquear quem
+ * chama. Com ERP desativado: grava na fila e retorna false (sem envio —
+ * a entrega acontece quando houver configuração, via dreno/cron).
+ * Retorna true só quando o provedor ACEITOU a entrega imediata.
  */
 export async function notificarErp(
   tipo: EventoErp,
-  dados: Record<string, unknown>
+  dados: Record<string, unknown>,
+  opcoes: { businessKey?: string } = {}
 ): Promise<boolean> {
-  const cfg = config();
-  if (!cfg) {
+  let id: string | null;
+  try {
+    id = await enfileirarEvento(tipo, dados, opcoes);
+  } catch (err) {
+    console.error("[erp:fila:create]", err);
+    return false;
+  }
+  if (!id) return false;
+  if (!config()) {
     avisoSemConfig();
     return false;
   }
-  const id = await enfileirarEvento(tipo, dados);
-  if (!id) return false;
   try {
     return await entregarEvento(id);
   } catch (err) {
