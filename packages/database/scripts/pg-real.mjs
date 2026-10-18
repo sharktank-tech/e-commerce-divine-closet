@@ -289,6 +289,11 @@ async function limpar() {
   } else {
     console.log("· limpo (prefixo alpine mantido — use --tudo para apagar também)");
   }
+  // raiz dedicada some quando vazia (arquivos desconhecos do usuário, se
+  // houver, mantêm o diretório — só saem os que este script criou).
+  try {
+    if (readdirSync(RAIZ).length === 0) rmSync(RAIZ, { recursive: true, force: true });
+  } catch {}
 }
 
 function imprimirEnv() {
