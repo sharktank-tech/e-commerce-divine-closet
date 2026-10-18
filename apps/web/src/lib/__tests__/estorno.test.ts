@@ -8,6 +8,7 @@ const { prismaMock, criarEstornoMock, listarEstornosMock, enfileirarEmailMock, p
     prismaMock: {
       order: { findUnique: vi.fn(), updateMany: vi.fn() },
       refund: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+      $transaction: vi.fn(),
     },
     criarEstornoMock: vi.fn(),
     listarEstornosMock: vi.fn(),
@@ -70,6 +71,9 @@ beforeEach(() => {
   prismaMock.order.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.refund.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.refund.create.mockResolvedValue(refundFake());
+  prismaMock.$transaction.mockImplementation(
+    async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock)
+  );
   listarEstornosMock.mockResolvedValue({ ok: true, refunds: [] });
   enfileirarEmailMock.mockResolvedValue("outbox-1");
   processarOutboxMock.mockResolvedValue("ENVIADO");
@@ -309,7 +313,7 @@ describe("reconciliarEstorno", () => {
     expect(r.registro.status).toBe("APPROVED");
     expect(prismaMock.order.updateMany).toHaveBeenCalled();
     expect(enfileirarEmailMock).toHaveBeenCalledTimes(1);
-    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED");
+    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
     expect(processarOutboxMock).toHaveBeenCalledTimes(1);
     expect(processarOutboxMock).toHaveBeenCalledWith("outbox-1");
@@ -373,7 +377,7 @@ describe("confirmarEstornoNotificado (webhook refunded)", () => {
       })
     );
     expect(enfileirarEmailMock).toHaveBeenCalledTimes(1);
-    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED");
+    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
     expect(processarOutboxMock).toHaveBeenCalledTimes(1);
     expect(processarOutboxMock).toHaveBeenCalledWith("outbox-1");

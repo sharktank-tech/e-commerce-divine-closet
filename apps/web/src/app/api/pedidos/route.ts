@@ -13,8 +13,11 @@ import {
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 import { getFrete, getPagamento } from "@/lib/config-loja";
+import {
+  enfileirarEmailStatusPedido,
+  processarEmailOutbox,
+} from "@/lib/email-outbox";
 import { notificarErp } from "@/lib/erp";
-import { enviarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 import { obterCupom } from "@/lib/cupom-cache";
 import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
@@ -350,22 +353,33 @@ export const POST = comErro(async (req: NextRequest) => {
     } else if (result.success) {
       await finalizarPedidoPago(order.id, result.paymentId);
     } else {
-      await prisma.order.update({
-        where: { id: order.id },
-        data: {
-          status: "CANCELLED",
-          paymentStatus: "FAILED",
-          paymentId: result.paymentId,
-        },
+      // Cancelamento (pagamento recusado): update + outbox na MESMA transação
+      // (dedupeKey única); envio pós-commit com retentativa.
+      const { emailId } = await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: {
+            status: "CANCELLED",
+            paymentStatus: "FAILED",
+            paymentId: result.paymentId,
+          },
+        });
+        const emailId = await enfileirarEmailStatusPedido(
+          order.id,
+          "CANCELLED",
+          tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+        );
+        return { emailId };
       });
       void notificarErp("pedido_cancelado", {
         numero: order.number,
         motivo: result.message,
       });
-      void enviarEmailStatusPedido({
-        orderId: order.id,
-        status: "CANCELLED",
-      }).catch((err) => console.error("[pedidos:cancel-email]", err));
+      if (emailId) {
+        void processarEmailOutbox(emailId).catch((err) =>
+          console.error("[pedidos:cancel-email]", err)
+        );
+      }
     }
 
     await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });

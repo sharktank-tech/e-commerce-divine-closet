@@ -23,14 +23,21 @@ e-mail**:
 
 **Outbox de e-mail transacional** (`EmailOutbox` + `apps/web/src/lib/email-outbox.ts`):
 
-1. **Renderização única**: na transição efetiva `PAID → REFUNDED`, o payload
-   (destinatário/assunto/texto/html) é montado pelo mesmo código de produção
-   (`montarEmailStatusPedido`) e **gravado imutável** antes de qualquer envio.
+1. **Renderização única + gravação atômica**: a linha do outbox (destinatário/
+   assunto/texto/html) é montada pelo mesmo código de produção
+   (`montarEmailStatusPedido`) e gravada **DENTRO da MESMA transação** que
+   altera o pedido (`$transaction` da transição PAID→REFUNDED; idem no PATCH
+   do admin, no cancelamento por Pix e na recusa de pagamento da criação do
+   pedido). Rollback da transição descarta junto — nunca fica estorno
+   (ou cancelamento) sem a notificação gravada.
 2. **Dedupe por ocorrência**: `dedupeKey = status:{orderId}:{status}` com
-   `@unique` → webhook repetido, confirmação simultânea ou reprocesso geram
-   **no máximo uma linha** (P2002 ignorado → devolve a linha existente).
-3. **Tentativa imediata**: logo após gravar, o fluxo do estorno já tenta um
-   envio sem bloquear a orquestração (fire-and-forget).
+   `@unique` → webhook repetido, confirmação simultânea, reprocesso ou
+   mudança manual no admin geram **no máximo uma linha** (P2002 ignorado →
+   devolve a linha existente; admin + estorno do MESMO pedido apontam para a
+   mesma linha — nunca dois e-mails).
+3. **Tentativa imediata**: logo após o commit, o fluxo tenta um envio sem
+   bloquear a orquestração (fire-and-forget). A gravação já está segura; se o
+   processo morrer aqui, o cron drena.
 4. **SENT só após aceite**: `sendEmail` resolve apenas quando o provedor
    aceita (Resend: `error == null`); a linha vira `SENT` + `sentAt` com
    guarda `updateMany where status = PENDING` (processadores concorrentes não
@@ -42,11 +49,17 @@ e-mail**:
    - **18h** — segunda janela em `/api/cron/emails` (novo, `vercel.json`);
    - máximo de 6 tentativas; backoff `min(2^attempt, 60)` minutos;
    - falha transitória (rede/408/429/5xx/concorrência na chave) → repete;
-     falha definitiva (configuração ausente, validação, driver desconhecido)
-     → `FAILED` sem queimar tentativas (`EmailNaoAceito.retryable`).
+      falha definitiva (configuração ausente, validação, driver desconhecido)
+      → `FAILED` sem queimar tentativas (`EmailNaoAceito.retryable`).
 6. **Idempotência no provedor**: TODA tentativa envia a mesma
    `Idempotency-Key` = `dedupeKey` com payload idêntico (imutável) —
    requisição incerta (timeout após o provedor ter aceitado) não duplica.
+
+**Todos os e-mails de status passam pelo outbox** (função direta
+`enviarEmailStatusPedido` removida — envio direto era o defeito). Exceção
+conhecida: a confirmação de compra (`emails.orderPaid` em
+`pedidos/finalizar.ts`) ainda é envio direto pós-commit, sem retentativa —
+fora do escopo desta correção, anotado como pendência.
 
 ## 3. Limitações documentadas
 
@@ -66,6 +79,9 @@ e-mail**:
   em vez de retentativa a cada minuto.
 - `EmailOutbox.orderId` **sem FK** (mesmo critério de auditoria da fila ERP):
   linhas sobrevivem a remoção hipotética de pedidos.
+- **At-least-once no envio**: dois dronos simultâneos podem ler a mesma linha
+  PENDING antes do `updateMany` de SENT; a proteção contra e-mail duplicado é
+  a `Idempotency-Key` no provedor (24h) + a janela diária dos crons.
 
 ## 4. Backfill do pedido 7653 — PREPARADO, NÃO EXECUTADO
 
