@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { autorizarCron } from "@/lib/cron-auth";
 import { prisma } from "@/lib/prisma";
-import { emails, sendEmail } from "@/lib/email";
+import { emails } from "@/lib/email";
+import { enfileirarEmail, processarEmailOutbox } from "@/lib/email-outbox";
 
 // Convite de avaliação X dias após a entrega (padrão 7).
 // Agendado via cron (vercel.json) com CRON_SECRET. Sem WhatsApp
 // (integração inexistente) — só e-mail, atrás do driver configurado.
-// Fuso: "0 13 * * *" UTC = 10:00 em Araguaina (UTC−3). Hobby: atraso de
-// minutos é normal; o marcador reviewRequestedAt só é gravado após o
-// envio, então reexecução no mesmo dia não duplica.
+// Fuso: "0 13 * * *" UTC = 10:00 em Araguaina (UTC−3).
+//
+// OUTBOX (fecha a lacuna de duplicidade): o convite era enviado DIRETO e o
+// marcador reviewRequestedAt só era gravado DEPOIS do envio — se o envio
+// fosse aceito mas a gravação falhasse (ou dois crons rodassem juntos), o
+// próximo ciclo reenviava. Agora: enfileira com dedupeKey única
+// (review:{orderId}) ANTES de qualquer envio — a unique impede a 2ª linha
+// mesmo sob concorrência —, tenta o envio imediato e grava o marcador. Falha
+// de envio fica PENDING e o cron de dreno retenta; aceitação pelo provedor é
+// o que marca SENT (nunca o agendamento).
 export async function GET(req: NextRequest) {
   try {
     if (!autorizarCron(req.headers.get("authorization"), process.env.CRON_SECRET)) {
@@ -54,17 +62,30 @@ export async function GET(req: NextRequest) {
         url: `${base}/produtos/${i.productSlug}`,
       }));
       try {
-        await sendEmail({ to: email, ...emails.reviewRequest(order.number, items) });
+        const mail = emails.reviewRequest(order.number, items);
+        // Enfileira idempotente (dedupeKey única) — repetição/concorrência não
+        // gera 2ª linha; então tenta o envio e grava o marcador.
+        const outboxId = await enfileirarEmail({
+          dedupeKey: `review:${order.id}`,
+          kind: "review_invite",
+          orderId: order.id,
+          mail: { to: email, subject: mail.subject, text: mail.text, html: mail.html },
+        });
+        if (!outboxId) {
+          skipped++;
+          continue;
+        }
+        await processarEmailOutbox(outboxId); // falha → PENDING, dreno retenta
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { reviewRequestedAt: new Date() },
+        });
         sent++;
       } catch (err) {
         console.error("[cron:avaliacoes:email]", order.number, err);
         skipped++;
         continue;
       }
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { reviewRequestedAt: new Date() },
-      });
     }
 
     return NextResponse.json({ ok: true, avaliados: orders.length, enviados: sent, pulados: skipped });

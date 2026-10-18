@@ -56,10 +56,21 @@ e-mail**:
    requisição incerta (timeout após o provedor ter aceitado) não duplica.
 
 **Todos os e-mails de status passam pelo outbox** (função direta
-`enviarEmailStatusPedido` removida — envio direto era o defeito). Exceção
-conhecida: a confirmação de compra (`emails.orderPaid` em
-`pedidos/finalizar.ts`) ainda é envio direto pós-commit, sem retentativa —
-fora do escopo desta correção, anotado como pendência.
+`enviarEmailStatusPedido` removida — envio direto era o defeito). Também
+**passam pelo outbox** (rodada de fechamento de lacunas):
+
+- a confirmação de compra (`emails.orderPaid` em `pedidos/finalizar.ts`) —
+  antes envio direto pós-commit sem retentativa nem proteção extra contra
+  duplicidade; agora enfileira `dedupeKey = status:{orderId}:PAID` idempotente
+  + tentativa imediata + dreno do cron;
+- o convite de avaliação (`emails.reviewRequest` em
+  `api/cron/avaliacoes/route.ts`) — antes `sendEmail` direto com o marcador
+  `reviewRequestedAt` gravado só DEPOIS do envio (falha entre envio e marcador
+  = reenvio no próximo ciclo); agora enfileira `dedupeKey = review:{orderId}`
+  (unique) antes de qualquer envio, tenta o envio e grava o marcador.
+
+Ver §3.1 para a matriz completa retentativa × não-retentativa e a distinção
+aceitação × entrega.
 
 ## 3. Limitações documentadas
 
@@ -82,6 +93,50 @@ fora do escopo desta correção, anotado como pendência.
 - **At-least-once no envio**: dois dronos simultâneos podem ler a mesma linha
   PENDING antes do `updateMany` de SENT; a proteção contra e-mail duplicado é
   a `Idempotency-Key` no provedor (24h) + a janela diária dos crons.
+
+### 3.1 Matriz de retentativa × não-retentativa (fecha as lacunas do outbox)
+
+**VIA OUTBOX — persiste, retenta com backoff, dedupe por `dedupeKey` (no máx.
+1 linha/ocorrência; `Idempotency-Key` = `dedupeKey` em toda tentativa):**
+
+| E-mail | `dedupeKey` | Enfileirado dentro da tx? | Retentativas |
+| --- | --- | --- | --- |
+| Estorno `REFUNDED` | `status:{id}:REFUNDED` | Sim (tx da transição PAID→REFUNDED) | 6, backoff `min(2^n,60)`min, crons 09h/18h |
+| Mudanças de status (`CANCELLED`/`SHIPPED`/… via admin, Pix, recusa) | `status:{id}:{status}` | Sim | idem |
+| **Confirmação "pedido pago" (`orderPaid`)** *(fecha lacuna)* | `status:{id}:PAID` | Não (pós-commit, como já era) — mas **idempotente** pela unique: repetição/concorrência não gera 2ª linha | 6, idem |
+| **Convite de avaliação (`reviewRequest`)** *(fecha lacuna)* | `review:{id}` | Não (cron) — mas **idempotente** pela unique antes de qualquer envio | 6, idem |
+
+**ENVIO DIRETO — sem linha no outbox, sem retentativa, sem `Idempotency-Key`
+(falha = perda; dedupe ad-hoc do próprio caminho):**
+
+| E-mail | Onde | Proteção contra duplicidade | Se falhar |
+| --- | --- | --- | --- |
+| Carrinho abandonado | `cron/carrinho-abandonado` | marcador `lembradoEm` após envio | perdido (re-tenta no próximo ciclo só se o marcador não gravou) |
+| Boas-vindas | `auth/register` | nenhuma (1× por cadastro) | perdido |
+| Recuperação de senha | `auth/recuperar` | token de reset | perdido (usuário pode pedir de novo) |
+| Reenvio de link de convidado | `api/acompanhar/reenviar` | rate-limit por IP | perdido (usuário re-pede) |
+| Contato / teste de marketing | `api/contato`, `admin/marketing/email` | nenhuma | HTTP 500 / log |
+
+> Critério: e-mails **transacionais ligados a uma transição de pedido** vão
+> pelo outbox (a transição e a notificação precisam ser atômicas e
+> recuperáveis). E-mails **utilitários/one-shot** (senha, boas-vindas, contato)
+> ficam diretos — sem transição a proteger e com re-pedido natural pelo
+> próprio usuário. `carrinho-abandonado` é o único "de negócio" ainda direto:
+> é re-processado por ciclo (o marcador `lembradoEm` é a guarda), aceitável
+> sem retentativa — migrá-lo ao outbox é pendência opcional.
+
+### 3.2 Aceitação × entrega (o que `SENT` significa)
+
+- `SENT` = o **provedor ACEITOU** a requisição (`sendEmail` resolve; Resend:
+  `error == null`). É **aceitação**, não garantia de caixa de entrada.
+- **Entrega/bounce/open NÃO são rastreados**: não há webhook do Resend
+  (`delivered`/`bounced`) conectado ao outbox. `SENT` não diz se o e-mail
+  chegou ao destinatário nem se caiu em spam.
+- `FAILED` = o provedor rejeitou por motivo **definitivo** (configuração
+  ausente, validação, ou 6 tentativas esgotadas) — não volta ao dreno.
+- Para rastrear entrega real seria preciso: webhook do Resend → atualizar
+  `EmailOutbox` (novo estado `DELIVERED`/`BOUNCED`) — **fora do escopo**;
+  hoje o contrato é "aceito pelo provedor", documentado aqui.
 
 ## 4. Backfill do pedido 7653 — PREPARADO, NÃO EXECUTADO
 

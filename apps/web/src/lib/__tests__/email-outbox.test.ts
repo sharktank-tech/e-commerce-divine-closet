@@ -32,6 +32,7 @@ import {
   EMAIL_OUTBOX_MAX_TENTATIVAS,
   dedupeKeyStatusPedido,
   drenarEmailsOutbox,
+  enfileirarEmail,
   enfileirarEmailStatusPedido,
   processarEmailOutbox,
 } from "@/lib/email-outbox";
@@ -116,6 +117,55 @@ describe("enfileirarEmailStatusPedido", () => {
   it("erros de banco que não são P2002 são propagados", async () => {
     prismaMock.emailOutbox.create.mockRejectedValue(new Error("boom"));
     await expect(enfileirarEmailStatusPedido("o1", "REFUNDED")).rejects.toThrow("boom");
+  });
+});
+
+describe("enfileirarEmail (caminhos que antes enviavam direto: pedido pago, avaliação)", () => {
+  it("grava PENDING arbitrário com dedupeKey e payload informado", async () => {
+    prismaMock.emailOutbox.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: "row-x",
+      ...data,
+    }));
+    const id = await enfileirarEmail({
+      dedupeKey: "status:o1:PAID",
+      kind: "order_paid",
+      orderId: "o1",
+      mail: { to: "c@x.com", subject: "Pago", text: "corpo" },
+    });
+    expect(id).toBe("row-x");
+    expect(prismaMock.emailOutbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dedupeKey: "status:o1:PAID",
+          kind: "order_paid",
+          status: "PENDING",
+          recipient: "c@x.com",
+        }),
+      })
+    );
+  });
+
+  it("dedupeKey repetida (P2002) → devolve a linha existente, sem 2º registro", async () => {
+    prismaMock.emailOutbox.create.mockRejectedValue(
+      Object.assign(new Error("dup"), { code: "P2002" })
+    );
+    prismaMock.emailOutbox.findUnique.mockResolvedValue({ id: "row-prev" });
+    const id = await enfileirarEmail({
+      dedupeKey: "review:o1",
+      kind: "review_invite",
+      mail: { to: "c@x.com", subject: "Avalie", text: "x" },
+    });
+    expect(id).toBe("row-prev");
+    expect(prismaMock.emailOutbox.findUnique).toHaveBeenCalledWith({
+      where: { dedupeKey: "review:o1" },
+    });
+  });
+
+  it("sem destinatário ou assunto → null (não grava)", async () => {
+    expect(
+      await enfileirarEmail({ dedupeKey: "k", kind: "x", mail: { to: "", subject: "s" } })
+    ).toBeNull();
+    expect(prismaMock.emailOutbox.create).not.toHaveBeenCalled();
   });
 });
 

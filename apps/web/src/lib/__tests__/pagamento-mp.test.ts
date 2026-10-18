@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 
+// E-mail "pedido pago" agora sai pelo OUTBOX (dedupeKey única) em vez de
+// sendEmail direto — mockável aqui para provar idempotência.
+const { enfileirarMock, processarMock } = vi.hoisted(() => ({
+  enfileirarMock: vi.fn(),
+  processarMock: vi.fn(),
+}));
+vi.mock("@/lib/email-outbox", () => ({
+  dedupeKeyStatusPedido: (orderId: string, status: string) => `status:${orderId}:${status}`,
+  enfileirarEmail: enfileirarMock,
+  processarEmailOutbox: processarMock,
+}));
+
 function bancoFake(statusPagamento: string | null, estoque = 10) {
   const tx = {
     $queryRawUnsafe: vi.fn(async () => []),
@@ -82,6 +94,34 @@ describe("finalizarPedidoPago", () => {
     expect(db.__tx.order.update).not.toHaveBeenCalled();
     expect(db.__tx.coupon.update).not.toHaveBeenCalled();
     expect(db.__tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it("e-mail 'pedido pago' sai pelo OUTBOX com dedupeKey status:{id}:PAID (não direto)", async () => {
+    vi.clearAllMocks();
+    enfileirarMock.mockResolvedValue("ob-1");
+    processarMock.mockResolvedValue("ENVIADO");
+    const db = bancoFake("PENDING");
+    await finalizarPedidoPago("ped-1", "pay-1", db);
+    // fire-and-forget: espera a microtask do enqueue
+    await vi.waitFor(() => expect(enfileirarMock).toHaveBeenCalled());
+    expect(enfileirarMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: "status:ped-1:PAID",
+        kind: "order_paid",
+        orderId: "ped-1",
+        mail: expect.objectContaining({ to: "c@c.com" }),
+      })
+    );
+    expect(processarMock).toHaveBeenCalledWith("ob-1");
+  });
+
+  it("webhook repetido (pedido já PAID) → jaFinalizado e NÃO re-enfileira e-mail", async () => {
+    vi.clearAllMocks();
+    const db = bancoFake("PAID");
+    const r = await finalizarPedidoPago("ped-1", "pay-1", db);
+    expect(r).toEqual({ ok: true, jaFinalizado: true });
+    await new Promise((s) => setTimeout(s, 5));
+    expect(enfileirarMock).not.toHaveBeenCalled();
   });
 });
 
