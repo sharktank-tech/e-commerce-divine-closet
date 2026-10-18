@@ -144,7 +144,7 @@ describe("enfileirarEvento", () => {
     expect(typeof deNovo).toBe("string");
   });
 
-  it("businessKey repetida (reprocesso/concorrência) → devolve a linha existente", async () => {
+  it("businessKey repetida (corrida residual) → catch P2002 devolve a linha existente", async () => {
     definirConfig();
     const chave = "pedido_estornado:ord-9";
     const primeiro = await enfileirarEvento(
@@ -152,18 +152,38 @@ describe("enfileirarEvento", () => {
       { numero: "DC-9" },
       { businessKey: chave }
     );
-    // simula corrida: o create desta vez perde pro índice único
+    // corrida de verdade: o pré-cheque ainda não enxerga a linha da outra tx
+    // e o create perde pro índice único (P2002)
+    const findBase = erpEventMock.findUnique.getMockImplementation()!;
+    erpEventMock.findUnique.mockImplementationOnce(async () => null);
     erpEventMock.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
     const segundo = await enfileirarEvento(
       "pedido_estornado",
       { numero: "DC-9" },
       { businessKey: chave }
     );
+    erpEventMock.findUnique.mockImplementation(findBase);
     expect(primeiro).toBe(segundo);
     // uma linha só na fila
     expect(
       [...fila.values()].filter((l) => l.businessKey === chave)
     ).toHaveLength(1);
+  });
+
+  it("businessKey já existente → pré-cheque devolve a linha SEM create (tx do chamador não aborta)", async () => {
+    definirConfig();
+    const chave = "pedido_estornado:ord-prev";
+    await enfileirarEvento("pedido_estornado", { numero: "DC-P" }, { businessKey: chave });
+    erpEventMock.create.mockClear();
+    const id = await enfileirarEvento(
+      "pedido_estornado",
+      { numero: "DC-P" },
+      { businessKey: chave }
+    );
+    // P2002 dentro de $transaction deixaria a transação inutilizável até o
+    // rollback — o pré-cheque evita o INSERT rejeitado no caso comum.
+    expect(erpEventMock.create).not.toHaveBeenCalled();
+    expect(id).toBeTruthy();
   });
 
   it("businessKey nova grava a chave na linha (unicidade por ocorrência)", async () => {

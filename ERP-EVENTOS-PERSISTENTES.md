@@ -36,7 +36,10 @@ persistido**. Em produção (sem essas variáveis):
    migration `20261017220000_erp_event_business_key`):
    `pedido_estornado:{orderId}`, `pedido_pago:{orderId}`,
    `pedido_criado:{orderId}`, `pedido_cancelado:{orderId}`.
-   Repetição/concorrência → `P2002` → devolve a linha existente.
+   Repetição/concorrência → devolve a linha existente: **pré-cheque**
+   `findUnique` antes do INSERT (evita um P2002 dentro de `$transaction`,
+   que deixaria a transação inutilizável até o rollback) e, numa corrida
+   residual, o `catch` de `P2002` devolve a linha já gravada.
    `NULL` continua permitido (eventos livrísticos de estoque/edição).
 3. **Transição + evento atômico** (as duas faces do mesmo fato):
    - estorno: `transicionarEstornoComEvento` — `$transaction` com as duas
@@ -61,14 +64,21 @@ persistido**. Em produção (sem essas variáveis):
 6. `DbErp` exportado permite aos `fakes` de teste registrarem
    `erpEvent`; transições antigas sem `erpEvent` (não relacionadas ao
    estorno) são toleradas via `tx.erpEvent?`.
+7. **Contrato com o receptor** (sistema ERP, fora deste repositório):
+   envelope `{event_id, versao, tipo, ocorrido_em, dados}` + cabeçalhos
+   `x-erp-evento`, `x-erp-ts`, `x-erp-assinatura: v1=<hmac-sha256(ts.corpo)>`.
+   `verificarAssinaturaErp` (timing-safe) está exportada para o receptor
+   reutilizar. Recomendação ao receptor: rejeitar `x-erp-ts` fora de uma
+   janela (ex.: ±5 min) para limitar replay — o emissor assina o timestamp
+   de cada tentativa, então retentativas legítimas sempre trazem ts novo.
 
 ## 3. Ativação da integração (após merge/deploy)
 
 1. Configurar no painel Vercel: `ERP_WEBHOOK_URL`, `ERP_WEBHOOK_SECRET`
    (hoje **ausentes** — por isso nenhum evento nunca foi entregue).
 2. Com config ativa, o dreno entrega linhas `PENDING` vencidas:
-   - cron diário 09h (`/api/cron/carrinho-abandonado` já chama
-     `drenarEventosErp`);
+   - cron diário (janela das 09h de Araguaina = `0 12 * * *` UTC;
+     `/api/cron/carrinho-abandonado` já chama `drenarEventosErp`);
    - acionamento manual: rota admin `POST /api/admin/erp` (sessão
      `dc_admin_session`).
 3. Sem config: fila **acumula** (o dreno nem consulta) — é o esperado

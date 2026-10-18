@@ -160,6 +160,18 @@ export async function enfileirarEvento(
 ): Promise<string | null> {
   const db = opcoes.db ?? prisma;
   const id = randomUUID();
+  // Pré-cheque da ocorrência: evita abortar a transação do chamador com
+  // P2002 (no Postgres, um INSERT rejeitado deixa a tx inutilizável até o
+  // rollback — dentro de $transaction isso derrubaria a transição junto).
+  // Corrida residual (pré-cheque passa, create perde) ainda pode P2002:
+  // o catch devolve a linha existente ou propaga (rollback + reprocesso).
+  if (opcoes.businessKey) {
+    const existente = await db.erpEvent.findUnique({
+      where: { businessKey: opcoes.businessKey },
+      select: { id: true },
+    });
+    if (existente) return existente.id;
+  }
   try {
     await db.erpEvent.create({
       data: {
