@@ -26,3 +26,10 @@ next-env.d.ts
 
 prisma/*.db
 prisma/*.db-journal
+
+# validação local de banco (packages/database/scripts/pg-real.mjs e
+# upgrade-pg-real.mjs) — nunca versionar dados/cluster locais
+.pg-real/
+.tmp-upgrade-a/
+.tmp-upgrade-b/
+.tmp-upgrade-legacy/

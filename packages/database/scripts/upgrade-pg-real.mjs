@@ -7,8 +7,12 @@
 //   node packages/database/scripts/upgrade-pg-real.mjs legacy    # upgrade
 //
 // Pré-requisitos: PostgreSQL real acessível (PGHOST/PGPORT/PGUSER ou
-// defaults 127.0.0.1:5433 postgres). Bancos dc_pgreal_* são descartáveis e
-// recriados a cada execução. Nenhum toque em produção.
+// defaults 127.0.0.1:5433 postgres) — provisionar com
+// `node packages/database/scripts/pg-real.mjs setup` + `eval "$(node ... env)"`
+// (doc: packages/database/PG-REAL.md). Bancos dc_pgreal_* são descartáveis e
+// recriados a cada execução. Nenhum toque em produção: modo precisa ser
+// rebuild|prodlike|legacy e o host precisa ser loopback (senão bloqueia —
+// ver "proteção contra execução destrutiva" abaixo).
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire } from "node:module";
@@ -29,6 +33,22 @@ const PGPORT = process.env.PGPORT || "5433";
 const PGUSER = process.env.PGUSER || "postgres";
 const NOME_DB = `dc_pgreal_${modo}`;
 const URL = `postgresql://${PGUSER}@${PGHOST}:${PGPORT}/${NOME_DB}`;
+
+// ------- proteção contra execução destrutiva -------
+// 1) modo conhecido (evita criar/dropar banco dc_pgreal_<lixo>);
+// 2) só loopback: o script DROP/CREATE DATABASE — nunca contra host remoto
+//    (produção). PG_PERMIT_HOST=1 é a exceção explícita, se um dia for
+//    necessário validar contra outro servidor descartável.
+const MODOS = ["rebuild", "prodlike", "legacy"];
+if (!MODOS.includes(modo)) {
+  console.error(`✗ Modo inválido: "${modo}". Uso: node packages/database/scripts/upgrade-pg-real.mjs <${MODOS.join("|")}>`);
+  process.exit(1);
+}
+const LOOPBACK = ["127.0.0.1", "::1", "localhost"];
+if (!LOOPBACK.includes(PGHOST) && process.env.PG_PERMIT_HOST !== "1") {
+  console.error(`✗ BLOQUEADO: PGHOST=${PGHOST} não é loopback — este script cria/dropa bancos dc_pgreal_* e não pode rodar contra host remoto (defina PG_PERMIT_HOST=1 apenas para outro servidor descartável).`);
+  process.exit(1);
+}
 
 const psql = async (sql, db = "postgres") =>
   run("psql", ["-h", PGHOST, "-p", PGPORT, "-U", PGUSER, "-d", db, "-v", "ON_ERROR_STOP=1", "-c", sql]);
