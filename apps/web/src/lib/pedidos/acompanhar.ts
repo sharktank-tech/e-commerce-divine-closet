@@ -101,6 +101,9 @@ export async function buscarPedidoPorToken(
 /**
  * Cria (ou ROTACIONA) o token de acompanhamento de um pedido convidado.
  * Retorna o plaintext — guarde/envie imediatamente; depois só o hash existe.
+ * A rotação SUBSTITUI o hash: o link antigo morre sozinho (é por isso que
+ * `revokedAt` nunca é escrito hoje — revogação explícita sem rotação é
+ * pendência de produto, não de segurança do link atual).
  */
 export async function rotacionarToken(
   input: { orderId: string; sentTo?: string | null },

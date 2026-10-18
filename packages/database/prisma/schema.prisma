@@ -543,3 +543,16 @@ model HistoricoPreco {
   @@index([produto_id, criado_em])
   @@map("historico_preco")
 }
+
+// Contador de tentativas por chave (ex.: reenviar:ip:203.0.113.9) em janelas
+// fixas — rate-limit do reenvio de link guest, persistido em Postgres para
+// valer entre instâncias serverless. Janela = início arredondado; linhas
+// antigas são simplesmente ignoradas (nenhuma limpeza necessária).
+model RateLimit {
+  chave        String   @db.VarChar(120)
+  janelaInicio DateTime
+  total        Int      @default(1)
+  createdAt    DateTime @default(now())
+
+  @@id([chave, janelaInicio])
+}

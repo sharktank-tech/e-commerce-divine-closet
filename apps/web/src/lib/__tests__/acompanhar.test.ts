@@ -7,6 +7,7 @@ const { prismaMock, sendEmailMock } = vi.hoisted(() => ({
   prismaMock: {
     order: { findUnique: vi.fn(), findMany: vi.fn() },
     orderTrackToken: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    rateLimit: { upsert: vi.fn() },
   },
   sendEmailMock: vi.fn(),
 }));
@@ -48,7 +49,10 @@ function tokenRow(overrides: Record<string, unknown> = {}) {
 }
 
 function reqJson(body: unknown) {
-  return { json: async () => body } as never;
+  return {
+    json: async () => body,
+    headers: new Headers({ "x-real-ip": "203.0.113.9" }),
+  } as never;
 }
 
 beforeEach(() => {
@@ -57,6 +61,7 @@ beforeEach(() => {
   prismaMock.orderTrackToken.update.mockResolvedValue({});
   // vi.clearAllMocks mantém impls antigas — zera o findUnique explicitamente
   prismaMock.orderTrackToken.findUnique.mockReset().mockResolvedValue(null);
+  prismaMock.rateLimit.upsert.mockReset().mockResolvedValue({ total: 1 });
   sendEmailMock.mockReset().mockResolvedValue(undefined);
 });
 
@@ -296,5 +301,25 @@ describe("POST /api/acompanhar/reenviar", () => {
     expect(bodyCom).toEqual(bodySem);
     expect(JSON.stringify(bodyCom)).not.toMatch(/DC-1|o1/);
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rate-limit por IP atingido → mesma resposta genérica, sem consulta nem envio", async () => {
+    prismaMock.rateLimit.upsert.mockResolvedValue({ total: 99 });
+    const res = await POST(reqJson({ email: "x@x.com" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.mensagem).toMatch(/Se houver pedidos/);
+    expect(prismaMock.order.findMany).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(prismaMock.rateLimit.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          chave_janelaInicio: expect.objectContaining({
+            chave: "reenviar:ip:203.0.113.9",
+          }),
+        }),
+      })
+    );
   });
 });
