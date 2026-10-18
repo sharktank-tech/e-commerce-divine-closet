@@ -10,36 +10,23 @@ import { describe, expect, it } from "vitest";
 // Mercado Pago; orderTrackToken.create teria o mesmo efeito no link guest).
 //
 // O teste simula o estado final de cada coluna `id` a partir do histórico de
-// migrations (CREATE + ALTERs posteriores) e exige UUID + DEFAULT — exceto
-// as tabelas legadas listadas, criadas antes do padrão atual (o histórico
-// não é editável). Ver DRIFT-BANCO-2026-10-17.md para a situação em
-// produção (uuid por push/manual, exceto AuditLog que segue TEXT).
+// migrations (CREATE + ALTERs posteriores + a conversão versionada de
+// 20260928181000_rebuild_legacy_uuid) e exige UUID + DEFAULT — exceto
+// AuditLog, que continua TEXT (divergência conhecida; ver
+// DRIFT-BANCO-2026-10-17.md).
 
 const PRISMA_DIR = join(__dirname, "..", "..", "..", "..", "..", "packages", "database", "prisma");
 const MIGRATIONS_DIR = join(PRISMA_DIR, "migrations");
 
 // Models cujo id termina TEXT no histórico de migrations (init/features
-// anteriores ao padrão UUID+DEFAULT). Em produção: uuid+default (conversão
-// fora do histórico via push/manual) — EXCETO AuditLog, que permanece
-// TEXT+default (funciona porque o DEFAULT gera uuid; o tipo diverge do
-// schema @db.Uuid, divergência conhecida e documentada). Qualquer NOVA
-// tabela deve seguir o padrão atual e não entrar aqui.
-const LEGADO_TEXT_OK = new Set([
-  "User",
-  "Address",
-  "Category",
-  "Product",
-  "ProductVariation",
-  "WishlistItem",
-  "Cart",
-  "CartItem",
-  "Order",
-  "OrderItem",
-  "Review",
-  "Coupon",
-  "Banner",
-  "AuditLog",
-]);
+// anteriores ao padrão UUID+DEFAULT). A conversão id TEXT→uuid das demais
+// tabelas legadas é versionada por 20260928181000_rebuild_legacy_uuid
+// (simulada abaixo a partir do ARRAY de tabelas da própria migração).
+// AuditLog permanece TEXT+default (funciona porque o DEFAULT gera uuid; o
+// tipo diverge do schema @db.Uuid — divergência conhecida, documentada e
+// coberta pelo teste de integração). Qualquer NOVA tabela deve seguir o
+// padrão atual e não entrar aqui.
+const LEGADO_TEXT_OK = new Set(["AuditLog"]);
 
 type EstadoId = { tipo: "UUID" | "TEXT" | "AUSENTE"; temDefault: boolean };
 
@@ -67,6 +54,19 @@ function modelsComIdDbgenerated(): Array<{ model: string; tabela: string }> {
   return out;
 }
 
+// 20260928181000_rebuild_legacy_uuid converte as tabelas listadas no ARRAY
+// (SQL dinâmico dentro de DO block: o regex de ALTER direto não pega). O
+// efeito final é id UUID + DEFAULT gen_random_uuid().
+function tabelasConvertidas(sqlMigrations: string[]): Set<string> {
+  const s = new Set<string>();
+  for (const sql of sqlMigrations) {
+    const bloco = /tabelas CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\]/.exec(sql);
+    if (!bloco) continue;
+    for (const m of bloco[1].matchAll(/'([A-Za-z_]+)'/g)) s.add(m[1]);
+  }
+  return s;
+}
+
 function estadoFinalId(sqlMigrations: string[], tabela: string): EstadoId {
   let estado: EstadoId = { tipo: "AUSENTE", temDefault: false };
   const esc = tabela.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -89,6 +89,9 @@ function estadoFinalId(sqlMigrations: string[], tabela: string): EstadoId {
     if (new RegExp(`ALTER TABLE "${esc}" ALTER COLUMN "?id"? SET DEFAULT gen_random_uuid\\(\\)`, "i").test(sql)) {
       estado = { ...estado, temDefault: true };
     }
+  }
+  if (tabelasConvertidas(sqlMigrations).has(tabela)) {
+    estado = { tipo: "UUID", temDefault: true };
   }
   return estado;
 }

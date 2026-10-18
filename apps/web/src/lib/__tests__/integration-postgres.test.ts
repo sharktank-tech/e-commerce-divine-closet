@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -16,8 +16,11 @@ import { PrismaClient } from "@prisma/client";
 // Sequência: aplica o SQL versionado DEFETUOSO real (as3 migrations de
 // 17/10, id TEXT sem DEFAULT), reproduz a violação NOT NULL (o500 do
 // estorno), aplica 20261017200000_ids_uuid_default e reexecuta com sucesso.
-// Um segundo grupo roda `prisma migrate deploy` em banco vazio e fixa a
-// divergência pré-existente do histórico (ver DRIFT-BANCO-2026-10-17.md).
+// Um segundo grupo roda `prisma migrate deploy` em banco vazio e exige o
+// replay COMPLETO do histórico (reconstrução do zero), incluindo a migração
+// de compatibilidade 20260928181000_rebuild_legacy_uuid que versiona as
+// conversões id TEXT→uuid antes feitas fora do histórico (ver
+// DRIFT-BANCO-2026-10-17.md).
 
 const run = promisify(execFile);
 const PRISMA_DIR = resolve(__dirname, "..", "..", "..", "..", "..", "packages", "database", "prisma");
@@ -170,42 +173,108 @@ describe("integração PostgreSQL real — caminho refund/token (defeito 17/10)"
 
 describe("integração PostgreSQL real — prisma migrate deploy em banco novo", () => {
   let amb: Ambiente | null = null;
+  let saida = "";
+
+  beforeAll(async () => {
+    amb = await abrirPostgres("pg-it-deploy");
+    // Procedimento de implantação real (npm run prisma:deploy). Antes de
+    // 20260928181000_rebuild_legacy_uuid este replay falhava em reviews com
+    // 42804 (FK uuid→text): as conversões id TEXT→uuid do ciclo 25–28/09
+    // aconteceram fora do histórico. A migração de compatibilidade versiona
+    // essa conversão sem reescrever nada já aplicado.
+    const res = await run(
+      "npx",
+      ["prisma", "migrate", "deploy", "--schema", join(PRISMA_DIR, "schema.prisma")],
+      { env: { ...process.env, DATABASE_URL: amb.url }, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 }
+    );
+    saida = res.stdout;
+  }, 240_000);
 
   afterAll(async () => {
     await fechar(amb);
     amb = null;
   }, 60_000);
 
-  it(
-    "histórico atual NÃO reconstitui produção: falha em reviews com 42804 (divergência pré-existente)",
-    async () => {
-      amb = await abrirPostgres("pg-it-deploy");
-      // Fixa a realidade: id de Order é TEXT no init e nada no histórico o
-      // converte para uuid (produção converteu fora do histórico), então a
-      // FK uuid→text de Review aborta o deploy. Se alguém corrigir o
-      // histórico (reescrita aprovada), este teste falha e o doc deve ser
-      // atualizado junto.
-      let stdout = "";
-      let stderr = "";
-      let codigo = 0;
-      try {
-        const res = await run(
-          "npx",
-          ["prisma", "migrate", "deploy", "--schema", join(PRISMA_DIR, "schema.prisma")],
-          { env: { ...process.env, DATABASE_URL: amb.url }, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 }
-        );
-        stdout = res.stdout;
-      } catch (err) {
-        const e = err as { code?: number; stdout?: string; stderr?: string };
-        codigo = typeof e.code === "number" ? e.code : 1;
-        stdout = e.stdout ?? "";
-        stderr = e.stderr ?? "";
-      }
-      const tudo = `${stdout}\n${stderr}`;
-      expect(codigo, "deploy em banco novo deveria falhar hoje").not.toBe(0);
-      expect(tudo).toContain("20260928181651_reviews");
-      expect(tudo).toContain("42804");
-    },
-    240_000
-  );
+  it("aplica o histórico inteiro em banco vazio, sem db push nem SQL manual", () => {
+    const aplicadas = [...saida.matchAll(/Applying migration `([^`]+)`/g)].map((m) => m[1]);
+    const total = readdirSync(MIGRATIONS).filter((d) => existsSync(join(MIGRATIONS, d, "migration.sql"))).length;
+    expect(aplicadas.length).toBe(total);
+    expect(saida).toContain("All migrations have been successfully applied.");
+  });
+
+  it("tabelas legadas terminam com id uuid DEFAULT gen_random_uuid()", async () => {
+    const rows = await amb!.db.query<{ table_name: string; data_type: string; column_default: string | null }>(
+      `SELECT table_name, data_type, column_default FROM information_schema.columns
+        WHERE column_name='id' AND table_schema='public'
+          AND table_name IN ('User','Address','Category','Product','ProductVariation','WishlistItem',
+                             'Cart','CartItem','Order','OrderItem','Review','Coupon','Banner')`
+    );
+    expect(rows.rows.length).toBe(13);
+    for (const r of rows.rows) {
+      expect(r.data_type, `${r.table_name}.id type`).toBe("uuid");
+      expect(r.column_default, `${r.table_name}.id default`).toContain("gen_random_uuid()");
+    }
+  });
+
+  it("FKs recriadas após a conversão continuam íntegras", async () => {
+    const rows = await amb!.db.query<{ conname: string }>(
+      `SELECT c.conname FROM pg_constraint c
+        JOIN pg_class t ON t.oid=c.conrelid
+       WHERE c.contype='f' AND t.relnamespace='public'::regnamespace
+         AND c.conname IN ('Review_orderId_fkey','Review_userId_fkey','OrderItem_orderId_fkey',
+                           'CartItem_productId_fkey','Product_categoryId_fkey','Category_parentId_fkey')`
+    );
+    expect(rows.rows.map((r) => r.conname).sort()).toEqual([
+      "CartItem_productId_fkey",
+      "Category_parentId_fkey",
+      "OrderItem_orderId_fkey",
+      "Product_categoryId_fkey",
+      "Review_orderId_fkey",
+      "Review_userId_fkey",
+    ]);
+  });
+
+  it("roles anon/authenticated existem (exigidos pelas policies de reviews)", async () => {
+    const rows = await amb!.db.query<{ rolname: string }>(
+      `SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated','divine_app')`
+    );
+    expect(rows.rows.map((r) => r.rolname).sort()).toEqual(["anon", "authenticated", "divine_app"]);
+  });
+
+  it("Refund/OrderTrackToken/ErpEvent: uuid + DEFAULT + unicidades + FK", async () => {
+    // EmailOutbox (20261017210000) e businessKey (20261017220000) só existem
+    // no histórico quando os PRs #10/#11 entram; as asserções seguem o que o
+    // deploy realmente aplicou (no combinado, todas rodam).
+    const temOutbox = saida.includes("20261017210000_email_outbox");
+    const temBusinessKey = saida.includes("20261017220000_erp_event_business_key");
+    const lista = temOutbox
+      ? "'Refund','OrderTrackToken','ErpEvent','EmailOutbox'"
+      : "'Refund','OrderTrackToken','ErpEvent'";
+    const cols = await amb!.db.query<{ table_name: string; data_type: string; column_default: string | null }>(
+      `SELECT table_name, data_type, column_default FROM information_schema.columns
+        WHERE column_name='id' AND table_schema='public' AND table_name IN (${lista})`
+    );
+    expect(cols.rows.length).toBe(temOutbox ? 4 : 3);
+    for (const r of cols.rows) {
+      expect(r.data_type, `${r.table_name}.id type`).toBe("uuid");
+      expect(r.column_default, `${r.table_name}.id default`).toContain("gen_random_uuid()");
+    }
+    const uniques = await amb!.db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes WHERE schemaname='public' AND indexdef LIKE '%UNIQUE%'
+         AND tablename IN (${lista})`
+    );
+    const esperados = [
+      "Refund_orderId_key",
+      "Refund_idempotencyKey_key",
+      "OrderTrackToken_orderId_key",
+      "OrderTrackToken_tokenHash_key",
+    ];
+    if (temBusinessKey) esperados.push("ErpEvent_businessKey_key");
+    if (temOutbox) esperados.push("EmailOutbox_dedupeKey_key");
+    expect(uniques.rows.map((r) => r.indexname).sort()).toEqual(expect.arrayContaining(esperados));
+    const fks = await amb!.db.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint WHERE contype='f' AND conname IN ('Refund_orderId_fkey','OrderTrackToken_orderId_fkey')`
+    );
+    expect(fks.rows.map((r) => r.conname).sort()).toEqual(["OrderTrackToken_orderId_fkey", "Refund_orderId_fkey"]);
+  });
 });

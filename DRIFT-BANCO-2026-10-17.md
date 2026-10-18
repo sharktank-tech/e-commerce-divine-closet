@@ -59,24 +59,35 @@ Audit integral de todas as colunas `id` em produção (24 tabelas):
   `@default(dbgenerated("gen_random_uuid()"))` (a migration aplicada já cria o default;
   sem isto, `prisma migrate diff` pedia `DROP DEFAULT`).
 - **Testes de regressão**:
-  - `migrations-id-default.test.ts` — estado final do `id` a partir do histórico (23 models);
+  - `migrations-id-default.test.ts` — estado final do `id` a partir do histórico, incluindo a
+    conversão versionada (23 models; só `AuditLog` segue TEXT);
   - `integration-postgres.test.ts` — **PostgreSQL real** (PGlite servido por socket TCP):
     aplica o SQL versionado defetuoso, **reproduz** `P2011` em
     `refund.create`/`orderTrackToken.create` sem id, aplica a migração de fix e
-    reexecuta com sucesso (id gerado no banco), confere
-    `uuid` + `DEFAULT gen_random_uuid()` nas 3 tabelas.
+    reexecuta com sucesso (id gerado no banco); e roda `prisma migrate deploy` em banco
+    vazio exigindo o **replay integral** do histórico (todas as migrations, incluindo
+    `20260928181000_rebuild_legacy_uuid`) + estrutura final `uuid` +
+    `DEFAULT gen_random_uuid()` + unicidades/FKs.
 
 ## 3. Por que o histórico não reconstitui produção
 
 A produção **não** foi construída executando o histórico de migrações do zero:
 
-- `init` cria `Order`/`User`/… como `TEXT`; **nada no histórico converte esses ids para
-  `uuid`** — mas produção tem `uuid`. As conversões ocorreram **fora do histórico**
+- `init` cria `Order`/`User`/… como `TEXT`; **nada no histórico original converte esses ids
+  para `uuid`** — mas produção tem `uuid`. As conversões ocorreram **fora do histórico**
   (época de `db push`/ajustes manuais, ~25–28/09).
-- Resultado: `prisma migrate deploy` em **banco vazio** aplica até
-  `20260928181651_reviews` e **falha** com `42804` (`Review_orderId_fkey`:
-  `uuid` → `Order.id text`). Fixado por teste de integração
-  («histórico atual NÃO reconstitui produção»).
+- Resultado original: `prisma migrate deploy` em **banco vazio** aplicava até
+  `20260928181651_reviews` e **falhava** com `42804` (`Review_orderId_fkey`:
+  `uuid` → `Order.id text`).
+- **Correção versionada neste PR**: `20260928181000_rebuild_legacy_uuid` replica, dentro do
+  histórico, exatamente a conversão que produção recebeu fora dele (13 tabelas:
+  `User`, `Address`, `Category`, `Product`, `ProductVariation`, `WishlistItem`, `Cart`,
+  `CartItem`, `Order`, `OrderItem`, `Review`, `Coupon`, `Banner` → `id uuid` +
+  `DEFAULT gen_random_uuid()`, recriando as FKs afetadas e criando as roles
+  `anon`/`authenticated` se ausentes). É **no-op** em produção (nenhuma dessas tabelas tem
+  mais `id` text) e **não reescreve** migrações já aplicadas: entra como migração nova
+  antes de `reviews`. Em banco vazio o replay agora vai até o fim (verificado por
+  `integration-postgres.test.ts` e por reconstrução manual fora do teste).
 - 6 linhas de `_prisma_migrations` têm checksums-placeholder (`manual-*`):
   `lotes_e_configuracao`, `orderitem_product_restrict`, `cartitem_unitprice`,
   `historico_preco`, `auditlog_id_default`, `carrinho_abandonado` — SQL aplicado à mão e
@@ -84,10 +95,10 @@ A produção **não** foi construída executando o histórico de migrações do 
 - `prisma migrate status` reporta «up to date» mesmo assim: ele só confere
   **presença** das linhas, **não** a estrutura (por isso o defeito do §1 passou despercebido).
 
-Consequência prática: **`ids_uuid_default` em si é executável em qualquer banco que já
-tenha as três tabelas** (conteúdo idempotente, ordem-independente; provado em integração e
-registrado na produção), mas a **cadeia completa** não roda em banco vazio — corrigir isso
-exigiria reescrever migrações aplicadas (vetado nesta rodada; opções no §6).
+Consequência prática: `ids_uuid_default` em si é executável em qualquer banco que já tenha
+as três tabelas (conteúdo idempotente, ordem-independente; provado em integração e
+registrado na produção), e a **cadeia completa** agora também roda em banco vazio
+(replay integral do histórico, incluindo a migração de compatibilidade do §3).
 
 ## 4. Diferenças restantes entre código e produção
 
@@ -118,8 +129,11 @@ uuid, tipos `TIMESTAMP(3)`/defaults, `custo_* NOT NULL`, índices únicos de `no
   (checksum confere); tipos/defaults reais das colunas `id`; diff estrutural completo.
 - **PostgreSQL real (ambiente isolado, teste automatizado)**: reprodução do `P2011` no
   caminho exato do bug + sucesso após a migração de fix; estrutura final
-  `uuid` + `gen_random_uuid()`; `migrate deploy` em vazio fixando a falha `42804` de
-  `reviews`.
+  `uuid` + `gen_random_uuid()`; `migrate deploy` em **banco vazio** com replay
+  **integral** do histórico (inclui `20260928181000_rebuild_legacy_uuid`), sem 42804.
+- **Reconstrução manual do zero** (fora do vitest): mesmo replay + auditoria de
+  `information_schema` (13 tabelas legadas convertidas; roles; FKs recriadas) e teste de
+  upgrade de base pré-pendências com dados e tentativas de duplicidade (bloqueadas).
 - **Testes automatizados**: `migrations-id-default.test.ts` (23 models) + suíte completa.
 
 ## 6. Pendências / ações operacionais
