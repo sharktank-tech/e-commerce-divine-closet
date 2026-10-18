@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { fila, erpEventMock } = vi.hoisted(() => {
   const fila = new Map<string, Record<string, unknown>>();
   const erpEventMock = {
-    create: vi.fn(),
+    createMany: vi.fn(),
     findUnique: vi.fn(),
     updateMany: vi.fn(),
     findMany: vi.fn(),
@@ -25,28 +25,28 @@ import {
   verificarAssinaturaErp,
 } from "@/lib/erp";
 
+// Simula o ON CONFLICT DO NOTHING do Prisma: count=0 em conflito de unique
+// (businessKey ou id), count=1 quando insere — NUNCA lança exceção por conflito.
 function ligarFila() {
-  erpEventMock.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
-    if (fila.has(data.id as string)) {
-      throw Object.assign(new Error("dup"), { code: "P2002" });
+  erpEventMock.createMany.mockImplementation(
+    async ({ data }: { data: Array<Record<string, unknown>>; skipDuplicates?: boolean }) => {
+      const d = data[0];
+      if (fila.has(d.id as string)) return { count: 0 };
+      if (d.businessKey && [...fila.values()].some((l) => l.businessKey === d.businessKey)) {
+        return { count: 0 };
+      }
+      const linha = {
+        ...d,
+        lastStatusCode: null,
+        lastError: null,
+        nextAttemptAt: new Date(),
+        createdAt: new Date(),
+        version: 1,
+      };
+      fila.set(d.id as string, linha);
+      return { count: 1 };
     }
-    if (
-      data.businessKey &&
-      [...fila.values()].some((l) => l.businessKey === data.businessKey)
-    ) {
-      throw Object.assign(new Error("businessKey dup"), { code: "P2002" });
-    }
-    const linha = {
-      ...data,
-      lastStatusCode: null,
-      lastError: null,
-      nextAttemptAt: new Date(),
-      createdAt: new Date(),
-      version: 1,
-    };
-    fila.set(data.id as string, linha);
-    return linha;
-  });
+  );
   erpEventMock.findUnique.mockImplementation(
     async ({ where }: { where: { id?: string; businessKey?: string } }) => {
       if (where.businessKey !== undefined) {
@@ -114,9 +114,10 @@ describe("enfileirarEvento", () => {
     expect(erpConfigurado()).toBe(false);
     const id = await enfileirarEvento("pedido_pago", { numero: "1" });
     expect(id).toBeTruthy();
-    expect(erpEventMock.create).toHaveBeenCalledWith(
+    expect(erpEventMock.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ tipo: "pedido_pago", status: "PENDING" }),
+        data: [expect.objectContaining({ tipo: "pedido_pago", status: "PENDING" })],
+        skipDuplicates: true,
       })
     );
     // entrega continua bloqueada sem config (nada sai sem URL+segredo)
@@ -129,22 +130,14 @@ describe("enfileirarEvento", () => {
     expect(erpConfigurado()).toBe(true);
     const id = await enfileirarEvento("pedido_criado", { numero: "DC-1" });
     expect(id).toBeTruthy();
-    expect(erpEventMock.create).toHaveBeenCalledWith(
+    expect(erpEventMock.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ id, tipo: "pedido_criado", status: "PENDING" }),
+        data: [expect.objectContaining({ id, tipo: "pedido_criado", status: "PENDING" })],
       })
     );
   });
 
-  it("reenfileirar mesmo event_id (P2002) é idempotente", async () => {
-    definirConfig();
-    const id = await enfileirarEvento("pedido_pago", {});
-    erpEventMock.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
-    const deNovo = await enfileirarEvento("pedido_pago", {});
-    expect(typeof deNovo).toBe("string");
-  });
-
-  it("businessKey repetida (corrida residual) → catch P2002 devolve a linha existente", async () => {
+  it("businessKey repetida (corrida: pré-cheque não enxerga) → count=0 devolve a linha existente", async () => {
     definirConfig();
     const chave = "pedido_estornado:ord-9";
     const primeiro = await enfileirarEvento(
@@ -152,11 +145,10 @@ describe("enfileirarEvento", () => {
       { numero: "DC-9" },
       { businessKey: chave }
     );
-    // corrida de verdade: o pré-cheque ainda não enxerga a linha da outra tx
-    // e o create perde pro índice único (P2002)
+    // corrida de verdade: o pré-cheque ainda não enxerga a linha da outra tx,
+    // o INSERT perde pro índice único — ON CONFLICT vira count=0, sem exceção
     const findBase = erpEventMock.findUnique.getMockImplementation()!;
-    erpEventMock.findUnique.mockImplementationOnce(async () => null);
-    erpEventMock.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    erpEventMock.findUnique.mockImplementationOnce(async () => null); // pré-cheque não vê
     const segundo = await enfileirarEvento(
       "pedido_estornado",
       { numero: "DC-9" },
@@ -170,29 +162,43 @@ describe("enfileirarEvento", () => {
     ).toHaveLength(1);
   });
 
-  it("businessKey já existente → pré-cheque devolve a linha SEM create (tx do chamador não aborta)", async () => {
+  it("businessKey já existente → pré-cheque devolve a linha SEM createMany", async () => {
     definirConfig();
     const chave = "pedido_estornado:ord-prev";
     await enfileirarEvento("pedido_estornado", { numero: "DC-P" }, { businessKey: chave });
-    erpEventMock.create.mockClear();
+    erpEventMock.createMany.mockClear();
     const id = await enfileirarEvento(
       "pedido_estornado",
       { numero: "DC-P" },
       { businessKey: chave }
     );
-    // P2002 dentro de $transaction deixaria a transação inutilizável até o
-    // rollback — o pré-cheque evita o INSERT rejeitado no caso comum.
-    expect(erpEventMock.create).not.toHaveBeenCalled();
+    expect(erpEventMock.createMany).not.toHaveBeenCalled();
     expect(id).toBeTruthy();
   });
 
   it("businessKey nova grava a chave na linha (unicidade por ocorrência)", async () => {
     definirConfig();
     await enfileirarEvento("pedido_cancelado", {}, { businessKey: "pedido_cancelado:ord-1" });
-    expect(erpEventMock.create).toHaveBeenCalledWith(
+    expect(erpEventMock.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ businessKey: "pedido_cancelado:ord-1" }),
+        data: [expect.objectContaining({ businessKey: "pedido_cancelado:ord-1" })],
       })
+    );
+  });
+
+  it("falha de banco que NÃO é conflito é PROPAGADA (não vira 'já existe')", async () => {
+    definirConfig();
+    erpEventMock.createMany.mockRejectedValueOnce(new Error("connection reset"));
+    await expect(enfileirarEvento("pedido_pago", {})).rejects.toThrow(/connection reset/);
+  });
+
+  it("count=0 sem businessKey correspondente (colisão de id) → erro visível, não idempotente", async () => {
+    definirConfig();
+    // força count=0 mas a linha não existe no findUnique por id
+    erpEventMock.createMany.mockResolvedValueOnce({ count: 0 });
+    erpEventMock.findUnique.mockResolvedValueOnce(null);
+    await expect(enfileirarEvento("pedido_pago", {})).rejects.toThrow(
+      /conflito-sem-linha/
     );
   });
 });

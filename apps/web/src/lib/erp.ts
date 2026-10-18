@@ -149,9 +149,16 @@ export type EnfileirarOpcoes = {
  * persiste mesmo com ERP desativado — o envio é responsabilidade da
  * entrega (entregarEvento/drenar), que só roda com URL+segredo.
  *
- * Falha de banco que não é P2002 é PROPAGADA (não engole): nos fluxos
- * transacionais o evento e a transição de negócio precisam falhar juntos
- * (rollback → reconciliação reprocessa), nunca gravar transição sem evento.
+ * Concorrência: a inserção usa `createMany`+`skipDuplicates`, que o Prisma
+ * traduz para `INSERT … ON CONFLICT DO NOTHING`. Diferente de um `create`
+ * simples (que, ao violar a unique de businessKey, ABORTA a transação do
+ * chamador no Postgres e derrubaria a transição de negócio junto), o
+ * ON CONFLICT não aborta a tx: a corrida entre duas transações vira
+ * `count = 0` e a transição legítima segue intacta. Só devolvemos um id
+ * existente quando a linha correspondente à MESMA ocorrência é localizada;
+ * qualquer outra falha (conexão, schema, NOT NULL, colisão de id sem
+ * businessKey correspondente) é PROPAGADA — nunca mascarada como
+ * "evento já existente".
  */
 export async function enfileirarEvento(
   tipo: EventoErp,
@@ -160,11 +167,8 @@ export async function enfileirarEvento(
 ): Promise<string | null> {
   const db = opcoes.db ?? prisma;
   const id = randomUUID();
-  // Pré-cheque da ocorrência: evita abortar a transação do chamador com
-  // P2002 (no Postgres, um INSERT rejeitado deixa a tx inutilizável até o
-  // rollback — dentro de $transaction isso derrubaria a transição junto).
-  // Corrida residual (pré-cheque passa, create perde) ainda pode P2002:
-  // o catch devolve a linha existente ou propaga (rollback + reprocesso).
+  // Pré-cheque (otimização): ocorrência já gravada devolve o id sem tentar
+  // INSERT. Não é a garantia de corrida — essa vem do ON CONFLICT abaixo.
   if (opcoes.businessKey) {
     const existente = await db.erpEvent.findUnique({
       where: { businessKey: opcoes.businessKey },
@@ -172,9 +176,10 @@ export async function enfileirarEvento(
     });
     if (existente) return existente.id;
   }
-  try {
-    await db.erpEvent.create({
-      data: {
+  // ON CONFLICT DO NOTHING (via skipDuplicates): não aborta a tx em corrida.
+  const r = await db.erpEvent.createMany({
+    data: [
+      {
         id,
         tipo,
         payload: dados,
@@ -182,22 +187,26 @@ export async function enfileirarEvento(
         attempt: 0,
         ...(opcoes.businessKey ? { businessKey: opcoes.businessKey } : {}),
       },
+    ],
+    skipDuplicates: true,
+  });
+  if (r.count === 1) return id; // inserimos — ocorrência nova
+  // count = 0 → houve conflito de unique (businessKey ou id). Localizamos a
+  // linha da MESMA ocorrência; se não existir, é anomalia (colisão de uuid)
+  // e precisa ficar visível, não virar "já existe".
+  if (opcoes.businessKey) {
+    const existente = await db.erpEvent.findUnique({
+      where: { businessKey: opcoes.businessKey },
+      select: { id: true },
     });
-  } catch (err) {
-    if ((err as { code?: string })?.code === "P2002") {
-      // ocorrência já enfileirada (businessKey única) → devolve a existente
-      // para a entrega pós-commit trabalhar na linha certa.
-      if (opcoes.businessKey) {
-        const existente = await db.erpEvent.findUnique({
-          where: { businessKey: opcoes.businessKey },
-        });
-        if (existente) return existente.id;
-      }
-      return id;
-    }
-    throw err;
+    if (existente) return existente.id;
+    throw new Error(
+      `erp:evento:conflito-sem-ocorrencia:${opcoes.businessKey}`
+    );
   }
-  return id;
+  const porId = await db.erpEvent.findUnique({ where: { id }, select: { id: true } });
+  if (porId) return porId.id; // retry da MESMA linha (uuid já gravado)
+  throw new Error(`erp:evento:conflito-sem-linha:${id}`);
 }
 
 function montarEnvelope(ev: EventoLinha): EnvelopeErp {
