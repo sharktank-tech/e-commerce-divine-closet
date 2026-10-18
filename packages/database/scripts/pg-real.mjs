@@ -32,12 +32,12 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   appendFileSync,
-  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -133,7 +133,7 @@ function gravarNss() {
   writeFileSync(GROUP, `${nome}:x:${gid}:\n`);
 }
 
-function copiarBinarios() {
+function ligarBinarios() {
   mkdirSync(BIN, { recursive: true });
   const origens = [join(PREFIXO, "usr/libexec/postgresql17"), join(PREFIXO, "usr/bin")];
   for (const nome of ["initdb", "pg_ctl", "pg_isready", "postgres", "psql"]) {
@@ -145,9 +145,16 @@ function copiarBinarios() {
       }
       bloquear(`binário "${nome}" ausente em ${origens.join(" / ")} — rode "setup" (instala o prefixo)`);
     }
+    // SYMLINK, não cópia: o postmaster resolve o binário REAL via
+    // /proc/self/exe e deriva share (/usr/share/postgresql17) e pkglibdir
+    // (/usr/lib/postgresql17) a partir dele — o layout <prefixo>/usr/libexec/
+    //postgresql17 é relocatable e acha tudo DENTRO do prefixo. Uma cópia em
+    // outro diretório cairia nos caminhos compilados /usr/*, inexistentes
+    // sem root (instalação usermode) → FATAL "incomplete PostgreSQL
+    // installation" na subida do servidor.
     const para = join(BIN, nome);
-    cpSync(de, para);
-    chmodSync(para, 0o755);
+    rmSync(para, { force: true });
+    symlinkSync(de, para);
   }
 }
 
@@ -190,9 +197,27 @@ async function inicializar() {
   if (!existsSync(join(PREFIXO, "usr/lib/libnss_wrapper.so"))) {
     console.error("· aviso: libnss_wrapper.so ausente — initdb pode falhar se o uid não existir em /etc/passwd");
   }
+  // initdb recusa diretório não-vazio: um initdb interrompido deixa resto
+  // sem PG_VERSION — descarta e recomeça.
+  if (existsSync(DADOS) && readdirSync(DADOS).length > 0) {
+    raizSegura(DADOS, "data incompleta");
+    console.log("· removendo data/ de initdb anterior incompleto");
+    rmSync(DADOS, { recursive: true, force: true });
+  }
   console.log(`· initdb -> ${DADOS} (superuser postgres, auth trust, locale C)`);
+  // initdb precisa rodar do PRÓPRIO prefixo (usr/libexec/postgresql17): o
+  // get_share_path() é derivado da localização do binário — de lá ele acha
+  // <prefixo>/usr/share/postgresql17 (bki, information_schema, timezonesets).
+  // Uma cópia em outro diretório resolveria o caminho compilado
+  // /usr/share/postgresql17, que não existe sem root (instalação usermode).
+  const SHARE = join(PREFIXO, "usr/share/postgresql17");
+  if (!existsSync(join(SHARE, "postgres.bki"))) {
+    bloquear(`prefixo sem share (usr/share/postgresql17/postgres.bki): ${PREFIXO} — instalação incompleta, rode "setup"`);
+  }
+  const initdbDe = [join(PREFIXO, "usr/libexec/postgresql17", "initdb"), join(BIN, "initdb")].find((p) => existsSync(p));
+  if (!initdbDe) bloquear("initdb não encontrado (nem no prefixo nem em bin/) — rode \"setup\"");
   try {
-    await run(join(BIN, "initdb"), ["-D", DADOS, "--no-locale", "--encoding=UTF8", "--auth=trust", "--username=postgres"], { env: envAlpine() });
+    await run(initdbDe, ["-D", DADOS, "--no-locale", "--encoding=UTF8", "--auth=trust", "--username=postgres"], { env: envAlpine() });
   } catch (e) {
     bloquear(`initdb falhou: ${(e.stderr || e.message || "").trim().split("\n").slice(-4).join(" | ")}`);
   }
@@ -289,7 +314,7 @@ switch (sub) {
   case "setup": {
     raizSegura(RAIZ, "PG_REAL_HOME");
     await instalarPrefixo();
-    copiarBinarios();
+    ligarBinarios();
     await inicializar();
     await iniciar();
     const codigo = await status();

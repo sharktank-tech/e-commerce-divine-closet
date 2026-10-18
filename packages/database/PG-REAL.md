@@ -27,9 +27,17 @@ O que faz, nesta ordem (tudo dentro de `PG_REAL_HOME`, padrão `<repo>/.pg-real`
    Alpine; sem esses arquivos o script bloqueia e instrui a apontar
    `PG_ALPINE_PREFIX` para um prefixo já existente). Se o prefixo já existe
    (ex.: `~/.local/pgalpine`), é reaproveitado — nada é baixado.
-2. **Binários**: copia `initdb`, `pg_ctl`, `pg_isready`, `postgres`, `psql`
-   para `<PG_REAL_HOME>/bin/` (irmãos side-by-side: o `initdb` acha o
-   `postgres` relativo a si mesmo).
+2. **Binários**: `initdb`, `pg_ctl`, `pg_isready`, `postgres`, `psql` viram
+   **symlinks** de `<PG_REAL_HOME>/bin/` para o prefixo
+   (`usr/libexec/postgresql17/`). Symlink e não cópia de propósito: o
+   postmaster resolve o binário real via `/proc/self/exe` e deriva
+   share (`/usr/share/postgresql17`) e pkglibdir (`/usr/lib/postgresql17`)
+   a partir dele — o layout `libexec/postgresql17` é relocatable e encontra
+   tudo dentro do prefixo. Uma cópia em outro diretório cairia nos caminhos
+   compilados `/usr/*`, inexistentes sem root, e o servidor não sobe
+   (`FATAL ... incomplete PostgreSQL installation`). O `initdb` roda do
+   prefixo pelo mesmo motivo (os input files — bki, timezonesets — saem do
+   `get_share_path` do binário).
 3. **`passwd`/`group`** (nss_wrapper): este host roda como uid 1000 **sem
    entrada em `/etc/passwd`** (`whoami` falha) — o wrapper dá identidade ao
    servidor via `LD_PRELOAD=libnss_wrapper.so`.
