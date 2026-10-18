@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { autorizarCron } from "@/lib/cron-auth";
 import { prisma } from "@/lib/prisma";
 import { emails, sendEmail } from "@/lib/email";
 import { HORAS_ABANDONO, precisaLembrete } from "@/lib/carrinho-abandonado";
@@ -9,6 +10,9 @@ import { drenarEmailsOutbox } from "@/lib/email-outbox";
 // Lembrete de carrinho abandonado (só logados — guest não tem e-mail).
 // Agendado via cron (vercel.json) com CRON_SECRET, mesma proteção da
 // rota de convite de avaliação.
+// Fuso: vercel.json usa UTC — "0 12 * * *" = 09:00 em Araguaina (UTC−3,
+// sem DST desde 2019). Vercel Hobby: execução best-effort, atraso de
+// minutos é normal; atraso máximo esperado = até a próxima janela diária.
 // Plano Hobby: cada cron roda no máx. 1x/dia (expressões mais frequentes
 // falham no deploy). A reconciliação de Pix pendente (rede de segurança do
 // webhook), o dreno da fila de eventos ERP e o dreno do outbox de e-mails
@@ -16,9 +20,7 @@ import { drenarEmailsOutbox } from "@/lib/email-outbox";
 // /api/cron/emails).
 export async function GET(req: NextRequest) {
   try {
-    const secret = process.env.CRON_SECRET;
-    const auth = req.headers.get("authorization") || "";
-    if (!secret || auth !== `Bearer ${secret}`) {
+    if (!autorizarCron(req.headers.get("authorization"), process.env.CRON_SECRET)) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 

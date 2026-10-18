@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { autorizarCron } from "@/lib/cron-auth";
 import { prisma } from "@/lib/prisma";
 import { emails, sendEmail } from "@/lib/email";
 
 // Convite de avaliação X dias após a entrega (padrão 7).
 // Agendado via cron (vercel.json) com CRON_SECRET. Sem WhatsApp
 // (integração inexistente) — só e-mail, atrás do driver configurado.
+// Fuso: "0 13 * * *" UTC = 10:00 em Araguaina (UTC−3). Hobby: atraso de
+// minutos é normal; o marcador reviewRequestedAt só é gravado após o
+// envio, então reexecução no mesmo dia não duplica.
 export async function GET(req: NextRequest) {
   try {
-    const secret = process.env.CRON_SECRET;
-    const auth = req.headers.get("authorization") || "";
-    if (!secret || auth !== `Bearer ${secret}`) {
+    if (!autorizarCron(req.headers.get("authorization"), process.env.CRON_SECRET)) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
