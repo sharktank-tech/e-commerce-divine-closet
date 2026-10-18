@@ -10,30 +10,24 @@
 
 | PR | Branch | Conteúdo | Migrações |
 |----|--------|----------|-----------|
-| #9 | `fix/migrations-id-default` | IDs text→uuid+default (AuditLog text+default), migração de compatibilidade `rebuild_legacy_uuid` idempotente, teste invertido de deploy | `20260928181000_rebuild_legacy_uuid` |
-| #10 | `feat/email-estorno-retentativa` | `EmailOutbox` + retentativa; **atualizado** com atomicidade tx+outbox em estorno/admin/cancel/PIX e remoção do envio direto legado; cron-auth (`CRON_SECRET`) nas 4 rotas; schedules corrigidos p/ horário local | `20260929000000_email_outbox` |
-| #11 | `feat/erp-evento-persistente` | `ErpEvent` sempre persistido (não só no catch), `businessKey @unique` + pré-cheque, contrato do receptor (envelope/assinatura v1), dreno 09h | `20260930000000_erp_event` |
-| correções da revisão | cherry-picks para os ramos acima | Frente 3→#10, Frente 4→#10, Frente 5→#11, Frente 6 (guest/rate-limit)→#9 (única que cria migração nova `20261018090000_rate_limit`) | `20261018090000_rate_limit` |
+| #9 | `fix/migrations-id-default` (tip 5cfde77) | IDs text→uuid+default (AuditLog text+default), migração de compatibilidade `rebuild_legacy_uuid` idempotente, teste invertido de deploy + correções guest (rate-limit Postgres, analytics/robots) | `20260928181000_rebuild_legacy_uuid`, `20261018090000_rate_limit` |
+| #10 | `fix/estorno-email-refunded` (tip f3e93ea) | `EmailOutbox` + retentativa; atomicidade tx+outbox em estorno/admin/cancel/PIX e remoção do envio direto legado; cron-auth (`CRON_SECRET`) nas 4 rotas; schedules corrigidos p/ horário local | `20260929000000_email_outbox` |
+| #11 | `feat/erp-evento-persistente` (tip f951169) | `ErpEvent` sempre persistido (não só no catch), `businessKey @unique` + pré-cheque, contrato do receptor (envelope/assinatura v1), dreno 09h | `20260930000000_erp_event` |
 
-Commits da base combinada a distribuir (em `feat/dc7653-combinado`):
-
-```
-f627f9a fix(email): atomicidade do outbox de estorno e demais status via outbox   → cherry-pick em #10
-f771049 fix(cron): exige CRON_SECRET nas 4 rotas e corrige schedules p/ horário local → cherry-pick em #10
-aa95e5a fix(erp): pré-cheque de businessKey antes do create + contrato do receptor → cherry-pick em #11
-0acd9a9 fix(guest): rate-limit de reenvio em Postgres + suprime analytics em /acompanhar → cherry-pick em #9
-```
-
-Sequência sugerida (cada linha só depois da anterior mergeada e verde):
+As correções da revisão (frentes 3–6) já foram **cherry-picked e pushadas**
+para os ramos acima em 17/10/2026:
 
 ```
-git checkout fix/migrations-id-default && git cherry-pick 0acd9a9 && git push
-# merge #9 (squash ou merge, time decide)
-git checkout feat/email-estorno-retentativa && git cherry-pick f627f9a f771049 && git push
-# merge #10 e RETARGET do #11 para main (hoje ele aponta para #10)
-git checkout feat/erp-evento-persistente && git rebase main && git cherry-pick aa95e5a && git push --force-with-lease
-# merge #11
+#9  5cfde77 ← 0acd9a9 (guest: rate-limit Postgres + analytics/robots)
+#10 691db7d ← f627f9a (outbox atômico)  +  f3e93ea ← f771049 (cron-auth + schedules)
+#11 f951169 ← aa95e5a (pré-cheque businessKey + contrato do receptor)
 ```
+
+Ordem de merge: **#9 → #10 → #11**. Se o #11 ainda apontar para o #10,
+retarget para `main` depois do merge do #10 (`gh pr edit 11 --base main`).
+Se houver conflito de schema ao mergear (#9 e #10 ambos acrescentam
+modelos ao fim de `schema.prisma`), manter os dois blocos — ordem entre
+modelos é irrelevante.
 
 ## 2. Ordem de implantação e migrações
 
@@ -42,10 +36,10 @@ nessa ordem; produção aplica cada migração com `npm run prisma:deploy`).
 
 1. Deploy do #9 → aplica `20260928181000_rebuild_legacy_uuid` (converte ids
    text→uuid, criando defaults; é idempotente e já foi exercitada em banco
-   legado — dados preservados).
+   legado — dados preservados) e `20261018090000_rate_limit` (tabela do
+   rate-limit guest — sem dependência dos demais PRs).
 2. Deploy do #10 → aplica `20260929000000_email_outbox` (enum + tabela).
 3. Deploy do #11 → aplica `20260930000000_erp_event` (coluna + unique).
-4. Deploy da correção guest (já no #9) → `20261018090000_rate_limit`.
 
 Migrações são **forward-only**; nunca reescrever histórico já aplicado.
 
