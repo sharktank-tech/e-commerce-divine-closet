@@ -346,8 +346,12 @@ model Refund {
 
 // Link privado de acompanhamento para pedido de CONVIDADO (sem conta).
 // Só o hash SHA-256 fica no banco — o plaintext viaja apenas no e-mail.
-// Reenvio ROTACIONA o token (antigo deixa de funcionar) e respeita
-// limite (sendCount) + espera (lastSentAt) por pedido.
+// Reenvio ROTACIONA o token: como `orderId` é único (1 linha/pedido), a
+// rotação SOBRESCREVE o `tokenHash` e o link antigo morre sozinho — não há
+// como 2 tokens ativos coexistirem. `revokedAt` é um gancho RESERVADO de
+// revogação explícita sem rotação (lido por `tokenAtivo`, mas hoje sempre
+// null; preenchê-lo negaria o acesso e a próxima rotação o limpa).
+// Respeita limite (sendCount) + espera (lastSentAt) por pedido.
 model OrderTrackToken {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   orderId     String    @unique @db.Uuid

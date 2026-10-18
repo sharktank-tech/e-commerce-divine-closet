@@ -166,6 +166,49 @@ describe("buscarPedidoPorToken", () => {
   });
 });
 
+describe("rotacionarToken", () => {
+  it("rotação SUBSTITUI o hash → link anterior deixa de resolver; novo resolve", async () => {
+    const antigo = gerarToken();
+    prismaMock.orderTrackToken.findUnique.mockResolvedValue(
+      tokenRow({ tokenHash: hashToken(antigo) })
+    );
+    const novo = await rotacionarToken({ orderId: "o1", sentTo: "g@g.com" });
+    expect(novo).not.toBe(antigo);
+    // a MESMA linha (orderId único) ganha o hash novo → o antigo morre
+    expect(prismaMock.orderTrackToken.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { orderId: "o1" },
+        data: expect.objectContaining({ tokenHash: hashToken(novo) }),
+      })
+    );
+    expect(prismaMock.orderTrackToken.create).not.toHaveBeenCalled();
+
+    // após a rotação, o lookup por hash só acha o novo (antigo → 404/null)
+    prismaMock.orderTrackToken.findUnique.mockImplementation(
+      async (args: { where: { tokenHash: string } }) =>
+        args.where.tokenHash === hashToken(novo)
+          ? tokenRow({ tokenHash: hashToken(novo) })
+          : null
+    );
+    prismaMock.order.findUnique.mockResolvedValue({
+      number: "DC-1",
+      status: "SHIPPED",
+      paymentStatus: "PAID",
+      total: "199.90",
+      createdAt: new Date("2026-01-02"),
+      trackingCode: null,
+      trackingCarrier: null,
+      trackingUrl: null,
+      items: [],
+      guestEmail: "g@g.com",
+      guestName: null,
+      address: null,
+    });
+    expect(await buscarPedidoPorToken(antigo)).toBeNull();
+    expect(await buscarPedidoPorToken(novo)).not.toBeNull();
+  });
+});
+
 describe("criarTokenAcompanhamento", () => {
   it("sem token → cria e devolve plaintext", async () => {
     prismaMock.orderTrackToken.findUnique.mockResolvedValue(null);
@@ -197,6 +240,29 @@ describe("criarTokenAcompanhamento", () => {
     const token = await criarTokenAcompanhamento({ orderId: "o1" });
     expect(token).toBeTruthy();
     expect(prismaMock.orderTrackToken.update).toHaveBeenCalled();
+    expect(prismaMock.orderTrackToken.create).not.toHaveBeenCalled();
+  });
+
+  it("token REVOGADO sem expirar → rotaciona (reativa) e limpa revokedAt", async () => {
+    // revokedAt é lido por tokenAtivo mas nunca escrito em produção (a
+    // rotação substitui o hash: orderId único ⇒ uma linha por pedido).
+    // Se a revogação explícita um dia preencher o campo, o reenvio precisa
+    // reativar: rotaciona (não pode reutilizar o link morto) e zera revokedAt.
+    prismaMock.orderTrackToken.findUnique.mockResolvedValue(
+      tokenRow({ revokedAt: new Date() })
+    );
+    const token = await criarTokenAcompanhamento({ orderId: "o1" });
+    expect(token).toBeTruthy();
+    expect(prismaMock.orderTrackToken.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { orderId: "o1" },
+        data: expect.objectContaining({
+          tokenHash: hashToken(token!),
+          revokedAt: null,
+          sendCount: { increment: 1 },
+        }),
+      })
+    );
     expect(prismaMock.orderTrackToken.create).not.toHaveBeenCalled();
   });
 });
