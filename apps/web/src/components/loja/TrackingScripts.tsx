@@ -7,11 +7,17 @@ import { hasConsent } from "@/lib/analytics";
 type Props = { meta: string; gtag: string[] };
 
 // Só injeta rastreamento com consentimento explícito (LGPD).
-// Sem IDs configurados, nada é renderizado.
+// Sem IDs configurados, nada é renderizado. Em /acompanhar/* (token privado
+// na URL) o rastreamento é suprimido — o token não pode vazar para o
+// provedor de analytics.
 export function TrackingScripts({ meta, gtag }: Props) {
   const [ok, setOk] = useState(false);
 
   useEffect(() => {
+    // Rotas com segredo no path (link privado de acompanhamento guest):
+    // NUNCA dispara PageView — a URL contém o token e iria para o provedor
+    // de rastreamento junto com o page_view.
+    if (window.location.pathname.startsWith("/acompanhar")) return;
     setOk(hasConsent());
   }, []);
 

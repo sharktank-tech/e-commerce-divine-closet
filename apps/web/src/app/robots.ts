@@ -9,7 +9,9 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/admin", "/api", "/conta", "/checkout", "/carrinho", "/sucesso"],
+        // /acompanhar/[token] é link privado (segredo no path) — fora do
+        // índice, junto das rotas internas.
+        disallow: ["/admin", "/api", "/conta", "/checkout", "/carrinho", "/sucesso", "/acompanhar"],
       },
     ],
     sitemap: `${root}/sitemap.xml`,
