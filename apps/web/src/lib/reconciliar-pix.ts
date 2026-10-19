@@ -5,7 +5,7 @@ import {
   enfileirarEmailStatusPedido,
   processarEmailOutbox,
 } from "@/lib/email-outbox";
-import { notificarErp } from "@/lib/erp";
+import { entregarEvento, enfileirarEvento } from "@/lib/erp";
 
 // Reconciliação de Pix pendente — rede de segurança do webhook do MP.
 // Roda 1x/dia no cron de carrinho-abandonado (plano Hobby: no máximo 2
@@ -94,31 +94,38 @@ export async function reconciliarPixPendentes(opcoes?: {
         if (!r.jaFinalizado) resumo.finalizados++;
         else resumo.mantidos++;
       } else if (decisao === "cancelar") {
-        // Guarda de corrida + outbox na MESMA transação: só cancela se ainda
-        // estiver PENDING; a linha do outbox (dedupeKey status:orderId:CANCELLED)
-        // nasce junto — rollback descarta as duas. O envio é pós-commit, com
-        // retentativa.
-        const { count, emailId } = await prisma.$transaction(async (tx) => {
+        // Guarda de corrida + evento + notificação na MESMA transação: só
+        // cancela se ainda estiver PENDING; o evento e a linha do outbox
+        // (dedupeKey status:orderId:CANCELLED) nascem junto — rollback
+        // descarta os três. O envio é pós-commit, com retentativa.
+        const { count, eventoId, emailId } = await prisma.$transaction(async (tx) => {
           const { count } = await tx.order.updateMany({
             where: { id: pedido.id, paymentStatus: "PENDING" },
             data: { status: "CANCELLED", paymentStatus: "FAILED" },
           });
+          let id: string | null = null;
           let mailId: string | null = null;
           if (count === 1) {
+            id = await enfileirarEvento(
+              "pedido_cancelado",
+              { numero: pedido.number, motivo: `Pix não confirmado (${pagamento.status})` },
+              { db: tx, businessKey: `pedido_cancelado:${pedido.id}` }
+            );
             mailId = await enfileirarEmailStatusPedido(
               pedido.id,
               "CANCELLED",
               tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
             );
           }
-          return { count, emailId: mailId };
+          return { count, eventoId: id, emailId: mailId };
         });
         if (count === 1) {
           resumo.cancelados++;
-          void notificarErp("pedido_cancelado", {
-            numero: pedido.number,
-            motivo: `Pix não confirmado (${pagamento.status})`,
-          });
+          if (eventoId) {
+            void entregarEvento(eventoId).catch((err) =>
+              console.error("[reconciliar-pix:erp]", err)
+            );
+          }
           if (emailId) {
             void processarEmailOutbox(emailId).catch((err) =>
               console.error("[reconciliar-pix:email]", err)

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // nunca envio direto. Combinado com a dedupeKey status:{orderId}:{status}, o
 // caminho admin e o caminho estorno (webhook) não duplicam e-mail: os dois
 // gravam/apontam para a MESMA linha.
-const { prismaMock, requireAuthMock, enfileirarEmail, processarOutbox } =
+const { prismaMock, requireAuthMock, enfileirarEvento, entregarEvento, enfileirarEmail, processarOutbox } =
   vi.hoisted(() => {
     const prismaMock = {
       order: { findUnique: vi.fn(), update: vi.fn() },
@@ -14,6 +14,8 @@ const { prismaMock, requireAuthMock, enfileirarEmail, processarOutbox } =
     return {
       prismaMock,
       requireAuthMock: vi.fn(),
+      enfileirarEvento: vi.fn(),
+      entregarEvento: vi.fn(),
       enfileirarEmail: vi.fn(),
       processarOutbox: vi.fn(),
     };
@@ -21,6 +23,7 @@ const { prismaMock, requireAuthMock, enfileirarEmail, processarOutbox } =
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/auth", () => ({ requireAuth: requireAuthMock, forbidden: () => new Response("forbidden", { status: 403 }) }));
+vi.mock("@/lib/erp", () => ({ enfileirarEvento, entregarEvento }));
 vi.mock("@/lib/email-outbox", () => ({
   enfileirarEmailStatusPedido: enfileirarEmail,
   processarEmailOutbox: processarOutbox,
@@ -54,6 +57,7 @@ beforeEach(() => {
   prismaMock.order.update.mockResolvedValue(orderAtualizado());
   enfileirarEmail.mockResolvedValue("outbox-1");
   processarOutbox.mockResolvedValue("ENVIADO");
+  entregarEvento.mockResolvedValue(false);
 });
 
 describe("PATCH /api/admin/pedidos/[id] — notificação via outbox", () => {
@@ -72,6 +76,7 @@ describe("PATCH /api/admin/pedidos/[id] — notificação via outbox", () => {
     expect(enfileirarEmail).toHaveBeenCalledWith("o1", "REFUNDED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
     expect(processarOutbox).toHaveBeenCalledWith("outbox-1");
+    expect(entregarEvento).not.toHaveBeenCalled();
   });
 
   it("sem mudança de status → nada enfileirado (anti-duplicado)", async () => {
@@ -83,14 +88,21 @@ describe("PATCH /api/admin/pedidos/[id] — notificação via outbox", () => {
     expect(processarOutbox).not.toHaveBeenCalled();
   });
 
-  it("CANCELLED → e-mail na MESMA transação (evento ERP: escopo do #11)", async () => {
+  it("CANCELLED → evento ERP + e-mail juntos na transação", async () => {
     prismaMock.order.findUnique.mockResolvedValue({ status: "PAID", trackingCode: null });
     prismaMock.order.update.mockResolvedValue(orderAtualizado({ status: "CANCELLED" }));
+    enfileirarEvento.mockResolvedValue("evt-1");
 
     const res = await PATCH(reqDe({ status: "CANCELLED" }), params);
     expect(res.status).toBe(200);
+    expect(enfileirarEvento).toHaveBeenCalledWith(
+      "pedido_cancelado",
+      expect.objectContaining({ numero: "DC-1" }),
+      expect.objectContaining({ businessKey: "pedido_cancelado:o1", db: prismaMock })
+    );
     expect(enfileirarEmail).toHaveBeenCalledWith("o1", "CANCELLED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
+    expect(entregarEvento).toHaveBeenCalledWith("evt-1");
     expect(processarOutbox).toHaveBeenCalledWith("outbox-1");
   });
 });

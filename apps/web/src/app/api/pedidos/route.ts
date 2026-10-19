@@ -13,11 +13,11 @@ import {
 } from "@/lib/pedidos/calculo-total";
 import { elegibilidadeCupom } from "@/lib/elegibilidade-cupom";
 import { getFrete, getPagamento } from "@/lib/config-loja";
+import { enfileirarEvento, entregarEvento } from "@/lib/erp";
 import {
   enfileirarEmailStatusPedido,
   processarEmailOutbox,
 } from "@/lib/email-outbox";
-import { notificarErp } from "@/lib/erp";
 import { obterCupom } from "@/lib/cupom-cache";
 import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
@@ -253,6 +253,7 @@ export const POST = comErro(async (req: NextRequest) => {
     );
 
     // Criação atômica: endereço + pedido + itens nascem juntos ou nada nasce.
+    let eventoCriadoId: string | null = null;
     const { order } = await prisma.$transaction(async (tx) => {
       // addressId: reutiliza endereço salvo da própria conta (sem duplicar).
       // ID de outra conta ou sem sessão → EnderecoInvalidoError (400 fora).
@@ -298,25 +299,38 @@ export const POST = comErro(async (req: NextRequest) => {
       include: { items: true },
     });
 
+      // Evento de criação na MESMA tx (pedido existe ⟺ evento existe);
+      // businessKey por pedido — reprocesso não duplica.
+      eventoCriadoId = await enfileirarEvento(
+        "pedido_criado",
+        {
+          numero: order.number,
+          total,
+          subtotal: centavosParaReais(subtotalCentavos),
+          desconto: discount,
+          frete: shipping,
+          cupom: appliedCouponCode,
+          metodo_pagamento: paymentMethod,
+          itens: cart.items.map((i) => ({
+            produto_id: i.product.id,
+            nome: i.product.name,
+            qtd: i.quantity,
+            preco_unit: Number(i.product.price),
+          })),
+        },
+        { db: tx, businessKey: `pedido_criado:${order.id}` }
+      );
+
       return { order };
     });
 
-    // ERP próprio (análise de vendas): fire-and-forget, nunca bloqueia.
-    void notificarErp("pedido_criado", {
-      numero: order.number,
-      total,
-      subtotal: centavosParaReais(subtotalCentavos),
-      desconto: discount,
-      frete: shipping,
-      cupom: appliedCouponCode,
-      metodo_pagamento: paymentMethod,
-      itens: cart.items.map((i) => ({
-        produto_id: i.product.id,
-        nome: i.product.name,
-        qtd: i.quantity,
-        preco_unit: Number(i.product.price),
-      })),
-    });
+    // ERP: entrega pós-commit, fire-and-forget (fila cuida das retentativas;
+    // sem config fica PENDING até o dreno).
+    if (eventoCriadoId) {
+      void entregarEvento(eventoCriadoId).catch((err) =>
+        console.error("[pedidos:erp]", err)
+      );
+    }
 
     let result;
     try {
@@ -333,10 +347,23 @@ export const POST = comErro(async (req: NextRequest) => {
     } catch (err) {
       // Gateway estourou sem resposta: não deixa PENDING órfão — cancela
       // e devolve a mensagem real (o carrinho fica intacto p/ retry).
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { status: "CANCELLED", paymentStatus: "FAILED" },
+      // Evento de cancelamento na MESMA tx da transição.
+      const eventoCancelId = await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "CANCELLED", paymentStatus: "FAILED" },
+        });
+        return enfileirarEvento(
+          "pedido_cancelado",
+          { numero: order.number, motivo: "Falha na comunicação com o gateway" },
+          { db: tx, businessKey: `pedido_cancelado:${order.id}` }
+        );
       });
+      if (eventoCancelId) {
+        void entregarEvento(eventoCancelId).catch((err) =>
+          console.error("[pedidos:erp]", err)
+        );
+      }
       if (err instanceof PaymentError) {
         return NextResponse.json({ error: err.message }, { status: 502 });
       }
@@ -353,9 +380,9 @@ export const POST = comErro(async (req: NextRequest) => {
     } else if (result.success) {
       await finalizarPedidoPago(order.id, result.paymentId);
     } else {
-      // Cancelamento (pagamento recusado): update + outbox na MESMA transação
-      // (dedupeKey única); envio pós-commit com retentativa.
-      const { emailId } = await prisma.$transaction(async (tx) => {
+      // Cancelamento (pagamento recusado): evento ERP + e-mail na MESMA
+      // transação (dedupeKey única); envio pós-commit com retentativa.
+      const { eventoId: eventoCancelId, emailId } = await prisma.$transaction(async (tx) => {
         await tx.order.update({
           where: { id: order.id },
           data: {
@@ -364,17 +391,23 @@ export const POST = comErro(async (req: NextRequest) => {
             paymentId: result.paymentId,
           },
         });
+        const eventoId = await enfileirarEvento(
+          "pedido_cancelado",
+          { numero: order.number, motivo: result.message },
+          { db: tx, businessKey: `pedido_cancelado:${order.id}` }
+        );
         const emailId = await enfileirarEmailStatusPedido(
           order.id,
           "CANCELLED",
           tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
         );
-        return { emailId };
+        return { eventoId, emailId };
       });
-      void notificarErp("pedido_cancelado", {
-        numero: order.number,
-        motivo: result.message,
-      });
+      if (eventoCancelId) {
+        void entregarEvento(eventoCancelId).catch((err) =>
+          console.error("[pedidos:erp]", err)
+        );
+      }
       if (emailId) {
         void processarEmailOutbox(emailId).catch((err) =>
           console.error("[pedidos:cancel-email]", err)

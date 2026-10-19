@@ -5,7 +5,7 @@ import {
   listarEstornosMp,
   traduzirErroMp,
 } from "@/lib/mercadopago";
-import { notificarErp } from "@/lib/erp";
+import { entregarEvento, enfileirarEvento } from "@/lib/erp";
 import {
   enfileirarEmailStatusPedido,
   processarEmailOutbox,
@@ -78,15 +78,19 @@ function paraRegistro(r: {
 }
 
 /**
- * Marca o pedido REFUNDED com guarda por estado atual: só PAID→REFUNDED no
- * pagamento e só estados anteriores de envio no status (nunca regride
- * SHIPPED/DELIVERED/CANCELLED). Idempotente — reprocessos não mudam nada.
+ * Transição PAID→REFUNDED + evento `pedido_estornado` na MESMA transação:
+ * ou existe as duas coisas, ou nenhuma (rollback → reconciliação/reprocesso
+ * tenta de novo — nunca fica estorno sem evento na fila, que foi o defeito).
+ * Guardas idempotentes: só PAID→REFUNDED no pagamento e só estados anteriores
+ * de envio no status (nunca regride SHIPPED/DELIVERED/CANCELLED); a
+ * businessKey única por pedido impede evento duplicado em concorrência.
  * ATENÇÃO: não devolve estoque (estorno não é devolução automática).
  */
-async function transicionarEstornoComEmail(
+async function transicionarEstornoComEvento(
   db: Db,
-  orderId: string
-): Promise<{ mudou: boolean; emailId: string | null }> {
+  orderId: string,
+  dadosErp: { numero: string; total: number }
+): Promise<{ mudou: boolean; eventoId: string | null; emailId: string | null }> {
   try {
     return (await db.$transaction(async (tx) => {
       const mudou =
@@ -98,7 +102,12 @@ async function transicionarEstornoComEmail(
         where: { id: orderId, status: { in: ["PENDING", "PAID", "PROCESSING"] } },
         data: { status: "REFUNDED" },
       });
-      if (!mudou) return { mudou: false, emailId: null };
+      if (!mudou) return { mudou: false, eventoId: null, emailId: null };
+      const eventoId = await enfileirarEvento(
+        "pedido_estornado",
+        { numero: dadosErp.numero, total: dadosErp.total },
+        { db: tx, businessKey: `pedido_estornado:${orderId}` }
+      );
       // E-mail na MESMA transação: ou a transição REFUNDED nasce com a linha
       // do outbox gravada, ou o rollback descarta as duas (nunca fica estorno
       // sem notificação — o envio em si é pós-commit, com retentativa).
@@ -107,33 +116,22 @@ async function transicionarEstornoComEmail(
         "REFUNDED",
         tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
       );
-      return { mudou: true, emailId };
-    })) as { mudou: boolean; emailId: string | null };
+      return { mudou: true, eventoId, emailId };
+    })) as { mudou: boolean; eventoId: string | null; emailId: string | null };
   } catch (err) {
     // Átomo: falhou junto = nada aplicado; loga e deixa a reconciliação
     // reprocessar (nunca responde erro ao provedor por isso).
     console.error("[estorno:transicao]", err);
-    return { mudou: false, emailId: null };
+    return { mudou: false, eventoId: null, emailId: null };
   }
 }
 
-
-/** ERP: só quando o pedido efetivamente passou a REFUNDED (não em reprocessos). */
-async function avisarEstornoConfirmado(db: Db, orderId: string): Promise<void> {
-  try {
-    const o = await db.order.findUnique({
-      where: { id: orderId },
-      select: { number: true, total: true },
-    });
-    if (o) {
-      void notificarErp("pedido_estornado", {
-        numero: o.number,
-        total: Number(o.total),
-      });
-    }
-  } catch (err) {
-    console.error("[estorno:erp]", err);
-  }
+/** Entrega pós-commit (I/O externo fora da tx); a fila cuida das retentativas. */
+function entregarEventoEstorno(eventoId: string | null): void {
+  if (!eventoId) return;
+  void entregarEvento(eventoId).catch((err) =>
+    console.error("[estorno:erp:entrega]", err)
+  );
 }
 
 /**
@@ -194,12 +192,12 @@ export async function confirmarEstornoNotificado(
     }
   }
 
-  const { mudou, emailId } = await transicionarEstornoComEmail(db, orderId);
+  const { mudou, eventoId, emailId } = await transicionarEstornoComEvento(db, orderId, {
+    numero: order.number,
+    total: Number(order.total),
+  });
   if (mudou) {
-    void notificarErp("pedido_estornado", {
-      numero: order.number,
-      total: Number(order.total),
-    });
+    entregarEventoEstorno(eventoId);
     tentarEnvioEmailRefund(emailId);
   }
 }
@@ -222,10 +220,27 @@ async function aplicarResultado(
       },
     });
     if (orderId) {
-      const { mudou, emailId } = await transicionarEstornoComEmail(db, orderId);
-      if (mudou) {
-        await avisarEstornoConfirmado(db, orderId);
-        tentarEnvioEmailRefund(emailId);
+      // O evento precisa dos dados do pedido DENTRO da tx da transição →
+      // carrega antes; falha de leitura não derruba a resposta (a
+      // reconciliação reprocessa este resultado aprovado).
+      let dados: { numero: string; total: number } | null = null;
+      try {
+        const o = await db.order.findUnique({
+          where: { id: orderId },
+          select: { number: true, total: true },
+        });
+        if (o) dados = { numero: o.number, total: Number(o.total) };
+      } catch (err) {
+        console.error("[estorno:erp:dados]", err);
+      }
+      if (!dados) {
+        console.error("[estorno:transicao] pedido sem dados para transição", orderId);
+      } else {
+        const { mudou, eventoId, emailId } = await transicionarEstornoComEvento(db, orderId, dados);
+        if (mudou) {
+          entregarEventoEstorno(eventoId);
+          tentarEnvioEmailRefund(emailId);
+        }
       }
     }
   } else if (refund.status === "in_process") {

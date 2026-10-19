@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, notificarErp, enfileirarEmail, processarOutbox, prismaMock } =
+const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, enfileirarEvento, entregarEvento, enfileirarEmail, processarOutbox, prismaMock } =
   vi.hoisted(() => {
     const prismaMock = {
       order: { findMany: vi.fn(), updateMany: vi.fn() },
@@ -11,19 +11,18 @@ const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, notificarErp
       updateMany: prismaMock.order.updateMany,
       buscarPagamento: vi.fn(),
       finalizarPedidoPago: vi.fn(),
-      notificarErp: vi.fn(),
+      enfileirarEvento: vi.fn(),
+      entregarEvento: vi.fn(),
       enfileirarEmail: vi.fn(),
       processarOutbox: vi.fn(),
       prismaMock,
     };
   });
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: { order: { findMany, updateMany }, $transaction: prismaMock.$transaction },
-}));
+vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/mercadopago", () => ({ buscarPagamento }));
 vi.mock("@/lib/pedidos/finalizar", () => ({ finalizarPedidoPago }));
-vi.mock("@/lib/erp", () => ({ notificarErp }));
+vi.mock("@/lib/erp", () => ({ enfileirarEvento, entregarEvento }));
 vi.mock("@/lib/email-outbox", () => ({
   enfileirarEmailStatusPedido: enfileirarEmail,
   processarEmailOutbox: processarOutbox,
@@ -48,6 +47,8 @@ beforeEach(() => {
   prismaMock.$transaction.mockImplementation(
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock)
   );
+  enfileirarEvento.mockResolvedValue("evt-1");
+  entregarEvento.mockResolvedValue(false);
   enfileirarEmail.mockResolvedValue("outbox-1");
   processarOutbox.mockResolvedValue("ENVIADO");
 });
@@ -112,10 +113,18 @@ describe("reconciliarPixPendentes", () => {
       where: { id: "ord-1", paymentStatus: "PENDING" },
       data: { status: "CANCELLED", paymentStatus: "FAILED" },
     });
-    expect(notificarErp).toHaveBeenCalledWith("pedido_cancelado", {
-      numero: "DC-20261017-0001",
-      motivo: "Pix não confirmado (expired)",
-    });
+    expect(enfileirarEvento).toHaveBeenCalledWith(
+      "pedido_cancelado",
+      {
+        numero: "DC-20261017-0001",
+        motivo: "Pix não confirmado (expired)",
+      },
+      expect.objectContaining({
+        businessKey: "pedido_cancelado:ord-1",
+        db: prismaMock,
+      })
+    );
+    expect(entregarEvento).toHaveBeenCalledWith("evt-1");
     // e-mail na MESMA transação (terceiro argumento é o tx) + envio pós-commit
     expect(enfileirarEmail).toHaveBeenCalledWith("ord-1", "CANCELLED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
@@ -129,7 +138,8 @@ describe("reconciliarPixPendentes", () => {
     updateMany.mockResolvedValue({ count: 0 });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
-    expect(notificarErp).not.toHaveBeenCalled();
+    expect(enfileirarEvento).not.toHaveBeenCalled();
+    expect(entregarEvento).not.toHaveBeenCalled();
     expect(enfileirarEmail).not.toHaveBeenCalled();
     expect(r).toMatchObject({ cancelados: 0, mantidos: 1 });
   });
