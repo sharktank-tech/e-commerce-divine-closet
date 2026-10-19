@@ -167,14 +167,28 @@ export async function enfileirarEvento(
 ): Promise<string | null> {
   const db = opcoes.db ?? prisma;
   const id = randomUUID();
+  // Atributo imutável da ocorrência: `tipo` precisa bater com a businessKey
+  // encontrada — businessKey malformada (tipo divergente) é erro de chamador,
+  // diagnosticável, nunca silencioso.
+  const conferirOcorrencia = (
+    existente: { id: string; tipo: string },
+    businessKey: string
+  ): string => {
+    if (existente.tipo !== tipo) {
+      throw new Error(
+        `erp:evento:conflito-divergente:${businessKey}:esperado=${tipo}:gravado=${existente.tipo}`
+      );
+    }
+    return existente.id;
+  };
   // Pré-cheque (otimização): ocorrência já gravada devolve o id sem tentar
   // INSERT. Não é a garantia de corrida — essa vem do ON CONFLICT abaixo.
   if (opcoes.businessKey) {
     const existente = await db.erpEvent.findUnique({
       where: { businessKey: opcoes.businessKey },
-      select: { id: true },
+      select: { id: true, tipo: true },
     });
-    if (existente) return existente.id;
+    if (existente) return conferirOcorrencia(existente, opcoes.businessKey);
   }
   // ON CONFLICT DO NOTHING (via skipDuplicates): não aborta a tx em corrida.
   const r = await db.erpEvent.createMany({
@@ -197,9 +211,9 @@ export async function enfileirarEvento(
   if (opcoes.businessKey) {
     const existente = await db.erpEvent.findUnique({
       where: { businessKey: opcoes.businessKey },
-      select: { id: true },
+      select: { id: true, tipo: true },
     });
-    if (existente) return existente.id;
+    if (existente) return conferirOcorrencia(existente, opcoes.businessKey);
     throw new Error(
       `erp:evento:conflito-sem-ocorrencia:${opcoes.businessKey}`
     );

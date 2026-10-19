@@ -24,23 +24,23 @@ const comoDb = (p: PrismaClient): Db => p as unknown as Db;
 
 const run = promisify(execFile);
 const PRISMA_DIR = resolve(__dirname, "..", "..", "..", "..", "..", "packages", "database", "prisma");
-const PG_ENV = {
-  ...process.env,
-  PATH: "/home/opencode/projects/tmp-exp/pg-real-bin:" + process.env.PATH,
-  LD_LIBRARY_PATH:
-    "/home/opencode/.local/pgalpine/usr/lib:/home/opencode/.local/pgalpine/usr/lib/postgresql17",
-  LD_PRELOAD: "/home/opencode/.local/pgalpine/usr/lib/libnss_wrapper.so",
-  NSS_WRAPPER_PASSWD: "/home/opencode/projects/tmp-exp/pg-real-bin/passwd",
-  NSS_WRAPPER_GROUP: "/home/opencode/projects/tmp-exp/pg-real-bin/group",
-  ICU_DATA: "/home/opencode/.local/pgalpine/usr/share/icu/78.1",
-};
 
-const BASE = "postgresql://postgres@127.0.0.1:5433";
+// O servidor real é provisionado pelo script versionado (doc:
+// packages/database/PG-REAL.md) e o ambiente vem do SHELL — nada hardcoded:
+//   node packages/database/scripts/pg-real.mjs setup
+//   eval "$(node packages/database/scripts/pg-real.mjs env)"   # PATH/LD_*/PGPORT
+// Subprocessos (psql, npx prisma) herdam PATH, LD_LIBRARY_PATH, LD_PRELOAD
+// (nss_wrapper) e ICU_DATA dessa sessão.
+const PG_HOST = process.env.PGHOST || "127.0.0.1";
+const PG_PORT = process.env.PGPORT || "5433";
+const PG_ENV = { ...process.env };
+
+const BASE = `postgresql://postgres@${PG_HOST}:${PG_PORT}`;
 const DB_CONCORRENCIA = "dc_concorrencia";
 
 async function criarBanco(url: string, nome: string): Promise<void> {
-  await run("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", `DROP DATABASE IF EXISTS ${nome};`], { env: PG_ENV });
-  await run("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", `CREATE DATABASE ${nome};`], { env: PG_ENV });
+  await run("psql", ["-h", PG_HOST, "-p", PG_PORT, "-U", "postgres", "-d", "postgres", "-c", `DROP DATABASE IF EXISTS ${nome};`], { env: PG_ENV });
+  await run("psql", ["-h", PG_HOST, "-p", PG_PORT, "-U", "postgres", "-d", "postgres", "-c", `CREATE DATABASE ${nome};`], { env: PG_ENV });
 }
 
 async function migrar(url: string): Promise<void> {
@@ -55,8 +55,20 @@ let prismaA: PrismaClient;
 let prismaB: PrismaClient;
 
 beforeAll(async () => {
-  await criarBanco(BASE, DB_CONCORRENCIA);
-  await migrar(url);
+  try {
+    await criarBanco(BASE, DB_CONCORRENCIA);
+    await migrar(url);
+  } catch (e) {
+    // falha DURA e explicada — não vira skip silencioso (regra da rodada:
+    // nunca trocar falha por resultado vazio).
+    throw new Error(
+      `PostgreSQL real indisponível em ${PG_HOST}:${PG_PORT} para o teste de concorrência. ` +
+        `Provisione e exporte o ambiente (packages/database/PG-REAL.md): ` +
+        `node packages/database/scripts/pg-real.mjs setup && ` +
+        `eval "$(node packages/database/scripts/pg-real.mjs env)". ` +
+        `Causa: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
   prismaA = new PrismaClient({ datasourceUrl: url });
   prismaB = new PrismaClient({ datasourceUrl: url });
   await prismaA.$connect();
@@ -66,7 +78,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prismaA?.$disconnect();
   await prismaB?.$disconnect();
-  await run("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", "postgres", "-c", `DROP DATABASE IF EXISTS ${DB_CONCORRENCIA};`], { env: PG_ENV });
+  await run("psql", ["-h", PG_HOST, "-p", PG_PORT, "-U", "postgres", "-d", "postgres", "-c", `DROP DATABASE IF EXISTS ${DB_CONCORRENCIA};`], { env: PG_ENV });
 }, 60_000);
 
 describe("ErpEvent.businessKey — corrida real em PostgreSQL (duas conexões independentes)", () => {
@@ -188,5 +200,18 @@ describe("ErpEvent.businessKey — corrida real em PostgreSQL (duas conexões in
       enfileirarEvento("pedido_pago", { numero: "x" }, { businessKey: `err-${crypto.randomUUID()}`, db: comoDb(prismaA) })
     ).rejects.toThrow();
     await prismaA.$executeRawUnsafe(`ALTER TABLE "ErpEvent_tmp_conflito" RENAME TO "ErpEvent"`);
+  });
+
+  it("businessKey existente com tipo DIVERGENTE → conflito-divergente em PG real (nunca devolve id alheio)", async () => {
+    // Insere diretamente uma ocorrência com tipo A sob a chave, depois pede
+    // tipo B com a MESMA chave: o atributo imutável `tipo` denuncia a
+    // divergência — sucesso silencioso devolveria o id de outra ocorrência.
+    const chave = `chave-divergente:${crypto.randomUUID()}`;
+    await prismaA.erpEvent.create({
+      data: { id: crypto.randomUUID(), tipo: "pedido_cancelado", businessKey: chave, payload: {}, status: "PENDING" },
+    });
+    await expect(
+      enfileirarEvento("pedido_pago", { numero: "DC-D" }, { businessKey: chave, db: comoDb(prismaA) })
+    ).rejects.toThrow(/conflito-divergente:.*esperado=pedido_pago:gravado=pedido_cancelado/);
   });
 });

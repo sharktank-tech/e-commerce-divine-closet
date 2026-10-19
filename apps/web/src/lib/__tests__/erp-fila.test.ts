@@ -201,6 +201,45 @@ describe("enfileirarEvento", () => {
       /conflito-sem-linha/
     );
   });
+
+  it("count=0 com businessKey mas linha inexistente → conflito-sem-ocorrencia (nunca sucesso silencioso)", async () => {
+    definirConfig();
+    // pré-cheque não enxerga, INSERT perde (count=0), mas o findUnique
+    // pós-conflito também não acha nada — anomalia diagnosticável.
+    erpEventMock.findUnique.mockResolvedValueOnce(null); // pré-cheque
+    erpEventMock.createMany.mockResolvedValueOnce({ count: 0 });
+    erpEventMock.findUnique.mockResolvedValueOnce(null); // pós-conflito
+    await expect(
+      enfileirarEvento("pedido_estornado", { numero: "DC-X" }, { businessKey: "pedido_estornado:ord-x" })
+    ).rejects.toThrow(/conflito-sem-ocorrencia:pedido_estornado:ord-x/);
+  });
+
+  it("linha encontrada com tipo DIVERGENTE → conflito-divergente (atributo imutável da ocorrência)", async () => {
+    definirConfig();
+    // businessKey existe mas foi gravada com outro tipo — a chave não
+    // representa a mesma ocorrência pedida; erro, nunca devolver o id alheio.
+    erpEventMock.findUnique.mockResolvedValueOnce(null); // pré-cheque não enxerga
+    erpEventMock.createMany.mockResolvedValueOnce({ count: 0 });
+    erpEventMock.findUnique.mockResolvedValueOnce({
+      id: "id-existente",
+      tipo: "pedido_cancelado", // divergente do pedido (pedido_pago)
+    });
+    await expect(
+      enfileirarEvento("pedido_pago", {}, { businessKey: "chave-reusada" })
+    ).rejects.toThrow(/conflito-divergente:chave-reusada:esperado=pedido_pago:gravado=pedido_cancelado/);
+  });
+
+  it("pré-cheque encontra linha com tipo divergente → conflito-divergente também no caminho rápido", async () => {
+    definirConfig();
+    erpEventMock.findUnique.mockResolvedValueOnce({
+      id: "id-alheio",
+      tipo: "estoque_atualizado",
+    });
+    await expect(
+      enfileirarEvento("pedido_pago", {}, { businessKey: "estoque_atualizado:p1" })
+    ).rejects.toThrow(/conflito-divergente/);
+    expect(erpEventMock.createMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("drenarEventosErp", () => {
