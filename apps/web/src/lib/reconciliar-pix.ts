@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { buscarPagamento } from "@/lib/mercadopago";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
-import { enfileirarEvento, entregarEvento } from "@/lib/erp";
-import { enviarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
+import {
+  enfileirarEmailStatusPedido,
+  processarEmailOutbox,
+} from "@/lib/email-outbox";
+import { entregarEvento, enfileirarEvento } from "@/lib/erp";
 
 // Reconciliação de Pix pendente — rede de segurança do webhook do MP.
 // Roda 1x/dia no cron de carrinho-abandonado (plano Hobby: no máximo 2
@@ -91,23 +94,30 @@ export async function reconciliarPixPendentes(opcoes?: {
         if (!r.jaFinalizado) resumo.finalizados++;
         else resumo.mantidos++;
       } else if (decisao === "cancelar") {
-        // Guarda de corrida + evento na MESMA transação: só cancela se ainda
-        // estiver PENDING e o evento de cancelamento nasce junto (businessKey
-        // única — outro caminho já tendo registrado não duplica).
-        const { count, eventoId } = await prisma.$transaction(async (tx) => {
+        // Guarda de corrida + evento + notificação na MESMA transação: só
+        // cancela se ainda estiver PENDING; o evento e a linha do outbox
+        // (dedupeKey status:orderId:CANCELLED) nascem junto — rollback
+        // descarta os três. O envio é pós-commit, com retentativa.
+        const { count, eventoId, emailId } = await prisma.$transaction(async (tx) => {
           const { count } = await tx.order.updateMany({
             where: { id: pedido.id, paymentStatus: "PENDING" },
             data: { status: "CANCELLED", paymentStatus: "FAILED" },
           });
           let id: string | null = null;
+          let mailId: string | null = null;
           if (count === 1) {
             id = await enfileirarEvento(
               "pedido_cancelado",
               { numero: pedido.number, motivo: `Pix não confirmado (${pagamento.status})` },
               { db: tx, businessKey: `pedido_cancelado:${pedido.id}` }
             );
+            mailId = await enfileirarEmailStatusPedido(
+              pedido.id,
+              "CANCELLED",
+              tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+            );
           }
-          return { count, eventoId: id };
+          return { count, eventoId: id, emailId: mailId };
         });
         if (count === 1) {
           resumo.cancelados++;
@@ -116,10 +126,11 @@ export async function reconciliarPixPendentes(opcoes?: {
               console.error("[reconciliar-pix:erp]", err)
             );
           }
-          void enviarEmailStatusPedido({
-            orderId: pedido.id,
-            status: "CANCELLED",
-          }).catch((err) => console.error("[reconciliar-pix:email]", err));
+          if (emailId) {
+            void processarEmailOutbox(emailId).catch((err) =>
+              console.error("[reconciliar-pix:email]", err)
+            );
+          }
         } else {
           resumo.mantidos++;
         }

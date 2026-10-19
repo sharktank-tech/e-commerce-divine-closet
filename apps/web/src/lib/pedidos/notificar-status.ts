@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { emails, sendEmail } from "@/lib/email";
+import { emails } from "@/lib/email";
 import {
   criarTokenAcompanhamento,
   linkAcompanhamento,
@@ -120,29 +120,4 @@ export async function montarEmailStatusPedido(
   });
 
   return { to: para, subject: mail.subject, text: mail.text, html: mail.html ?? null };
-}
-
-/**
- * Envia o e-mail do status atual do pedido (não bloqueia quem chama).
- * Retorno true só quando efetivamente houve envio programado.
- */
-export async function enviarEmailStatusPedido(
-  input: { orderId: string; status: string },
-  deps: {
-    db?: Db;
-    send?: typeof sendEmail;
-  } = {}
-): Promise<boolean> {
-  const send = deps.send ?? sendEmail;
-
-  const mail = await montarEmailStatusPedido(input, deps);
-  if (!mail) return false;
-
-  try {
-    await send({ to: mail.to, subject: mail.subject, text: mail.text, html: mail.html ?? undefined });
-    return true;
-  } catch (err) {
-    console.error("[status-email]", input.orderId, err);
-    return false;
-  }
 }

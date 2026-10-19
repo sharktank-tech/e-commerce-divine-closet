@@ -99,6 +99,50 @@ export async function enfileirarEmailStatusPedido(
 }
 
 /**
+ * Enfileira UM e-mail arbitrário (payload já renderizado) de forma idempotente
+ * pela dedupeKey. Usado pelos caminhos que antes enviavam DIRETO sem retry nem
+ * proteção contra duplicidade (confirmação "pedido pago", convite de avaliação):
+ * a unique de dedupeKey garante no máximo UMA linha por ocorrência — webhook
+ * repetido ou cron concorrente não duplicam o envio. Retorna o id da linha (a
+ * existente, quando já havia) para a tentativa imediata.
+ */
+export async function enfileirarEmail(
+  params: {
+    dedupeKey: string;
+    kind: string;
+    orderId?: string | null;
+    mail: { to: string; subject: string; text?: string; html?: string | null };
+  },
+  db: Db = prisma
+): Promise<string | null> {
+  const { dedupeKey, kind, orderId, mail } = params;
+  if (!mail.to || !mail.subject) return null;
+  try {
+    const row = await db.emailOutbox.create({
+      data: {
+        dedupeKey,
+        kind,
+        orderId: orderId ?? null,
+        recipient: mail.to,
+        subject: mail.subject,
+        text: mail.text ?? null,
+        html: mail.html ?? null,
+        status: "PENDING",
+        attempt: 0,
+        nextAttemptAt: new Date(),
+      },
+    });
+    return row.id;
+  } catch (err) {
+    if ((err as { code?: string })?.code === "P2002") {
+      const existente = await db.emailOutbox.findUnique({ where: { dedupeKey } });
+      return existente?.id ?? null;
+    }
+    throw err;
+  }
+}
+
+/**
  * Tenta enviar uma linha PENDING devida. Transições via updateMany com guarda
  * de status → processadores concorrentes não duplicam (um só marca SENT).
  */

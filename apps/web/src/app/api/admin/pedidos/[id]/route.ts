@@ -5,9 +5,10 @@ import { requireAuth, forbidden } from "@/lib/auth";
 import { validarUrlRastreio } from "@/lib/rastreio";
 import { enfileirarEvento, entregarEvento } from "@/lib/erp";
 import {
-  deveNotificarStatus,
-  enviarEmailStatusPedido,
-} from "@/lib/pedidos/notificar-status";
+  enfileirarEmailStatusPedido,
+  processarEmailOutbox,
+} from "@/lib/email-outbox";
+import { deveNotificarStatus } from "@/lib/pedidos/notificar-status";
 
 const schema = z.object({
   status: z.enum([
@@ -72,9 +73,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       select: { status: true, trackingCode: true },
     });
 
-    // Transição + evento ERP na MESMA transação (só ao entrar em CANCELLED;
-    // businessKey única — se outro caminho já registrou, não duplica).
-    const { order, eventoId: eventoCancelId } = await prisma.$transaction(async (tx) => {
+    // Transição + evento ERP + notificação na MESMA transação (evento só ao
+    // entrar em CANCELLED; e-mail só com mudança real — businessKey/dedupeKey
+    // únicas: se outro caminho (estorno, reconciliação) já registrou, não
+    // duplica). O envio em si é pós-commit, com retentativa via outbox.
+    const { order, eventoId: eventoCancelId, emailId } = await prisma.$transaction(async (tx) => {
       const order = await tx.order.update({
         where: { id },
         data: {
@@ -105,26 +108,32 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           { db: tx, businessKey: `pedido_cancelado:${order.id}` }
         );
       }
-      return { order, eventoId };
+      let emailId: string | null = null;
+      if (
+        deveNotificarStatus(anterior, {
+          status: order.status,
+          trackingCode: order.trackingCode,
+        })
+      ) {
+        // template do status REAL (não mais "atualizado" genérico); payload
+        // imutável gravado junto da transição — idempotente pela dedupeKey.
+        emailId = await enfileirarEmailStatusPedido(
+          order.id,
+          order.status,
+          tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+        );
+      }
+      return { order, eventoId, emailId };
     });
     if (eventoCancelId) {
       void entregarEvento(eventoCancelId).catch((err) =>
         console.error("[admin:pedido:erp]", err)
       );
     }
-
-    if (
-      deveNotificarStatus(
-        anterior,
-        { status: order.status, trackingCode: order.trackingCode }
-      )
-    ) {
-      // template do status REAL (não mais "atualizado" genérico);
-      // notificação não bloqueia a atualização do pedido
-      void enviarEmailStatusPedido({
-        orderId: order.id,
-        status: order.status,
-      }).catch((err) => console.error("[admin:pedido:email]", err));
+    if (emailId) {
+      void processarEmailOutbox(emailId).catch((err) =>
+        console.error("[admin:pedido:email]", err)
+      );
     }
 
     return NextResponse.json({ order });

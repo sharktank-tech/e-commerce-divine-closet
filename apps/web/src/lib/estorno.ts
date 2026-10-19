@@ -90,7 +90,7 @@ async function transicionarEstornoComEvento(
   db: Db,
   orderId: string,
   dadosErp: { numero: string; total: number }
-): Promise<{ mudou: boolean; eventoId: string | null }> {
+): Promise<{ mudou: boolean; eventoId: string | null; emailId: string | null }> {
   try {
     return (await db.$transaction(async (tx) => {
       const mudou =
@@ -102,19 +102,27 @@ async function transicionarEstornoComEvento(
         where: { id: orderId, status: { in: ["PENDING", "PAID", "PROCESSING"] } },
         data: { status: "REFUNDED" },
       });
-      if (!mudou) return { mudou: false, eventoId: null };
+      if (!mudou) return { mudou: false, eventoId: null, emailId: null };
       const eventoId = await enfileirarEvento(
         "pedido_estornado",
         { numero: dadosErp.numero, total: dadosErp.total },
         { db: tx, businessKey: `pedido_estornado:${orderId}` }
       );
-      return { mudou: true, eventoId };
-    })) as { mudou: boolean; eventoId: string | null };
+      // E-mail na MESMA transação: ou a transição REFUNDED nasce com a linha
+      // do outbox gravada, ou o rollback descarta as duas (nunca fica estorno
+      // sem notificação — o envio em si é pós-commit, com retentativa).
+      const emailId = await enfileirarEmailStatusPedido(
+        orderId,
+        "REFUNDED",
+        tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+      );
+      return { mudou: true, eventoId, emailId };
+    })) as { mudou: boolean; eventoId: string | null; emailId: string | null };
   } catch (err) {
     // Átomo: falhou junto = nada aplicado; loga e deixa a reconciliação
     // reprocessar (nunca responde erro ao provedor por isso).
     console.error("[estorno:transicao]", err);
-    return { mudou: false, eventoId: null };
+    return { mudou: false, eventoId: null, emailId: null };
   }
 }
 
@@ -127,20 +135,16 @@ function entregarEventoEstorno(eventoId: string | null): void {
 }
 
 /**
- * E-mail do estado REFUNDED (template de estorno). Chamado SÓ na transição
- * efetiva PAID→REFUNDED (o guard de updateMany impede duplicado). Grava no
- * outbox (payload imutável + dedupeKey) e já tenta um envio — falha
- * transitória fica PENDING para o cron; não bloqueia a orquestração.
+ * E-mail do estado REFUNDED (template de estorno). A linha do outbox já foi
+ * gravada DENTRO da transição PAID→REFUNDED (dedupeKey impede duplicado); aqui
+ * só se tenta o envio imediato — falha transitória fica PENDING para o cron.
+ * Não bloqueia a orquestração.
  */
-function enviarEmailRefundConfirmado(orderId: string): void {
-  void (async () => {
-    try {
-      const id = await enfileirarEmailStatusPedido(orderId, "REFUNDED");
-      if (id) await processarEmailOutbox(id);
-    } catch (err) {
-      console.error("[estorno:email]", err);
-    }
-  })();
+function tentarEnvioEmailRefund(emailId: string | null): void {
+  if (!emailId) return;
+  void processarEmailOutbox(emailId).catch((err) => {
+    console.error("[estorno:email]", err);
+  });
 }
 
 /**
@@ -188,13 +192,13 @@ export async function confirmarEstornoNotificado(
     }
   }
 
-  const { mudou, eventoId } = await transicionarEstornoComEvento(db, orderId, {
+  const { mudou, eventoId, emailId } = await transicionarEstornoComEvento(db, orderId, {
     numero: order.number,
     total: Number(order.total),
   });
   if (mudou) {
     entregarEventoEstorno(eventoId);
-    enviarEmailRefundConfirmado(orderId);
+    tentarEnvioEmailRefund(emailId);
   }
 }
 
@@ -232,10 +236,10 @@ async function aplicarResultado(
       if (!dados) {
         console.error("[estorno:transicao] pedido sem dados para transição", orderId);
       } else {
-        const { mudou, eventoId } = await transicionarEstornoComEvento(db, orderId, dados);
+        const { mudou, eventoId, emailId } = await transicionarEstornoComEvento(db, orderId, dados);
         if (mudou) {
           entregarEventoEstorno(eventoId);
-          enviarEmailRefundConfirmado(orderId);
+          tentarEnvioEmailRefund(emailId);
         }
       }
     }
