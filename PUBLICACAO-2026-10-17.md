@@ -1,20 +1,21 @@
-# Runbook de publicação — PRs #9, #10, #11 (DC-20261017-7653)
+# Runbook de publicação — PRs #9, #10, #11, #12 (DC-20261017-7653)
 
-> Revisão integrada de 17/10/2026; **atualizada na rodada final de 18/10**.
-> Base combinada validada: branch `feat/dc7653-combinado` (worktree
-> `/home/opencode/projects/wt-all`, tip `a68d582`).
-> Comandos reproduzíveis: ver "Validações locais" ao final.
+> Revisão integrada de 17/10/2026; **atualizada na rodada final de 19/10**.
+> Composição de referência validada: `d5481ee` (merge #9→#10→#11→#12 sobre `main`).
 > **Nenhum passo abaixo foi executado em produção** — é o roteiro para o
 > operador humano/CI. Este runbook contém apenas **nomes** de variáveis e
 > comandos; **nunca cole valores/segredos aqui**.
 
 ## 1. O que cada PR entrega
 
-| PR | Branch | Conteúdo | Migrações |
-|----|--------|----------|-----------|
-| #9 | `fix/migrations-id-default` (tip 5cfde77) | IDs text→uuid+default (AuditLog text+default), migração de compatibilidade `rebuild_legacy_uuid` idempotente, teste invertido de deploy + correções guest (rate-limit Postgres, analytics/robots) | `20260928181000_rebuild_legacy_uuid`, `20261018090000_rate_limit` |
-| #10 | `fix/estorno-email-refunded` (tip f3e93ea) | `EmailOutbox` + retentativa (até **6** tentativas, backoff `min(2^n,60)`min); atomicidade tx+outbox em estorno/admin/cancel/PIX e remoção do envio direto legado; cron-auth (`CRON_SECRET`) nas 4 rotas; schedules corrigidos p/ horário local | `20260929000000_email_outbox` |
-| #11 | `feat/erp-evento-persistente` (tip f951169) | `ErpEvent` sempre persistido (não só no catch), `businessKey @unique` + pré-cheque, contrato do receptor (envelope/assinatura v1), dreno 09h | `20260930000000_erp_event` |
+| PR | Branch | SHA | Conteúdo | Migrações |
+|----|--------|-----|----------|-----------|
+| #9 | `fix/migrations-id-default` | `dabe6a6` | IDs text→uuid+default (Refund/OrderTrackToken/ErpEvent), migração de compatibilidade `rebuild_legacy_uuid` idempotente, rate-limit guest, teste de revogação de token | `20260928181000_rebuild_legacy_uuid`, `20261017200000_ids_uuid_default`, `20261018090000_rate_limit` |
+| #10 | `fix/estorno-email-refunded` | `ca48594` | `EmailOutbox` + retentativa (até **6** tentativas, backoff `min(2^n,60)`min); atomicidade tx+outbox em estorno/admin/cancel/PIX; `orderPaid`/convite via outbox; cron-auth (`CRON_SECRET`) nas 4 rotas; schedules corrigidos p/ horário local | `20261017210000_email_outbox` |
+| #11 | `feat/erp-evento-persistente` | `84021e6` | `ErpEvent` sempre persistido (não só no catch), `businessKey @unique` + pré-cheque + `conferirOcorrencia` (conflito distingue divergência), contrato do receptor (envelope/assinatura v1), dreno 09h | `20261017220000_erp_event_business_key` |
+| #12 | `chore/pg-real-docs` | `1891e73` | PG real versionado (`pg-real.mjs`, `upgrade-pg-real.mjs`), doc `PG-REAL.md`, DRIFT §4 reescrito, `.gitignore`, este runbook | — |
+
+Ordem de merge: **#9 → #10 → #11 → #12**. Após merge do #11, o #12 retargeta automaticamente para `main`.
 
 Correções da revisão de 17/10 (frentes 3–6), já **pushadas** aos ramos:
 
@@ -24,35 +25,9 @@ Correções da revisão de 17/10 (frentes 3–6), já **pushadas** aos ramos:
 #11 f951169 ← aa95e5a (pré-cheque businessKey + contrato do receptor)
 ```
 
-### 1.1 Commits que estão SÓ na combinada (rodada final de 18/10)
+### 1.1 Ordem de merge
 
-A rodada final fechou lacunas **direto na combinada**; antes do merge, cada
-correção precisa chegar ao PR dono (ou a um chore PR). Sem isso, o merge dos
-PRs publica o código ANTIGO dessas frentes:
-
-| Commit na combinada | Correção | Destino |
-|---|---|---|
-| `357deb5` | ERP concorrência: `enfileirarEvento` vira `createMany(skipDuplicates)` + `ON CONFLICT DO NOTHING` (corrida não aborta a transição; erros reais ainda propagam) | **PR #11** |
-| `82a8151` | Outbox: `orderPaid` e convite de avaliação saem do envio direto e entram no outbox idempotente (`status:{id}:PAID`, `review:{id}`) + `enfileirarEmail()` genérica | **PR #10** |
-| `6d5b765` | Testes do token de convidado (rotação invalida link anterior; `revokedAt` revogado→rotaciona e limpa) + comentário do contrato no schema | **PR #9** |
-| `e2a4d68`, `418db58`, `720a943`, `a68d582` | Scripts versionados de PG real (`pg-real.mjs`, `upgrade-pg-real.mjs` com proteções), doc `PG-REAL.md`, DRIFT §4 reescrito, `.gitignore` | chore PR (ex.: `chore/validacao-pg-real`) após o #11 — infra, sem schema |
-| `92bf792`, `ccedadc` | Este runbook | junto do chore PR |
-
-```bash
-# exemplo de cherry-pick para os PRs donos (resolver conflitos; os testes
-# do PR são a régua):
-git checkout feat/erp-evento-persistente && git cherry-pick 357deb5   # → #11
-git checkout fix/estorno-email-refunded   && git cherry-pick 82a8151   # → #10
-git checkout fix/migrations-id-default    && git cherry-pick 6d5b765   # → #9
-```
-
-### 1.2 Ordem de merge
-
-Ordem: **#9 → #10 → #11 → chore PR**. Se o #11 ainda apontar para o #10,
-retarget para `main` depois do merge do #10 (`gh pr edit 11 --base main`).
-Se houver conflito de schema ao mergear (#9 e #10 ambos acrescentam modelos
-ao fim de `schema.prisma`), manter os dois blocos — ordem entre modelos é
-irrelevante.
+Ordem: **#9 → #10 → #11 → #12**. Após merge do #11, o #12 retargeta automaticamente para `main`.
 
 ## 2. Ordem de implantação e migrações
 
@@ -61,10 +36,11 @@ nessa ordem; produção aplica cada migração com `npm run prisma:deploy`).
 
 1. Deploy do #9 → aplica `20260928181000_rebuild_legacy_uuid` (converte ids
    text→uuid, criando defaults; é idempotente e já foi exercitada em banco
-   legado — dados preservados) e `20261018090000_rate_limit` (tabela do
-   rate-limit guest — sem dependência dos demais PRs).
-2. Deploy do #10 → aplica `20260929000000_email_outbox` (enum + tabela).
-3. Deploy do #11 → aplica `20260930000000_erp_event` (coluna + unique).
+   legado — dados preservados), `20261017200000_ids_uuid_default` (Refund/
+   OrderTrackToken/ErpEvent id UUID + DEFAULT) e `20261018090000_rate_limit`
+   (tabela do rate-limit guest — sem dependência dos demais PRs).
+2. Deploy do #10 → aplica `20261017210000_email_outbox` (enum + tabela).
+3. Deploy do #11 → aplica `20261017220000_erp_event_business_key` (coluna + unique).
 
 Migrações são **forward-only**; nunca reescrever histórico já aplicado.
 Comprovado nesta rodada em PostgreSQL real (17.11), inclusive em base
@@ -104,7 +80,7 @@ Nenhuma variável NOVA é obrigatória. Já existem em produção:
 
 ## 5. Publicação, ativação e backfills são fases SEPARADAS
 
-**A. Publicação** = merge na ordem do §1.2 + deploy + `npm run prisma:deploy`
+**A. Publicação** = merge na ordem do §1.1 + deploy + `npm run prisma:deploy`
 por PR. Só código e schema. Não muda comportamento dependente de config.
 
 **B. Ativação** (checklist após o deploy do #11, na ordem):
@@ -233,3 +209,45 @@ Tudo acima também foi executado de um **checkout limpo** (git clone novo +
 Sem CI neste ambiente: os "checks" são exatamente esses comandos. Docker
 não estava disponível — nada acima toca em produção (só bancos
 `dc_pgreal_*`/`dc_concorrencia` descartáveis em 127.0.0.1).
+
+## 12. Composição de referência (rodada final de 19/10)
+
+Composição de referência montada a partir do `main` atual com os heads
+finais publicados: `d5481ee` (merge #9→#10→#11→#12 sobre `main`).
+
+| Check | SHA da execução | Resultado |
+|-------|-----------------|-----------|
+| Suíte completa | `d5481ee` | 52 arquivos / 485 testes ✅ |
+| typecheck | `d5481ee` | 0 erros ✅ |
+| lint | `d5481ee` | 0 erros / 17 warnings pré-existentes `<img>` ✅ |
+| build (com `DATABASE_URL`) | `d5481ee` | 0 erros ✅ |
+| build (sem env) | `d5481ee` | exatamente 139 avisos `Environment variable not found` / 0 erros reais ✅ |
+
+Nenhuma migração reescrita: todas 5 são adições (A), zero modificações (M).
+Nenhum `node_modules` rastreado na árvore final.
+
+## 13. Atualização de branches dependentes após cada merge
+
+Após cada merge, branches dependentes precisam ser atualizadas. Se usado
+squash, confira explicitamente os diffs e a ancestralidade antes de retargetar,
+evitando reapresentar alterações já incorporadas.
+
+```bash
+# após merge do #9 em main:
+git checkout fix/estorno-email-refunded
+git rebase main          # ou git merge main se houver conflitos
+
+# após merge do #10 em main:
+git checkout feat/erp-evento-persistente
+git rebase main
+
+# após merge do #11 em main:
+git checkout chore/pg-real-docs
+git rebase main          # retarget automático via GitHub se PR aberto
+```
+
+Se usado squash, confira a ancestralidade antes de retargetar:
+
+```bash
+git merge-base --is-ancestor <sha-merged> <branch-head> && echo "OK: branch contém o merge" || echo "ATENÇÃO: branch não contém o merge"
+```
