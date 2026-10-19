@@ -330,7 +330,7 @@ describe("reconciliarEstorno", () => {
     expect(r.registro.status).toBe("APPROVED");
     expect(prismaMock.order.updateMany).toHaveBeenCalled();
     expect(enfileirarEmailMock).toHaveBeenCalledTimes(1);
-    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED");
+    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
     expect(processarOutboxMock).toHaveBeenCalledTimes(1);
     expect(processarOutboxMock).toHaveBeenCalledWith("outbox-1");
@@ -396,7 +396,7 @@ describe("confirmarEstornoNotificado (webhook refunded)", () => {
       })
     );
     expect(enfileirarEmailMock).toHaveBeenCalledTimes(1);
-    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED");
+    expect(enfileirarEmailMock).toHaveBeenCalledWith("order-1", "REFUNDED", prismaMock);
     await new Promise((r) => setTimeout(r, 0));
     expect(processarOutboxMock).toHaveBeenCalledTimes(1);
     expect(processarOutboxMock).toHaveBeenCalledWith("outbox-1");

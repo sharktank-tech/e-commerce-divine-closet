@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { emails, sendEmail } from "@/lib/email";
+import { emails } from "@/lib/email";
 import { invalidarCupom } from "@/lib/cupom-cache";
 import { type DbErp, entregarEvento, enfileirarEvento } from "@/lib/erp";
 import { montarLinkAcompanhamento } from "@/lib/pedidos/notificar-status";
+import { dedupeKeyStatusPedido, enfileirarEmail, processarEmailOutbox } from "@/lib/email-outbox";
 
 // Pós-aprovação do pedido — caminho único para confirmação síncrona
 // (mock/cartão aprovado na hora) e assíncrona (Pix via webhook do MP).
@@ -220,12 +221,31 @@ export async function finalizarPedidoPago(
     console.error("[finalizar:link-acompanhar]", err);
   }
 
+  // E-mail "pedido pago" via OUTBOX (antes: sendEmail direto — perdia a
+  // mensagem se falhasse e podia duplicar em webhook repetido/concorrente).
+  // A dedupeKey única (status:{orderId}:PAID) garante NO MÁXIMO UMA linha por
+  // pedido: repetição PENDING→PAID não re-enfileira (a guarda de transição já
+  // retorna cedo) e, mesmo que enfileirasse, o P2002 devolve a linha existente
+  // → nenhum segundo envio. Fire-and-forget: não trava a finalização; falha
+  // fica PENDING e o cron de dreno (09h/18h) retenta com backoff.
   const mail = emails.orderPaid(order.number, linkAcompanhar);
-  sendEmail({
-    to: order.user?.email || order.guestEmail || "",
-    subject: mail.subject,
-    text: mail.text,
-  }).catch((err) => console.error("[finalizar:email]", err));
+  void (async () => {
+    try {
+      const outboxId = await enfileirarEmail({
+        dedupeKey: dedupeKeyStatusPedido(order.id, "PAID"),
+        kind: "order_paid",
+        orderId: order.id,
+        mail: {
+          to: order.user?.email || order.guestEmail || "",
+          subject: mail.subject,
+          text: mail.text,
+        },
+      });
+      if (outboxId) await processarEmailOutbox(outboxId);
+    } catch (err) {
+      console.error("[finalizar:email]", err);
+    }
+  })();
 
   return { ok: true, jaFinalizado: false };
 }

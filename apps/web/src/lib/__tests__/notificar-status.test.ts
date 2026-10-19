@@ -2,26 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // E-mails de status: anti-duplicado (só muda real), link certo por tipo de
 // cliente (logado → /conta; convidado → token privado) e template com
-// rastreio quando existe.
-const { prismaMock, sendEmailMock } = vi.hoisted(() => ({
+// rastreio quando existe. O envio em si é do outbox (email-outbox.test.ts).
+const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     order: { findUnique: vi.fn() },
     orderTrackToken: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
   },
-  sendEmailMock: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
-vi.mock("@/lib/email", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/email")>();
-  return { ...original, sendEmail: sendEmailMock };
-});
 
 import { emails } from "@/lib/email";
 import { hashToken } from "@/lib/pedidos/acompanhar";
 import {
   deveNotificarStatus,
-  enviarEmailStatusPedido,
+  montarEmailStatusPedido,
   montarLinkAcompanhamento,
 } from "@/lib/pedidos/notificar-status";
 import { orderStatusLabel } from "@/lib/utils";
@@ -43,7 +38,6 @@ function orderFake(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  sendEmailMock.mockResolvedValue(undefined);
   prismaMock.orderTrackToken.create.mockResolvedValue({});
   prismaMock.orderTrackToken.update.mockResolvedValue({});
   prismaMock.orderTrackToken.findUnique.mockResolvedValue(null);
@@ -126,25 +120,22 @@ describe("montarLinkAcompanhamento", () => {
   });
 });
 
-describe("enviarEmailStatusPedido", () => {
-  it("logado: envia com link /conta e assunto do status", async () => {
+describe("montarEmailStatusPedido (payload imutável do outbox)", () => {
+  it("logado: destinatário + link /conta + assunto do status", async () => {
     prismaMock.order.findUnique.mockResolvedValue(orderFake());
-    const ok = await enviarEmailStatusPedido(
+    const mail = await montarEmailStatusPedido(
       { orderId: "o1", status: "SHIPPED" },
-      { db: prismaMock as never, send: sendEmailMock }
+      { db: prismaMock as never }
     );
-    expect(ok).toBe(true);
-    expect(sendEmailMock).toHaveBeenCalledTimes(1);
-    const mail = sendEmailMock.mock.calls[0][0];
-    expect(mail.to).toBe("logada@x.com");
-    expect(mail.subject).toBe(
+    expect(mail?.to).toBe("logada@x.com");
+    expect(mail?.subject).toBe(
       `Pedido DC-1: ${orderStatusLabel("SHIPPED")}`
     );
-    expect(mail.text).toContain("/conta?tab=pedidos");
-    expect(mail.text).toContain(orderStatusLabel("SHIPPED"));
+    expect(mail?.text).toContain("/conta?tab=pedidos");
+    expect(mail?.text).toContain(orderStatusLabel("SHIPPED"));
   });
 
-  it("convidado: envia com link privado no corpo", async () => {
+  it("convidado: link privado no corpo", async () => {
     prismaMock.order.findUnique.mockResolvedValue(
       orderFake({
         userId: null,
@@ -153,14 +144,12 @@ describe("enviarEmailStatusPedido", () => {
         status: "PAID",
       })
     );
-    const ok = await enviarEmailStatusPedido(
+    const mail = await montarEmailStatusPedido(
       { orderId: "o1", status: "PAID" },
-      { db: prismaMock as never, send: sendEmailMock }
+      { db: prismaMock as never }
     );
-    expect(ok).toBe(true);
-    const mail = sendEmailMock.mock.calls[0][0];
-    expect(mail.to).toBe("g@g.com");
-    expect(mail.text).toMatch(/\/acompanhar\/[A-Za-z0-9_-]{43}/);
+    expect(mail?.to).toBe("g@g.com");
+    expect(mail?.text).toMatch(/\/acompanhar\/[A-Za-z0-9_-]{43}/);
   });
 
   it("com rastreio: inclui código e link na mensagem", async () => {
@@ -171,36 +160,24 @@ describe("enviarEmailStatusPedido", () => {
         status: "SHIPPED",
       })
     );
-    await enviarEmailStatusPedido(
+    const mail = await montarEmailStatusPedido(
       { orderId: "o1", status: "SHIPPED" },
-      { db: prismaMock as never, send: sendEmailMock }
+      { db: prismaMock as never }
     );
-    const mail = sendEmailMock.mock.calls[0][0];
-    expect(mail.text).toContain("BR123456789");
-    expect(mail.text).toContain("Correios");
-    expect(mail.text).toMatch(/rastreamento\.correios\.com\.br/);
+    expect(mail?.text).toContain("BR123456789");
+    expect(mail?.text).toContain("Correios");
+    expect(mail?.text).toMatch(/rastreamento\.correios\.com\.br/);
   });
 
-  it("sem destinatário → false e nada enviado", async () => {
+  it("sem destinatário → null (nada a enfileirar)", async () => {
     prismaMock.order.findUnique.mockResolvedValue(
       orderFake({ userId: null, user: null, guestEmail: null })
     );
-    const ok = await enviarEmailStatusPedido(
+    const mail = await montarEmailStatusPedido(
       { orderId: "o1", status: "CANCELLED" },
-      { db: prismaMock as never, send: sendEmailMock }
+      { db: prismaMock as never }
     );
-    expect(ok).toBe(false);
-    expect(sendEmailMock).not.toHaveBeenCalled();
-  });
-
-  it("falha no envio → false (nunca propaga)", async () => {
-    prismaMock.order.findUnique.mockResolvedValue(orderFake());
-    sendEmailMock.mockRejectedValue(new Error("smtp down"));
-    const ok = await enviarEmailStatusPedido(
-      { orderId: "o1", status: "PAID" },
-      { db: prismaMock as never, send: sendEmailMock }
-    );
-    expect(ok).toBe(false);
+    expect(mail).toBeNull();
   });
 });
 
