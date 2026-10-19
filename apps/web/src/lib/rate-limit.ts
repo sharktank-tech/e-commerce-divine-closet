@@ -2,6 +2,9 @@
 // processo (no serverless, cada instância conta separado; suficiente contra
 // abuso casual e força bruta lenta. Para limite global, trocar por Redis).
 // Retorna { permitido, restantes, resetEm } sem nunca lançar.
+//
+// Para o caso que PRECISA valer entre instâncias (reenvio de link guest),
+// há também `consumirRateLimit` abaixo: contador persistido em Postgres.
 
 export type ResultadoLimite = {
   permitido: boolean;
@@ -78,4 +81,59 @@ export async function naVez<T>(chave: string, fn: () => Promise<T>): Promise<T> 
     liberar();
     if (filas.get(chave) === encadeada) filas.delete(chave);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Contador PERSISTIDO em Postgres (tabela RateLimit): vale entre instâncias
+// serverless, ao contrário do contador em memória acima. Janela fixa com
+// início arredondado — sem job de limpeza (janelas antigas simplesmente
+// deixam de ser a corrente).
+
+import { prisma } from "@/lib/prisma";
+
+type Db = Pick<typeof prisma, "rateLimit">;
+
+export type ResultadoRateLimit = {
+  permitido: boolean;
+  /** Tentativas ainda disponíveis na janela corrente (mínimo 0). */
+  restantes: number;
+};
+
+/**
+ * Consome 1 tentativa da `chave` (ex.: `reenviar:ip:203.0.113.9`).
+ * `limite` é o máximo de tentativas POR JANELA (padrão: 60 min).
+ */
+export async function consumirRateLimit(
+  chave: string,
+  opcoes: { limite: number; janelaMin?: number; db?: Db; agora?: Date }
+): Promise<ResultadoRateLimit> {
+  const janelaMs = (opcoes.janelaMin ?? 60) * 60_000;
+  const agora = opcoes.agora ?? new Date();
+  const janelaInicio = new Date(Math.floor(agora.getTime() / janelaMs) * janelaMs);
+  const db = opcoes.db ?? prisma;
+
+  const linha = await db.rateLimit.upsert({
+    where: { chave_janelaInicio: { chave, janelaInicio } },
+    create: { chave, janelaInicio, total: 1 },
+    update: { total: { increment: 1 } },
+  });
+  return {
+    permitido: linha.total <= opcoes.limite,
+    restantes: Math.max(0, opcoes.limite - linha.total),
+  };
+}
+
+/**
+ * IP do cliente para rate-limit. Em produção (Vercel) `x-real-ip` é gravado
+ * pelo edge e não é spoofável pelo cliente; `x-forwarded-for` é usado só
+ * como fallback (fora do Vercel pode conter o primeiro hop do cliente —
+ * documentado como melhor-esforço, nunca é fonte de autorização).
+ */
+export function ipDoPedido(headers: Headers): string {
+  const real = headers.get("x-real-ip")?.trim();
+  if (real) return real.slice(0, 64);
+  const xff = headers.get("x-forwarded-for");
+  const primeiro = xff?.split(",")[0]?.trim();
+  if (primeiro) return primeiro.slice(0, 64);
+  return "desconhecido";
 }
