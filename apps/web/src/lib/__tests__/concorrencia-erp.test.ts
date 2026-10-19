@@ -21,6 +21,12 @@ const comoDb = (p: PrismaClient): Db => p as unknown as Db;
 //
 // Banco dedicado dc_concorrencia (isolado); `prisma migrate deploy` no
 // beforeAll prova o histórico completo também em PostgreSQL real.
+// DEPENDÊNCIA: o histórico fresh completo exige o #9 na base
+// (`rebuild_legacy_uuid` converte ids text→uuid ANTES de `reviews`, que cria
+// FK orderId uuid → Order.id). Sem o #9 (branches irmãs #10/#11 isoladas),
+// o deploy fresh reproduz o defeito PRÉ-EXISTENTE do main (FK uuid×text) e o
+// beforeAll falha com a causa visível — nunca skip. A composição de merge
+// #9 → #10 → #11 é o caminho válido (ver PUBLICACAO-2026-10-17.md §2).
 
 const run = promisify(execFile);
 const PRISMA_DIR = resolve(__dirname, "..", "..", "..", "..", "..", "packages", "database", "prisma");
@@ -60,12 +66,16 @@ beforeAll(async () => {
     await migrar(url);
   } catch (e) {
     // falha DURA e explicada — não vira skip silencioso (regra da rodada:
-    // nunca trocar falha por resultado vazio).
+    // nunca trocar falha por resultado vazio). Causas possíveis: PG ausente
+    // (provisionar via pg-real.mjs) ou histórico fresh incompleto (branch
+    // sem o #9 — ver DEPENDÊNCIA no cabeçalho deste arquivo).
     throw new Error(
-      `PostgreSQL real indisponível em ${PG_HOST}:${PG_PORT} para o teste de concorrência. ` +
-        `Provisione e exporte o ambiente (packages/database/PG-REAL.md): ` +
+      `Preparação do PostgreSQL real falhou em ${PG_HOST}:${PG_PORT} (banco ${DB_CONCORRENCIA}). ` +
+        `Se o servidor não existir, provisione e exporte o ambiente (packages/database/PG-REAL.md): ` +
         `node packages/database/scripts/pg-real.mjs setup && ` +
         `eval "$(node packages/database/scripts/pg-real.mjs env)". ` +
+        `Se o erro for de migração (ex.: FK uuid×text em reviews), a branch está sem o #9 ` +
+        `(rebuild_legacy_uuid) — valide na composição #9→#10→#11. ` +
         `Causa: ${e instanceof Error ? e.message : String(e)}`
     );
   }
