@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { autorizarCron } from "@/lib/cron-auth";
 import { reconciliarPixPendentes } from "@/lib/reconciliar-pix";
 
 // Gatilho MANUAL da reconciliação de Pix (mesmo código do piggyback no
@@ -6,9 +7,7 @@ import { reconciliarPixPendentes } from "@/lib/reconciliar-pix";
 // ser chamado a qualquer momento p/ consertar Pix órfão sem esperar o cron.
 export async function GET(req: NextRequest) {
   try {
-    const secret = process.env.CRON_SECRET;
-    const auth = req.headers.get("authorization") || "";
-    if (!secret || auth !== `Bearer ${secret}`) {
+    if (!autorizarCron(req.headers.get("authorization"), process.env.CRON_SECRET)) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 

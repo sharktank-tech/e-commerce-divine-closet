@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { validarUrlRastreio } from "@/lib/rastreio";
 import {
-  deveNotificarStatus,
-  enviarEmailStatusPedido,
-} from "@/lib/pedidos/notificar-status";
+  enfileirarEmailStatusPedido,
+  processarEmailOutbox,
+} from "@/lib/email-outbox";
+import { deveNotificarStatus } from "@/lib/pedidos/notificar-status";
 
 const schema = z.object({
   status: z.enum([
@@ -71,41 +72,53 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       select: { status: true, trackingCode: true },
     });
 
-    const order = await prisma.order.update({
-      where: { id },
-      data: {
-        status: parsed.data.status,
-        ...(parsed.data.paymentStatus ? { paymentStatus: parsed.data.paymentStatus } : {}),
-        ...(parsed.data.trackingCode !== undefined
-          ? { trackingCode: parsed.data.trackingCode || null }
-          : {}),
-        ...(parsed.data.trackingCarrier !== undefined
-          ? { trackingCarrier: parsed.data.trackingCarrier || null }
-          : {}),
-        ...(parsed.data.trackingUrl !== undefined
-          ? { trackingUrl: parsed.data.trackingUrl ? validarUrlRastreio(parsed.data.trackingUrl) : null }
-          : {}),
-        // marca a entrega (base do convite de avaliação pós-compra)
-        ...(parsed.data.status === "DELIVERED" ? { entregueEm: new Date() } : {}),
-      },
-      include: {
-        items: true,
-        user: { select: { id: true, name: true, email: true } },
-      },
+    // Transição + notificação na MESMA transação (e-mail só com mudança real;
+    // dedupeKey idempotente: se outro caminho já gravou, não duplica). O
+    // envio em si é pós-commit, com retentativa via outbox.
+    const { order, emailId } = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.update({
+        where: { id },
+        data: {
+          status: parsed.data.status,
+          ...(parsed.data.paymentStatus ? { paymentStatus: parsed.data.paymentStatus } : {}),
+          ...(parsed.data.trackingCode !== undefined
+            ? { trackingCode: parsed.data.trackingCode || null }
+            : {}),
+          ...(parsed.data.trackingCarrier !== undefined
+            ? { trackingCarrier: parsed.data.trackingCarrier || null }
+            : {}),
+          ...(parsed.data.trackingUrl !== undefined
+            ? { trackingUrl: parsed.data.trackingUrl ? validarUrlRastreio(parsed.data.trackingUrl) : null }
+            : {}),
+          // marca a entrega (base do convite de avaliação pós-compra)
+          ...(parsed.data.status === "DELIVERED" ? { entregueEm: new Date() } : {}),
+        },
+        include: {
+          items: true,
+          user: { select: { id: true, name: true, email: true } },
+        },
+      });
+      let emailId: string | null = null;
+      if (
+        deveNotificarStatus(anterior, {
+          status: order.status,
+          trackingCode: order.trackingCode,
+        })
+      ) {
+        // template do status REAL (não mais "atualizado" genérico); payload
+        // imutável gravado junto da transição — idempotente pela dedupeKey.
+        emailId = await enfileirarEmailStatusPedido(
+          order.id,
+          order.status,
+          tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+        );
+      }
+      return { order, emailId };
     });
-
-    if (
-      deveNotificarStatus(
-        anterior,
-        { status: order.status, trackingCode: order.trackingCode }
-      )
-    ) {
-      // template do status REAL (não mais "atualizado" genérico);
-      // notificação não bloqueia a atualização do pedido
-      void enviarEmailStatusPedido({
-        orderId: order.id,
-        status: order.status,
-      }).catch((err) => console.error("[admin:pedido:email]", err));
+    if (emailId) {
+      void processarEmailOutbox(emailId).catch((err) =>
+        console.error("[admin:pedido:email]", err)
+      );
     }
 
     return NextResponse.json({ order });

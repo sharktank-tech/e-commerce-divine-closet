@@ -249,12 +249,15 @@ enum ErpEventStatus {
   DEAD
 }
 
-// Fila persistente de eventos loja → ERP. A PK é o event_id do envelope
-// (reenfileirar o mesmo evento não duplica). Entrega tentada na hora
-// (fire-and-forget) e drenada no cron com backoff exponencial; DEAD após
-// esgotar tentativas. Payload nunca sai daqui sem assinatura.
+// Fila persistente de eventos loja → ERP. A PK é o event_id do envelope e
+// businessKey é a OCORRÊNCIA de negócio (ex.: pedido_estornado:{orderId}) —
+// reprocesso/concorrência não duplica evento (P2002 idempotente). Gravado
+// SEMPRE (mesmo com ERP desativado: fila guarda o histórico e a entrega
+// acontece quando houver URL+segredo; dreno no cron com backoff exponencial,
+// DEAD após esgotar tentativas). Payload nunca sai daqui sem assinatura.
 model ErpEvent {
   id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid // = event_id do envelope (app envia; default p/ inserts sem id)
+  businessKey    String?        @unique // ocorrência de negócio; null = evento livrístico (estoque/edições)
   version        Int            @default(1)
   tipo           String
   payload        Json
@@ -559,4 +562,36 @@ model RateLimit {
   createdAt    DateTime @default(now())
 
   @@id([chave, janelaInicio])
+}
+
+// Outbox de e-mail transacional com retentativa persistente (estorno e demais
+// status). Payload renderizado UMA vez na enfileiração (imutável → o Resend
+// deduplica pelo header Idempotency-Key, janela de 24h — ver
+// EMAIL-ESTORNO-RETENTATIVA.md). SENT = aceito pelo provedor (nunca antes);
+// FAILED = falha definitiva (configuração/validação ou tentativas esgotadas).
+// orderId sem FK de propósito (mesmo critério de auditoria do ErpEvent).
+enum EmailOutboxStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model EmailOutbox {
+  id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dedupeKey     String           @unique
+  kind          String
+  orderId       String?          @db.Uuid
+  recipient     String
+  subject       String
+  text          String?
+  html          String?
+  status        EmailOutboxStatus @default(PENDING)
+  attempt       Int              @default(0)
+  nextAttemptAt DateTime         @default(now())
+  lastError     String?
+  sentAt        DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([status, nextAttemptAt])
 }

@@ -1,19 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, notificarErp } = vi.hoisted(() => ({
-  findMany: vi.fn(),
-  updateMany: vi.fn(),
-  buscarPagamento: vi.fn(),
-  finalizarPedidoPago: vi.fn(),
-  notificarErp: vi.fn(),
-}));
+const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, notificarErp, enfileirarEmail, processarOutbox, prismaMock } =
+  vi.hoisted(() => {
+    const prismaMock = {
+      order: { findMany: vi.fn(), updateMany: vi.fn() },
+      $transaction: vi.fn(),
+    };
+    return {
+      findMany: prismaMock.order.findMany,
+      updateMany: prismaMock.order.updateMany,
+      buscarPagamento: vi.fn(),
+      finalizarPedidoPago: vi.fn(),
+      notificarErp: vi.fn(),
+      enfileirarEmail: vi.fn(),
+      processarOutbox: vi.fn(),
+      prismaMock,
+    };
+  });
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { order: { findMany, updateMany } },
+  prisma: { order: { findMany, updateMany }, $transaction: prismaMock.$transaction },
 }));
 vi.mock("@/lib/mercadopago", () => ({ buscarPagamento }));
 vi.mock("@/lib/pedidos/finalizar", () => ({ finalizarPedidoPago }));
 vi.mock("@/lib/erp", () => ({ notificarErp }));
+vi.mock("@/lib/email-outbox", () => ({
+  enfileirarEmailStatusPedido: enfileirarEmail,
+  processarEmailOutbox: processarOutbox,
+}));
 
 import {
   HORAS_PARA_CANCELAR_PIX,
@@ -27,6 +41,15 @@ const pedido = (horas: number) => ({
   number: "DC-20261017-0001",
   paymentId: "184666023462",
   createdAt: new Date(AGORA.getTime() - horas * 3_600_000),
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  prismaMock.$transaction.mockImplementation(
+    async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock)
+  );
+  enfileirarEmail.mockResolvedValue("outbox-1");
+  processarOutbox.mockResolvedValue("ENVIADO");
 });
 
 describe("decidirReconciliacao", () => {
@@ -93,6 +116,10 @@ describe("reconciliarPixPendentes", () => {
       numero: "DC-20261017-0001",
       motivo: "Pix não confirmado (expired)",
     });
+    // e-mail na MESMA transação (terceiro argumento é o tx) + envio pós-commit
+    expect(enfileirarEmail).toHaveBeenCalledWith("ord-1", "CANCELLED", prismaMock);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(processarOutbox).toHaveBeenCalledWith("outbox-1");
     expect(r).toMatchObject({ cancelados: 1 });
   });
 
@@ -103,6 +130,7 @@ describe("reconciliarPixPendentes", () => {
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
     expect(notificarErp).not.toHaveBeenCalled();
+    expect(enfileirarEmail).not.toHaveBeenCalled();
     expect(r).toMatchObject({ cancelados: 0, mantidos: 1 });
   });
 
