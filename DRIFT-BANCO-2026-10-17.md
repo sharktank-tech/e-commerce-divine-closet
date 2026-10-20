@@ -104,24 +104,32 @@ registrado na produção), e a **cadeia completa** agora também roda em banco v
 
 `prisma migrate diff --from-url <produção> --to-schema-datamodel schema.prisma`
 (leitura). Itens **não executados** nesta rodada — nenhum DDL foi aplicado em produção
-além da `ids_uuid_default` já autorizada/aplicada:
+além da `ids_uuid_default` já autorizada/aplicada. A classificação abaixo cobre as
+**48 linhas** de `diff-combined-vs-schema.txt` (reconstrução combinada vs schema).
+Todas são **pré-existentes** (nenhuma vem dos PRs #9/#10/#11 — o
+`diff-prod-vs-combined.txt` confirma que os 3 PRs só **adicionam** EmailOutbox/enum,
+`ErpEvent.businessKey`+unique e RateLimit, nunca removem objeto de produção).
+A rota de implantação é `migrate deploy` (aditiva) — **não** `db push` (sincroniza);
+portanto nenhum destes itens dispara na publicação. Classificação:
 
-| Divergência | Produção | Schema/ histórico | Observação |
-| --- | --- | --- | --- |
-| `AuditLog.id` | `TEXT` + default | `@db.Uuid` (histórico também `TEXT`) | tipo diverge; default ok ⇒ funciona. Migração futura `TYPE UUID USING id::uuid` (tabela pequena) |
-| `ErpEvent.id` default | `DEFAULT` presente | schema alinhado neste PR | **resolvido** no PR #9 |
-| `Product.custo_peca/embalagem_centavos` | `NULL`+`DEFAULT 0` | `NOT NULL` | migração de precificação nunca aplicada com o tipo do schema |
-| `Product.custos_extras_descricao` | `DEFAULT ''` | sem default | idem |
-| `precificacao_calculada_em`, `created_at/updated_at` de `config_precificacao`/`lotes_compra`/`materiais_embalagem` | `TIMESTAMPTZ` (+ `DEFAULT now()` em `updated_at`) | `TIMESTAMP(3)` (sem default em `updated_at`) | migrações manuais no estilo `TIMESTAMPTZ`; arquivos versionados espelham o banco, **o schema é que diverge** |
-| `lotes_compra.quantidade_pecas` | sem `DEFAULT` | `DEFAULT 1` | mesma origem |
-| FKs `Product_lote_id_fkey`, `lotes_compra_categoria_id_fkey` | existem | schema não declara `@relation` | `migrate dev` futuro geraria **DROP FK** — antes de rodar `migrate dev`, alinhar o schema (adicionar relações) |
-| índice `Review_userId_productId_key` | existe (único) | `Review` atual não declara `@@unique([userId, productId])` | legado; `migrate dev` geraria `DROP INDEX` |
-| `lotes_compra_nome_key`, `materiais_embalagem_nome_key` | **não existem** | schema declara `nome @unique` | unicidade só no schema; inserts duplicados dependem do app. Pendência: `CREATE UNIQUE INDEX` (verificar duplicatas antes) |
+| Objeto | Diferença (reconstrução → schema) | Origem | Impacto | Ação |
+| --- | --- | --- | --- | --- |
+| `Product_lote_id_fkey` | reconstrução tem FK `Product.lote_id→lotes_compra`; schema não declara `@relation` | migração criou FK; schema nunca modelou `lote` | nenhum em `migrate deploy`; `migrate dev` futuro geraria DROP FK | alinhar schema (adicionar `@relation`) antes de qualquer `migrate dev`; fora do escopo dos PRs |
+| `lotes_compra_categoria_id_fkey` | idem (`categoria_id→Category`) | idem | idem | idem |
+| `Review_userId_productId_key` | reconstrução tem unique `[userId,productId]`; schema declara só `[userId,productId,orderId]` | unique legado; schema evoluiu p/ incluir `orderId` | nenhum em deploy; `migrate dev` geraria DROP INDEX | decidir se o unique legado é preservado; pendência documentada |
+| `lotes_compra_categoria_id_idx`, `lotes_compra_data_compra_idx` | índices existem na reconstrução; schema não declara `@@index` | migração criou índices; schema os omitiu | nenhum (índice extra não quebra) | opcional: declarar `@@index` no schema |
+| `AuditLog.id` | reconstrução `TEXT`+default; schema `UUID DEFAULT gen_random_uuid()` | migração `auditlog_id_default` só adicionou DEFAULT a coluna TEXT (não converteu tipo) | funciona (default gera uuid como texto); tipo diverge | migração futura `TYPE UUID USING id::uuid` (tabela pequena); pendência §6 |
+| `Product.custo_peca_centavos`, `custo_embalagem_centavos` | reconstrução `NULL`+`DEFAULT 0`; schema `NOT NULL` | migração de precificação nunca aplicada com o tipo do schema | Prisma client já exige o campo (validação app); nenhum em deploy | pendência: migração de higiene NOT NULL |
+| `Product.custos_extras_descricao` | reconstrução `DEFAULT ''`; schema sem default | idem | nenhum | idem |
+| `Product.precificacao_calculada_em`, `config_precificacao/lotes_compra/materiais_embalagem.created_at/updated_at` | reconstrução `TIMESTAMPTZ` (+`DEFAULT now()` em `updated_at`); schema `TIMESTAMP(3)` (sem default) | migrações manuais no estilo `TIMESTAMPTZ`; arquivos versionados espelham o banco, o schema diverge | nenhum (ambos armazenam tempo; `TIMESTAMPTZ` é mais correto) | pendência: alinhar schema a `@db.Timestamptz` ou migrar tipos |
+| `lotes_compra.quantidade_pecas` | reconstrução sem DEFAULT; schema `DEFAULT 1` | mesma origem (manual) | nenhum | pendência |
+| `lotes_compra_nome_key`, `materiais_embalagem_nome_key` | schema declara `nome @unique`; reconstrução **não** tem o índice | unicidade só no schema (migração nunca criou o índice) | inserts duplicados só dependem do app hoje; `migrate dev` geraria CREATE UNIQUE (falharia se houver duplicatas) | pendência: `CREATE UNIQUE INDEX` após verificar duplicatas |
 
 Recomendação de ordem (futura, com aprovação): (1) alinhar `@relation`/únicos do schema ao
 desejado **antes** de qualquer `migrate dev`; (2) migração única de higiene (`AuditLog`
 uuid, tipos `TIMESTAMP(3)`/defaults, `custo_* NOT NULL`, índices únicos de `nome`);
-(3) revisar baseline do histórico (§6).
+(3) revisar baseline do histórico (§6). **Nada disto bloqueia a publicação dos PRs** —
+a rota é `migrate deploy`, e todos os itens são pré-existentes e aditivos.
 
 ## 5. Garantias validadas nesta rodada
 
@@ -131,17 +139,34 @@ uuid, tipos `TIMESTAMP(3)`/defaults, `custo_* NOT NULL`, índices únicos de `no
   caminho exato do bug + sucesso após a migração de fix; estrutura final
   `uuid` + `gen_random_uuid()`; `migrate deploy` em **banco vazio** com replay
   **integral** do histórico (inclui `20260928181000_rebuild_legacy_uuid`), sem 42804.
+- **Reconstrução/upgrade em PostgreSQL REAL 17.11** (fora do PGlite; servidor dedicado
+  porta 5433, bancos `dc_pgreal_*` descartáveis; script versionado em
+  `packages/database/scripts/upgrade-pg-real.mjs`):
+  - `rebuild` — 28 migrações em banco vazio; inserts ORM **sem id** em
+    `Refund`/`OrderTrackToken`/`ErpEvent`/`EmailOutbox`/`RateLimit` todos `ok` (caminho
+    que falhou em produção); unicidades `businessKey`/`dedupeKey`/`orderId`/`idempotencyKey`
+    bloqueiam a 2ª linha.
+  - `prodlike` — base sintética como produção (histórico até `20261017200000`, uuid já
+    convertido, dados + Refund/OrderTrackToken/ErpEvent pré-existentes); deploy aplica as
+    **4 pendentes** (`rebuild_legacy_uuid` como no-op + `email_outbox` +
+    `erp_event_business_key` + `rate_limit`); **dados preservados** (2 users/2 orders/
+    1 review/1 cartItem/1 orderItem/1 refund/1 token/2 erpEvents intactos); tabelas novas
+    presentes; conflitos de duplicidade bloqueados.
+  - `legacy` — base legada (ids ainda TEXT, até `20260928180013`); deploy aplica as
+    **20 pendentes** incluindo a conversão TEXT→uuid (`rebuild_legacy_uuid`) com dados
+    pré-existentes preservados e conversão aplicada; tabelas novas presentes.
 - **Reconstrução manual do zero** (fora do vitest): mesmo replay + auditoria de
   `information_schema` (13 tabelas legadas convertidas; roles; FKs recriadas) e teste de
   upgrade de base pré-pendências com dados e tentativas de duplicidade (bloqueadas).
-- **Testes automatizados**: `migrations-id-default.test.ts` (23 models) + suíte completa.
+- **Testes automatizados**: `migrations-id-default.test.ts` (23 models);
+  `concorrencia-erp.test.ts` (corrida real em PostgreSQL 17.11) + suíte completa.
 
 ## 6. Pendências / ações operacionais
 
 1. **PR #9** (correção + testes + este documento) → merge + `npm run prisma:deploy`
    (a migração já está aplicada; deploy pós-merge só confirma o registro versionado).
 2. Decisões sobre divergências do §4 (nenhuma aplicada; não inventar destino/segredo).
-3. **Banco novo**: provisionar via procedimento aprovado (hoje: `prisma db push` +
-   baseline de `_prisma_migrations`) **ou** aprovar reescrita/rebaseline do histórico
-   (fora do escopo desta rodada). Até lá, `migrate deploy` em vazio falha em `reviews`.
-4. `AuditLog.id` → migração futura `TYPE UUID`.
+3. **Banco novo**: provisionar via `prisma migrate deploy` em banco vazio — o replay
+   integral do histórico agora **completa sem falha** (inclui
+   `20260928181000_rebuild_legacy_uuid`, provado em PostgreSQL real, modo `rebuild`).
+4. `AuditLog.id` → migração futura `TYPE UUID` (ver §4).
