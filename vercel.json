@@ -1,12 +1,16 @@
 {
   "crons": [
     {
-      "path": "/api/cron/avaliacoes",
+      "path": "/api/cron/carrinho-abandonado",
       "schedule": "0 12 * * *"
     },
     {
-      "path": "/api/cron/carrinho-abandonado",
-      "schedule": "0 9 * * *"
+      "path": "/api/cron/avaliacoes",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/emails",
+      "schedule": "0 21 * * *"
     }
   ]
 }

@@ -6,6 +6,10 @@ import {
   traduzirErroMp,
 } from "@/lib/mercadopago";
 import { notificarErp } from "@/lib/erp";
+import {
+  enfileirarEmailStatusPedido,
+  processarEmailOutbox,
+} from "@/lib/email-outbox";
 
 // Orquestração de estorno INTEGRAL via Mercado Pago.
 // Regra de ouro: o pedido só passa a REFUNDED/APPROVED quando o provedor
@@ -36,7 +40,7 @@ export class EstornoErro extends Error {
   }
 }
 
-type Db = Pick<typeof prisma, "order" | "refund">;
+type Db = Pick<typeof prisma, "order" | "refund" | "$transaction">;
 
 export type RegistroEstorno = {
   id: string;
@@ -79,17 +83,40 @@ function paraRegistro(r: {
  * SHIPPED/DELIVERED/CANCELLED). Idempotente — reprocessos não mudam nada.
  * ATENÇÃO: não devolve estoque (estorno não é devolução automática).
  */
-async function atualizarPedidoEstornado(db: Db, orderId: string): Promise<boolean> {
-  const mudou = await db.order.updateMany({
-    where: { id: orderId, paymentStatus: "PAID" },
-    data: { paymentStatus: "REFUNDED" },
-  });
-  await db.order.updateMany({
-    where: { id: orderId, status: { in: ["PENDING", "PAID", "PROCESSING"] } },
-    data: { status: "REFUNDED" },
-  });
-  return (mudou.count ?? 0) > 0;
+async function transicionarEstornoComEmail(
+  db: Db,
+  orderId: string
+): Promise<{ mudou: boolean; emailId: string | null }> {
+  try {
+    return (await db.$transaction(async (tx) => {
+      const mudou =
+        ((await tx.order.updateMany({
+          where: { id: orderId, paymentStatus: "PAID" },
+          data: { paymentStatus: "REFUNDED" },
+        })).count ?? 0) > 0;
+      await tx.order.updateMany({
+        where: { id: orderId, status: { in: ["PENDING", "PAID", "PROCESSING"] } },
+        data: { status: "REFUNDED" },
+      });
+      if (!mudou) return { mudou: false, emailId: null };
+      // E-mail na MESMA transação: ou a transição REFUNDED nasce com a linha
+      // do outbox gravada, ou o rollback descarta as duas (nunca fica estorno
+      // sem notificação — o envio em si é pós-commit, com retentativa).
+      const emailId = await enfileirarEmailStatusPedido(
+        orderId,
+        "REFUNDED",
+        tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+      );
+      return { mudou: true, emailId };
+    })) as { mudou: boolean; emailId: string | null };
+  } catch (err) {
+    // Átomo: falhou junto = nada aplicado; loga e deixa a reconciliação
+    // reprocessar (nunca responde erro ao provedor por isso).
+    console.error("[estorno:transicao]", err);
+    return { mudou: false, emailId: null };
+  }
 }
+
 
 /** ERP: só quando o pedido efetivamente passou a REFUNDED (não em reprocessos). */
 async function avisarEstornoConfirmado(db: Db, orderId: string): Promise<void> {
@@ -107,6 +134,19 @@ async function avisarEstornoConfirmado(db: Db, orderId: string): Promise<void> {
   } catch (err) {
     console.error("[estorno:erp]", err);
   }
+}
+
+/**
+ * E-mail do estado REFUNDED (template de estorno). A linha do outbox já foi
+ * gravada DENTRO da transição PAID→REFUNDED (dedupeKey impede duplicado); aqui
+ * só se tenta o envio imediato — falha transitória fica PENDING para o cron.
+ * Não bloqueia a orquestração.
+ */
+function tentarEnvioEmailRefund(emailId: string | null): void {
+  if (!emailId) return;
+  void processarEmailOutbox(emailId).catch((err) => {
+    console.error("[estorno:email]", err);
+  });
 }
 
 /**
@@ -154,12 +194,13 @@ export async function confirmarEstornoNotificado(
     }
   }
 
-  const mudou = await atualizarPedidoEstornado(db, orderId);
+  const { mudou, emailId } = await transicionarEstornoComEmail(db, orderId);
   if (mudou) {
     void notificarErp("pedido_estornado", {
       numero: order.number,
       total: Number(order.total),
     });
+    tentarEnvioEmailRefund(emailId);
   }
 }
 
@@ -181,8 +222,11 @@ async function aplicarResultado(
       },
     });
     if (orderId) {
-      const mudou = await atualizarPedidoEstornado(db, orderId);
-      if (mudou) await avisarEstornoConfirmado(db, orderId);
+      const { mudou, emailId } = await transicionarEstornoComEmail(db, orderId);
+      if (mudou) {
+        await avisarEstornoConfirmado(db, orderId);
+        tentarEnvioEmailRefund(emailId);
+      }
     }
   } else if (refund.status === "in_process") {
     await db.refund.updateMany({
