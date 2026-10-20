@@ -17,7 +17,7 @@ type Linha = {
 const { fila, erpEventMock } = vi.hoisted(() => {
   const fila = new Map<string, Record<string, unknown>>();
   const erpEventMock = {
-    create: vi.fn(),
+    createMany: vi.fn(),
     findUnique: vi.fn(),
     updateMany: vi.fn(),
     findMany: vi.fn(),
@@ -29,21 +29,22 @@ const { fila, erpEventMock } = vi.hoisted(() => {
 vi.mock("@/lib/prisma", () => ({ prisma: { erpEvent: erpEventMock } }));
 
 function ligarFila() {
-  erpEventMock.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
-    if (fila.has(data.id as string)) {
-      throw Object.assign(new Error("dup"), { code: "P2002" });
+  erpEventMock.createMany.mockImplementation(
+    async ({ data }: { data: Array<Record<string, unknown>> }) => {
+      const d = data[0];
+      if (fila.has(d.id as string)) return { count: 0 };
+      const linha = {
+        ...d,
+        lastStatusCode: null,
+        lastError: null,
+        nextAttemptAt: new Date(),
+        createdAt: new Date(),
+        version: 1,
+      };
+      fila.set(d.id as string, linha);
+      return { count: 1 };
     }
-    const linha = {
-      ...data,
-      lastStatusCode: null,
-      lastError: null,
-      nextAttemptAt: new Date(),
-      createdAt: new Date(),
-      version: 1,
-    };
-    fila.set(data.id as string, linha);
-    return linha;
-  });
+  );
   erpEventMock.findUnique.mockImplementation(
     async ({ where }: { where: { id: string } }) => fila.get(where.id) ?? null
   );
@@ -81,7 +82,7 @@ describe("notificarErp", () => {
     delete process.env.NEXT_PUBLIC_APP_URL;
   });
 
-  it("sem config: não envia (false), sem fetch, sem persistir", async () => {
+  it("sem config: não envia (false), sem fetch — mas PERSISTE na fila", async () => {
     delete process.env.ERP_WEBHOOK_URL;
     delete process.env.ERP_WEBHOOK_SECRET;
     delete process.env.NEXT_PUBLIC_APP_URL;
@@ -89,7 +90,10 @@ describe("notificarErp", () => {
     vi.stubGlobal("fetch", fetchSpy);
     expect(await notificarErp("pedido_criado", { numero: "1" })).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(erpEventMock.create).not.toHaveBeenCalled();
+    // fila é fonte de verdade mesmo com ERP desativado (histórico intacto;
+    // a entrega acontece quando houver URL+segredo, via dreno)
+    expect(erpEventMock.createMany).toHaveBeenCalledTimes(1);
+    expect([...fila.values()][0].status).toBe("PENDING");
   });
 
   it("sucesso de primeira: persiste na fila e envia 1x com assinatura", async () => {
@@ -107,7 +111,7 @@ describe("notificarErp", () => {
     );
     expect(await notificarErp("pedido_pago", { numero: "DC-1" })).toBe(true);
     // persistiu ANTES de enviar (fila = fonte de verdade)
-    expect(erpEventMock.create).toHaveBeenCalledTimes(1);
+    expect(erpEventMock.createMany).toHaveBeenCalledTimes(1);
     expect(corpo.tipo).toBe("pedido_pago");
     expect(corpo.versao).toBe(1);
     expect(typeof corpo.event_id).toBe("string");

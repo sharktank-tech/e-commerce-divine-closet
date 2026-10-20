@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { validarUrlRastreio } from "@/lib/rastreio";
+import { enfileirarEvento, entregarEvento } from "@/lib/erp";
 import {
   enfileirarEmailStatusPedido,
   processarEmailOutbox,
@@ -72,10 +73,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       select: { status: true, trackingCode: true },
     });
 
-    // Transição + notificação na MESMA transação (e-mail só com mudança real;
-    // dedupeKey idempotente: se outro caminho já gravou, não duplica). O
-    // envio em si é pós-commit, com retentativa via outbox.
-    const { order, emailId } = await prisma.$transaction(async (tx) => {
+    // Transição + evento ERP + notificação na MESMA transação (evento só ao
+    // entrar em CANCELLED; e-mail só com mudança real — businessKey/dedupeKey
+    // únicas: se outro caminho (estorno, reconciliação) já registrou, não
+    // duplica). O envio em si é pós-commit, com retentativa via outbox.
+    const { order, eventoId: eventoCancelId, emailId } = await prisma.$transaction(async (tx) => {
       const order = await tx.order.update({
         where: { id },
         data: {
@@ -95,9 +97,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         },
         include: {
           items: true,
-          user: { select: { id: true, name: true, email: true } },
+          user: { select: { email: true, name: true } },
         },
       });
+      let eventoId: string | null = null;
+      if (order.status === "CANCELLED" && anterior?.status !== "CANCELLED") {
+        eventoId = await enfileirarEvento(
+          "pedido_cancelado",
+          { numero: order.number, motivo: "Cancelado pela administração" },
+          { db: tx, businessKey: `pedido_cancelado:${order.id}` }
+        );
+      }
       let emailId: string | null = null;
       if (
         deveNotificarStatus(anterior, {
@@ -113,8 +123,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
         );
       }
-      return { order, emailId };
+      return { order, eventoId, emailId };
     });
+    if (eventoCancelId) {
+      void entregarEvento(eventoCancelId).catch((err) =>
+        console.error("[admin:pedido:erp]", err)
+      );
+    }
     if (emailId) {
       void processarEmailOutbox(emailId).catch((err) =>
         console.error("[admin:pedido:email]", err)

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { emails } from "@/lib/email";
 import { invalidarCupom } from "@/lib/cupom-cache";
-import { notificarErp } from "@/lib/erp";
+import { type DbErp, entregarEvento, enfileirarEvento } from "@/lib/erp";
 import { montarLinkAcompanhamento } from "@/lib/pedidos/notificar-status";
 import { dedupeKeyStatusPedido, enfileirarEmail, processarEmailOutbox } from "@/lib/email-outbox";
 
@@ -11,7 +11,9 @@ import { dedupeKeyStatusPedido, enfileirarEmail, processarEmailOutbox } from "@/
 // reenviado) não duplica baixa de estoque, cupom nem e-mail.
 // Concorrência: trava as linhas dos produtos (FOR UPDATE) e revalida o
 // estoque DENTRO da transação — dois checkouts do último item em estoque
-// não vendem além do disponível. I/O externo (e-mail) fica fora da tx.
+// não vendem além do disponível. Eventos ERP (`pedido_pago` com businessKey
+// + `estoque_atualizado`) são GRAVADOS na MESMA tx da transição; I/O externo
+// (e-mail, entrega do webhook ERP) fica fora da tx, após o commit.
 
 type BancoFinalizar = {
   $transaction(fn: (tx: TxFinalizar) => Promise<unknown>): Promise<unknown>;
@@ -68,6 +70,12 @@ type TxFinalizar = {
   productVariation: {
     update(args: unknown): Promise<unknown>;
   };
+  // Opcional: fakes de teste podem omitir — sem modelo não há fila a
+  // gravar (transição de negócio segue; evento é melhor-esforço no fake).
+  erpEvent?: {
+    create(args: unknown): Promise<unknown>;
+    findUnique(args: unknown): Promise<{ id: string } | null>;
+  };
 };
 
 export async function finalizarPedidoPago(
@@ -86,6 +94,7 @@ export async function finalizarPedidoPago(
   if (order.paymentStatus !== "PENDING") return { ok: true, jaFinalizado: true };
 
   const estoquesNovos = new Map<string, number>();
+  const eventosErp: string[] = [];
 
   await db.$transaction(async (tx) => {
     const ids = [...new Set(order.items.map((i) => i.product.id))];
@@ -154,7 +163,49 @@ export async function finalizarPedidoPago(
         });
       }
     }
+
+    // Eventos ERP na MESMA transição da baixa: `pedido_pago` (venda
+    // confirmada — só em PAID real, nunca em pedido apenas criado) com
+    // businessKey única por pedido; estoque atualizado junto do decremento.
+    // Erro de fila aqui derruba a tx inteira (transição sem evento = não):
+    // webhook/reconciliação reprocessam a confirmação.
+    if (tx.erpEvent) {
+      const erpDb = tx as unknown as DbErp;
+      const pagoId = await enfileirarEvento(
+        "pedido_pago",
+        {
+          numero: order.number,
+          total: Number(String(order.total)),
+          metodo_pagamento: order.paymentMethod,
+          cupom: order.couponCode,
+          itens: order.items.map((i) => ({
+            produto_id: i.product.id,
+            nome: i.productName,
+            qtd: i.quantity,
+            preco_unit: Number(String(i.unitPrice)),
+          })),
+        },
+        { db: erpDb, businessKey: `pedido_pago:${order.id}` }
+      );
+      if (pagoId) eventosErp.push(pagoId);
+      for (const [produto_id, estoque] of estoquesNovos) {
+        const eid = await enfileirarEvento(
+          "estoque_atualizado",
+          { produto_id, estoque },
+          { db: erpDb }
+        );
+        if (eid) eventosErp.push(eid);
+      }
+    }
   });
+
+  // Pós-commit: entrega imediata (sem travar); sem config ERP a fila
+  // fica PENDING e o dreno do cron entrega depois.
+  for (const eventoId of eventosErp) {
+    void entregarEvento(eventoId).catch((err) =>
+      console.error("[finalizar:erp]", eventoId, err)
+    );
+  }
 
   // Link de acompanhamento no e-mail de confirmação: logado → /conta;
   // convidado → link privado novo (só se não existe token ativo).
@@ -195,22 +246,6 @@ export async function finalizarPedidoPago(
       console.error("[finalizar:email]", err);
     }
   })();
-
-  void notificarErp("pedido_pago", {
-    numero: order.number,
-    total: Number(String(order.total)),
-    metodo_pagamento: order.paymentMethod,
-    cupom: order.couponCode,
-    itens: order.items.map((i) => ({
-      produto_id: i.product.id,
-      nome: i.productName,
-      qtd: i.quantity,
-      preco_unit: Number(String(i.unitPrice)),
-    })),
-  });
-  for (const [produto_id, estoque] of estoquesNovos) {
-    void notificarErp("estoque_atualizado", { produto_id, estoque });
-  }
 
   return { ok: true, jaFinalizado: false };
 }
