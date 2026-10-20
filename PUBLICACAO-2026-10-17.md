@@ -244,7 +244,7 @@ Nenhuma variável NOVA é obrigatória. Já existem em produção:
 | `DATABASE_URL` | Prisma/build | precisa existir no build (§3) |
 | `RESEND_API_KEY` | provedor de e-mail | — |
 | `EMAIL_DRIVER` | driver do outbox | **valida de verdade para status/estorno/pedido-pago/convite** após #10 (antes: envio direto); confirmar `resend` |
-| `CRON_SECRET` | auth dos crons | sem ele as rotas respondem 401 |
+| `CRON_SECRET` | auth dos crons | rota sem secret responde 401; **mas 401 também vem de requisição não autenticada** — um 401 público não prova que o secret está cadastrado no painel |
 | `JWT_SECRET` | sessão | — |
 | `ERP_WEBHOOK_URL`, `ERP_WEBHOOK_SECRET` | receptor ERP | opcionais: sem eles o dreno fica em dry-run/log (ativação, §5B) |
 
@@ -287,10 +287,10 @@ antes dos merges:
   cron das 09h. `notificarErp()` persiste sempre e entrega só com configuração.
   **Produção hoje: `ErpEvent` com 0 linhas** (nenhum PENDING/FAILED/DEAD,
   nenhum vencido) — não há passivo a liberar.
-- **Outbox**: `EmailOutbox` **não existe** em produção (tabela vem da
-  migração do #10 e nasce vazia) — nenhum e-mail histórico aguarda envio.
-  `RateLimit` também inexiste (vem do #9). Backfill do 7653 continua
-  fora do escopo (§5C): a publicação **não** o enfileira.
+- **Outbox**: `EmailOutbox` e `RateLimit` **nascem vazias** após a migração
+  (publicadas em 2026-10-20; estado conferido: **0 linhas** nas duas) —
+  nenhum e-mail histórico aguarda envio. Backfill do 7653 continua fora do
+  escopo (§5C): a publicação **não** o enfileira.
 - **Comunicações transacionais já operacionais**: nada é desligado. A troca
   de envio direto para outbox do #10 preserva o envio (retentando), não o
   remove; `EMAIL_DRIVER`/`CRON_SECRET` permanecem como estão.
@@ -302,6 +302,25 @@ antes dos merges:
   `erp-fila.test.ts`/`erp.test.ts` (sem config → 0 entregas).
 - **Crons**: só disparam nas janelas do §8 e exigem `CRON_SECRET`;
   disparo sem autorização responde 401 (verificado em §5, smoke).
+
+### 5E. Como ler o estado das filas (correção de interpretação)
+
+Três leituras ERRADAS que a publicação não autoriza:
+
+| Leitura errada | Por que é errada | O que de fato indica |
+|---|---|---|
+| "Fila vazia ⇒ transporte desativado" | o outbox só recebe linhas quando há ocorrência a notificar | transporte = `EMAIL_DRIVER` (+ `RESEND_API_KEY`/`SMTP_*`); fila = volume pendente |
+| "Fila com PENDING ⇒ transporte ativo" | o ERP persiste o evento **sempre**, inclusive sem configuração | entrega acontece só com `ERP_WEBHOOK_URL`+`ERP_WEBHOOK_SECRET` |
+| "`CRON_SECRET` presente ⇒ envio configurado / ausente ⇒ envio desligado" | `CRON_SECRET` protege o **acesso** à rota cron; não é chave de desligamento do transporte | `EMAIL_DRIVER`/credenciais decidem se há envio |
+
+Adicional: com `EMAIL_DRIVER=mock` o `sendEmail` resolve **sem provedor**, e a
+linha vira `SENT` — portanto `SENT` no outbox também não é prova de entrega
+real. Fila `0 linhas` e `SENT` convivem com transporte desligado ou mock.
+
+`/api/cron/*` responde **401** tanto com secret ausente quanto com requisição
+não autenticada: um 401 público é comportamento esperado, não evidência de
+configuração. A única confirmação é o painel de variáveis do deployment
+ativo (§3.1) e o log da execução autenticada (§8/§9).
 
 ## 6. Inspeção das filas antes/depois
 

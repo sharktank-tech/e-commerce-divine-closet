@@ -227,7 +227,8 @@ export async function finalizarPedidoPago(
   // pedido: repetição PENDING→PAID não re-enfileira (a guarda de transição já
   // retorna cedo) e, mesmo que enfileirasse, o P2002 devolve a linha existente
   // → nenhum segundo envio. Fire-and-forget: não trava a finalização; falha
-  // fica PENDING e o cron de dreno (09h/18h) retenta com backoff.
+  // fica PENDING e o dreno dos crons (12:00/21:00 UTC = 09h/18h local) retenta
+  // com backoff.
   const mail = emails.orderPaid(order.number, linkAcompanhar);
   void (async () => {
     try {

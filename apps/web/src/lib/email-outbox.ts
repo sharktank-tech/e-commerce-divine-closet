@@ -17,8 +17,17 @@ import { montarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 //   esgotadas); SÓ PENDING volta ao dreno.
 //
 // A tentativa imediata roda logo após a enfileiração (fire-and-forget, sem
-// travar quem chama); o cron diário (09h via carrinho-abandonado + 18h via
-// /api/cron/emails) drena as vencidas.
+// travar quem chama); o dreno roda nos crons diários — 12:00 UTC (09h local,
+// em /api/cron/carrinho-abandonado) e 21:00 UTC (18h local, em
+// /api/cron/emails) — e pega as vencidas.
+//
+// Interpretação operacional (não confundir fila com transporte):
+// - fila VAZIA não significa transporte desativado: o outbox só recebe
+//   linhas quando há ocorrência a notificar; o transporte é EMAIL_DRIVER.
+// - CRON_SECRET protege o ACESSO às rotas cron; não é chave de
+//   desligamento do envio e sua presença não comprova transporte ativo.
+// - EMAIL_DRIVER=mock resolve o envio SEM provedor → a linha vira SENT
+//   sem mensagem real: SENT também não é prova de entrega.
 
 export const EMAIL_OUTBOX_MAX_TENTATIVAS = 6;
 /** Limite de linhas por rodada de dreno (mesma ordem de grandeza da fila ERP). */

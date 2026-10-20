@@ -9,9 +9,11 @@
  * PREPARADO, NÃO EXECUTAR sem autorização explícita. Observações:
  * - exige a migration 20261017220000_erp_event_business_key em produção
  *   (coluna businessKey) — falha com erro de coluna se rodar antes;
- * - NÃO entrega nada (sem fetch): o cron dreno (/api/cron/carrinho-abandonado
- *   ou a drenagem pós-deploy) só pega linhas PENDING quando houver
- *   ERP_WEBHOOK_URL+SECRET configurados; sem config a linha fica guardada.
+ * - NÃO entrega nada (sem fetch): o cron dreno (/api/cron/carrinho-abandonado)
+ *   só entrega quando houver ERP_WEBHOOK_URL+SECRET configurados; sem config a
+ *   linha fica guardada. Fila com PENDING ≠ transporte ativo; fila vazia ≠
+ *   transporte desativado — o estado do transporte é `ERP_WEBHOOK_URL/SECRET`,
+ *   e ambos são ilegíveis daqui (painel Vercel).
  *
  * Uso:
  *   # dry-run (padrão) — só LÊ e imprime resumo, NÃO grava nada:
@@ -208,8 +210,16 @@ async function main() {
 
     console.log(
       "Entrega (NÃO feita aqui): configurar ERP_WEBHOOK_URL/SECRET em produção " +
-        "e deixar o dreno rodar — cron /api/cron/carrinho-abandonado (09h UTC) " +
-        "ou acionamento manual via POST /api/admin/erp (sessão admin)."
+        "e deixar o dreno rodar — cron /api/cron/carrinho-abandonado " +
+        "(12:00 UTC = 09h local) — ou acionamento manual via " +
+        "POST /api/admin/erp?acao=reprocessar (sessão admin). Sem URL+secret " +
+        "a linha fica guardada: fila com linhas PENDING não significa " +
+        "transporte ativo, e fila vazia não significa transporte desativado."
+    );
+    console.log(
+      "Atenção: o fallback automático (NEXT_PUBLIC_APP_URL + /erp/hooks) aponta " +
+        "para rota INEXISTENTE nesta aplicação (404) — ERP_WEBHOOK_URL precisa " +
+        "apontar para um receptor real antes de qualquer entrega."
     );
   } finally {
     await prisma.$disconnect();
