@@ -13,7 +13,7 @@
 | #9 | `fix/migrations-id-default` | `dabe6a6` | IDs text→uuid+default (Refund/OrderTrackToken/ErpEvent), migração de compatibilidade `rebuild_legacy_uuid` idempotente, rate-limit guest, teste de revogação de token | `20260928181000_rebuild_legacy_uuid`, `20261017200000_ids_uuid_default`, `20261018090000_rate_limit` |
 | #10 | `fix/estorno-email-refunded` | `ca48594` | `EmailOutbox` + retentativa (até **6** tentativas, backoff `min(2^n,60)`min); atomicidade tx+outbox em estorno/admin/cancel/PIX; `orderPaid`/convite via outbox; cron-auth (`CRON_SECRET`) nas 4 rotas; schedules corrigidos p/ horário local | `20261017210000_email_outbox` |
 | #11 | `feat/erp-evento-persistente` | `84021e6` | `ErpEvent` sempre persistido (não só no catch), `businessKey @unique` + pré-cheque + `conferirOcorrencia` (conflito distingue divergência), contrato do receptor (envelope/assinatura v1), dreno 09h | `20261017220000_erp_event_business_key` |
-| #12 | `chore/pg-real-docs` | `9952e70` (ver §12) | PG real versionado (`pg-real.mjs`, `upgrade-pg-real.mjs`), doc `PG-REAL.md`, DRIFT §4 reescrito, `.gitignore`, este runbook | — |
+| #12 | `chore/pg-real-docs` | ref estável `origin/chore/pg-real-docs` (tip só avança por edição deste arquivo — ver §12.1) | PG real versionado (`pg-real.mjs`, `upgrade-pg-real.mjs`), doc `PG-REAL.md`, DRIFT §4 reescrito, `.gitignore`, este runbook | — |
 
 ### 1.1 Estratégia de merge escolhida: **merge commit** (não squash, não rebase)
 
@@ -25,7 +25,7 @@ main ec22668
   └─ #9  dabe6a6   (contém ec22668)
        └─ #10 ca48594 (contém dabe6a6)
             └─ #11 84021e6 (contém ca48594)
-                 └─ #12 9952e70 (contém 84021e6)
+                 └─ #12 chore/pg-real-docs (contém 84021e6; só doc/infra)
 ```
 
 Com **merge commit** o diff de cada PR encolhe sozinho a cada merge
@@ -34,17 +34,22 @@ comum NÃO avança (o SHA esmagado ≠ `dabe6a6`) e o diff do #10 volta a
 mostrar as mudanças do #9 — reapresentação. Por isso a ordem e o modo:
 
 ```bash
+# SHAs envolvidos (main e os 3 primeiros são fixos; o do #12 avança apenas
+# quando este runbook é editado — imprima antes de mergear):
+git rev-parse --short main dabe6a6 ca48594 84021e6 origin/chore/pg-real-docs
+
 # pré-requisito: confirmar a pilha (todos devem responder "é ancestral")
 git merge-base --is-ancestor ec22668 dabe6a6 && echo "#9 ok"
 git merge-base --is-ancestor dabe6a6 ca48594 && echo "#10 ok"
 git merge-base --is-ancestor ca48594 84021e6 && echo "#11 ok"
-git merge-base --is-ancestor 84021e6 9952e70 && echo "#12 ok"
+git merge-base --is-ancestor 84021e6 origin/chore/pg-real-docs && echo "#12 ok"
 
 # ordem exata, um por vez, SEM squash (--no-ff deixa o merge explícito):
 git checkout main && git merge --no-ff dabe6a6   -m "merge #9: fix(database) migrations UUID + rate-limit"
 git merge --no-ff ca48594                         -m "merge #10: fix(email) outbox estorno/status"
 git merge --no-ff 84021e6                         -m "merge #11: feat(erp) eventos persistentes + businessKey"
-git merge --no-ff 9952e70                         -m "merge #12: chore(db) pg-real + docs drift/runbook"
+git merge --no-ff "$(git rev-parse origin/chore/pg-real-docs)" \
+                                                 -m "merge #12: chore(db) pg-real + docs drift/runbook"
 git push origin main
 ```
 
@@ -304,13 +309,22 @@ git diff d5481ee <head> --name-only -- . ':(exclude)*.md' ':(exclude)*.mjs' ':(e
 
 | Comparação | Diferença | Natureza |
 |---|---|---|
-| `d5481ee` × `9952e70` (`chore/pg-real-docs`, head do #12) | só `PUBLICACAO-2026-10-17.md` (61+/43−) | **documental** — é esta seção do runbook, escrita depois do teste |
+| `d5481ee` × head atual de `chore/pg-real-docs` (o do #12) | **só** `PUBLICACAO-2026-10-17.md` | **documental** — é este mesmo arquivo, editado depois do teste (o delta muda a cada edição; imprima com o comando abaixo) |
 | `d5481ee` × `84021e6` (#11) | **código idêntico** (diff de código = vazio); 6 arquivos: `.gitignore`, `DRIFT-BANCO-2026-10-17.md`, `PUBLICACAO-…`, `PG-REAL.md`, `pg-real.mjs`, `upgrade-pg-real.mjs` | **documentais/infra do #12** — nenhum é código de aplicação; nada os importa (só menção em comentários do teste) |
 | `d5481ee` × `ca48594` (#10) | código do #11 + docs do #12 | esperado — a composição **contém** o #11, que o #10 não tem |
 | `d5481ee` × `dabe6a6` (#9) | código do #10 + do #11 + docs do #12 | esperado — a composição contém #10 e #11 |
 
-Conclusão: **a árvore de código da composição testada é igual à do head do
-#12** (`9952e70`), diferindo apenas no runbook; e igual à do #11 em todo o
+```bash
+# conferência executável a qualquer momento:
+TIP12=$(git rev-parse --short origin/chore/pg-real-docs)
+echo "#12 tip: $TIP12"
+git diff --stat d5481ee $TIP12                       # → só PUBLICACAO-2026-10-17.md
+git diff d5481ee $TIP12 --name-only -- . ':(exclude)*.md' ':(exclude)*.mjs' ':(exclude).gitignore'
+# ↑ deve sair VAZIO ⇒ nenhuma diferença de código de aplicação
+```
+
+Conclusão: **a árvore de código da composição testada (`d5481ee`) é igual à
+do head do #12**, diferindo apenas neste runbook; e igual à do #11 em todo o
 código de aplicação, diferindo apenas nos arquivos documentais/infra que o
 #12 acrescenta. Nenhuma diferença é de código de aplicação.
 
@@ -334,7 +348,7 @@ Conferência pós-merge (uma linha por PR — todas devem responder `OK`):
 git merge-base --is-ancestor dabe6a6 main && echo "OK: main contém #9 (dabe6a6)"
 git merge-base --is-ancestor ca48594 main && echo "OK: main contém #10 (ca48594)"
 git merge-base --is-ancestor 84021e6 main && echo "OK: main contém #11 (84021e6)"
-git merge-base --is-ancestor 9952e70 main && echo "OK: main contém #12 (9952e70)"
+git merge-base --is-ancestor origin/chore/pg-real-docs main && echo "OK: main contém #12 ($(git rev-parse --short origin/chore/pg-real-docs))"
 
 # e o diff de cada PR aberto deve ter encolhido para as mudanças próprias:
 git diff main...origin/fix/estorno-email-refunded --name-only | wc -l   # só #10
