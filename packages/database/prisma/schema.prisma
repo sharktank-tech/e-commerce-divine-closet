@@ -254,7 +254,7 @@ enum ErpEventStatus {
 // (fire-and-forget) e drenada no cron com backoff exponencial; DEAD após
 // esgotar tentativas. Payload nunca sai daqui sem assinatura.
 model ErpEvent {
-  id             String         @id @db.Uuid // = event_id do envelope
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid // = event_id do envelope (app envia; default p/ inserts sem id)
   version        Int            @default(1)
   tipo           String
   payload        Json
@@ -346,8 +346,12 @@ model Refund {
 
 // Link privado de acompanhamento para pedido de CONVIDADO (sem conta).
 // Só o hash SHA-256 fica no banco — o plaintext viaja apenas no e-mail.
-// Reenvio ROTACIONA o token (antigo deixa de funcionar) e respeita
-// limite (sendCount) + espera (lastSentAt) por pedido.
+// Reenvio ROTACIONA o token: como `orderId` é único (1 linha/pedido), a
+// rotação SOBRESCREVE o `tokenHash` e o link antigo morre sozinho — não há
+// como 2 tokens ativos coexistirem. `revokedAt` é um gancho RESERVADO de
+// revogação explícita sem rotação (lido por `tokenAtivo`, mas hoje sempre
+// null; preenchê-lo negaria o acesso e a próxima rotação o limpa).
+// Respeita limite (sendCount) + espera (lastSentAt) por pedido.
 model OrderTrackToken {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   orderId     String    @unique @db.Uuid
@@ -542,4 +546,17 @@ model HistoricoPreco {
 
   @@index([produto_id, criado_em])
   @@map("historico_preco")
+}
+
+// Contador de tentativas por chave (ex.: reenviar:ip:203.0.113.9) em janelas
+// fixas — rate-limit do reenvio de link guest, persistido em Postgres para
+// valer entre instâncias serverless. Janela = início arredondado; linhas
+// antigas são simplesmente ignoradas (nenhuma limpeza necessária).
+model RateLimit {
+  chave        String   @db.VarChar(120)
+  janelaInicio DateTime
+  total        Int      @default(1)
+  createdAt    DateTime @default(now())
+
+  @@id([chave, janelaInicio])
 }
