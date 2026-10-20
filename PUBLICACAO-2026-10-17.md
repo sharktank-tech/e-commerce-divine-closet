@@ -13,21 +13,71 @@
 | #9 | `fix/migrations-id-default` | `dabe6a6` | IDs text→uuid+default (Refund/OrderTrackToken/ErpEvent), migração de compatibilidade `rebuild_legacy_uuid` idempotente, rate-limit guest, teste de revogação de token | `20260928181000_rebuild_legacy_uuid`, `20261017200000_ids_uuid_default`, `20261018090000_rate_limit` |
 | #10 | `fix/estorno-email-refunded` | `ca48594` | `EmailOutbox` + retentativa (até **6** tentativas, backoff `min(2^n,60)`min); atomicidade tx+outbox em estorno/admin/cancel/PIX; `orderPaid`/convite via outbox; cron-auth (`CRON_SECRET`) nas 4 rotas; schedules corrigidos p/ horário local | `20261017210000_email_outbox` |
 | #11 | `feat/erp-evento-persistente` | `84021e6` | `ErpEvent` sempre persistido (não só no catch), `businessKey @unique` + pré-cheque + `conferirOcorrencia` (conflito distingue divergência), contrato do receptor (envelope/assinatura v1), dreno 09h | `20261017220000_erp_event_business_key` |
-| #12 | `chore/pg-real-docs` | `1891e73` | PG real versionado (`pg-real.mjs`, `upgrade-pg-real.mjs`), doc `PG-REAL.md`, DRIFT §4 reescrito, `.gitignore`, este runbook | — |
+| #12 | `chore/pg-real-docs` | `9952e70` (ver §12) | PG real versionado (`pg-real.mjs`, `upgrade-pg-real.mjs`), doc `PG-REAL.md`, DRIFT §4 reescrito, `.gitignore`, este runbook | — |
 
-Ordem de merge: **#9 → #10 → #11 → #12**. Após merge do #11, o #12 retargeta automaticamente para `main`.
+### 1.1 Estratégia de merge escolhida: **merge commit** (não squash, não rebase)
 
-Correções da revisão de 17/10 (frentes 3–6), já **pushadas** aos ramos:
+Os 4 heads estão em **pilha estrita** — cada branch contém o anterior
+(confere com `git merge-base --is-ancestor`):
 
 ```
-#9  5cfde77 ← 0acd9a9 (guest: rate-limit Postgres + analytics/robots)
-#10 691db7d ← f627f9a (outbox atômico)  +  f3e93ea ← f771049 (cron-auth + schedules)
-#11 f951169 ← aa95e5a (pré-cheque businessKey + contrato do receptor)
+main ec22668
+  └─ #9  dabe6a6   (contém ec22668)
+       └─ #10 ca48594 (contém dabe6a6)
+            └─ #11 84021e6 (contém ca48594)
+                 └─ #12 9952e70 (contém 84021e6)
 ```
 
-### 1.1 Ordem de merge
+Com **merge commit** o diff de cada PR encolhe sozinho a cada merge
+aplicado, porque o ancestral comum avança. Compor **squash**, o ancestral
+comum NÃO avança (o SHA esmagado ≠ `dabe6a6`) e o diff do #10 volta a
+mostrar as mudanças do #9 — reapresentação. Por isso a ordem e o modo:
 
-Ordem: **#9 → #10 → #11 → #12**. Após merge do #11, o #12 retargeta automaticamente para `main`.
+```bash
+# pré-requisito: confirmar a pilha (todos devem responder "é ancestral")
+git merge-base --is-ancestor ec22668 dabe6a6 && echo "#9 ok"
+git merge-base --is-ancestor dabe6a6 ca48594 && echo "#10 ok"
+git merge-base --is-ancestor ca48594 84021e6 && echo "#11 ok"
+git merge-base --is-ancestor 84021e6 9952e70 && echo "#12 ok"
+
+# ordem exata, um por vez, SEM squash (--no-ff deixa o merge explícito):
+git checkout main && git merge --no-ff dabe6a6   -m "merge #9: fix(database) migrations UUID + rate-limit"
+git merge --no-ff ca48594                         -m "merge #10: fix(email) outbox estorno/status"
+git merge --no-ff 84021e6                         -m "merge #11: feat(erp) eventos persistentes + businessKey"
+git merge --no-ff 9952e70                         -m "merge #12: chore(db) pg-real + docs drift/runbook"
+git push origin main
+```
+
+**Conflito esperado** apenas ao mergear o #9 e o #10 (ambos acrescentam
+modelos ao fim de `schema.prisma`): manter os **dois** blocos — a ordem
+entre modelos é irrelevante. Não há outra divergência conhecida.
+
+### 1.2 Se a estratégia for **squash**
+
+Antes de retargetar qualquer branch dependente, confira diffs e
+ancestralidade — sem isso o PR reapresenta mudanças já em `main`:
+
+```bash
+# 1) após esmagar o #9 em main, o merge-base do #10 continua ec22668:
+git merge-base origin/fix/estorno-email-refunded main   # == ec22668 ⇒ diff mostra o #9 de novo
+
+# 2) encolher o diff do #10 trazendo main para dentro da branch (merge, não rebase):
+git checkout fix/estorno-email-refunded && git merge main
+#    repita o mesmo passo para #11 e #12 após cada squash
+
+# 3) conferir que o diff encolheu só para as mudanças próprias:
+git diff main...fix/estorno-email-refunded --name-only | wc -l
+```
+
+Se o PR for retargetado pela API (não há `gh` neste ambiente), o mesmo
+comando vira um `PATCH /pulls/<n>` com `"base":"main"` — só depois do
+passo 2 acima.
+
+### 1.3 Ordem de merge
+
+Ordem: **#9 → #10 → #11 → #12**. Após merge do #11, o #12 retargeta
+automaticamente para `main` (GitHub faz o retarget ao deletar a branch do
+#11, ou via API).
 
 ## 2. Ordem de implantação e migrações
 
@@ -189,8 +239,8 @@ fixas, não retentativa por minuto).
 
 ```bash
 export PATH="$HOME/.local/node/bin:$HOME/.local/bin:$PATH"
-cd /home/opencode/projects/wt-all/apps/web
-npm test        # 52 arquivos / 481 testes verdes (inclui concorrência em PG real)
+cd /home/opencode/projects/wt-composicao/apps/web
+npm test        # 52 arquivos / 485 testes verdes (inclui integração em PG real)
 npm run typecheck
 npm run lint    # 0 erros; 17 warnings pré-existentes de <img>
 npm run build   # build conclui; com DATABASE_URL de banco de teste → 0 erros
@@ -202,6 +252,10 @@ node packages/database/scripts/upgrade-pg-real.mjs rebuild   # 28 migrations, in
 node packages/database/scripts/upgrade-pg-real.mjs prodlike  # 4 pendentes, dados OK
 node packages/database/scripts/upgrade-pg-real.mjs legacy    # 20 pendentes, dados OK
 # (guards: modo rebuild|prodlike|legacy e host somente loopback — senão bloqueia)
+
+# integração PostgreSQL como subconjunto de testes (a linha "PG real" do §12):
+npx vitest run src/lib/__tests__/concorrencia-erp.test.ts \
+               src/lib/__tests__/integration-postgres.test.ts   # 2 arquivos / 18 testes
 ```
 
 Tudo acima também foi executado de um **checkout limpo** (git clone novo +
@@ -215,39 +269,95 @@ não estava disponível — nada acima toca em produção (só bancos
 Composição de referência montada a partir do `main` atual com os heads
 finais publicados: `d5481ee` (merge #9→#10→#11→#12 sobre `main`).
 
+**Os números abaixo são da composição (`d5481ee`), não de PR isolado.**
+Nenhuma execução própria de #9, #10 ou #11 isolados está registrada nesta
+rodada; a validação por PR foi o que cada branch publicou anteriormente.
+
 | Check | SHA da execução | Resultado |
 |-------|-----------------|-----------|
 | Suíte completa | `d5481ee` | 52 arquivos / 485 testes ✅ |
+| **Integração PostgreSQL** | `d5481ee` | **2 arquivos / 18 testes** ✅ (`concorrencia-erp` 7 — duas conexões reais; `integration-postgres` 11 — PGlite) |
 | typecheck | `d5481ee` | 0 erros ✅ |
 | lint | `d5481ee` | 0 erros / 17 warnings pré-existentes `<img>` ✅ |
 | build (com `DATABASE_URL`) | `d5481ee` | 0 erros ✅ |
 | build (sem env) | `d5481ee` | exatamente 139 avisos `Environment variable not found` / 0 erros reais ✅ |
 
+Comando da linha de PG (também em §11):
+
+```bash
+cd /home/opencode/projects/wt-d5481ee/apps/web   # worktree em detached HEAD d5481ee
+eval "$(node packages/database/scripts/pg-real.mjs env)"
+npx vitest run src/lib/__tests__/concorrencia-erp.test.ts \
+               src/lib/__tests__/integration-postgres.test.ts    # 2 arquivos / 18 testes ✅
+```
+
 Nenhuma migração reescrita: todas 5 são adições (A), zero modificações (M).
 Nenhum `node_modules` rastreado na árvore final.
 
-## 13. Atualização de branches dependentes após cada merge
+### 12.1 Igualdade de árvore: composição testada × heads publicados
 
-Após cada merge, branches dependentes precisam ser atualizadas. Se usado
-squash, confira explicitamente os diffs e a ancestralidade antes de retargetar,
-evitando reapresentar alterações já incorporadas.
+Comando que reproduz a conferência:
 
 ```bash
-# após merge do #9 em main:
-git checkout fix/estorno-email-refunded
-git rebase main          # ou git merge main se houver conflitos
-
-# após merge do #10 em main:
-git checkout feat/erp-evento-persistente
-git rebase main
-
-# após merge do #11 em main:
-git checkout chore/pg-real-docs
-git rebase main          # retarget automático via GitHub se PR aberto
+git diff d5481ee <head> --name-only -- . ':(exclude)*.md' ':(exclude)*.mjs' ':(exclude).gitignore'
 ```
 
-Se usado squash, confira a ancestralidade antes de retargetar:
+| Comparação | Diferença | Natureza |
+|---|---|---|
+| `d5481ee` × `9952e70` (`chore/pg-real-docs`, head do #12) | só `PUBLICACAO-2026-10-17.md` (61+/43−) | **documental** — é esta seção do runbook, escrita depois do teste |
+| `d5481ee` × `84021e6` (#11) | **código idêntico** (diff de código = vazio); 6 arquivos: `.gitignore`, `DRIFT-BANCO-2026-10-17.md`, `PUBLICACAO-…`, `PG-REAL.md`, `pg-real.mjs`, `upgrade-pg-real.mjs` | **documentais/infra do #12** — nenhum é código de aplicação; nada os importa (só menção em comentários do teste) |
+| `d5481ee` × `ca48594` (#10) | código do #11 + docs do #12 | esperado — a composição **contém** o #11, que o #10 não tem |
+| `d5481ee` × `dabe6a6` (#9) | código do #10 + do #11 + docs do #12 | esperado — a composição contém #10 e #11 |
+
+Conclusão: **a árvore de código da composição testada é igual à do head do
+#12** (`9952e70`), diferindo apenas no runbook; e igual à do #11 em todo o
+código de aplicação, diferindo apenas nos arquivos documentais/infra que o
+#12 acrescenta. Nenhuma diferença é de código de aplicação.
+
+Preservação por PR na composição (conferida): as 3 migrações do #9,
+`ErpEvent.id @default(dbgenerated(…))`, `RateLimit`, `EmailOutbox`+enum,
+migração `email_outbox`, `businessKey @unique`, migração
+`erp_event_business_key`, `concorrencia-erp.test.ts` e `erp-fila.test.ts`
+estão todos presentes.
+
+## 13. Atualização de branches dependentes após cada merge
+
+**Estratégia escolhida = merge commit (§1.1) → nenhuma branch precisa ser
+atualizada.** Como cada head já contém o anterior, o ancestral comum avança
+com o merge e o diff de cada PR encolhe sozinho; rebase/rework aqui só
+recriaria SHAs já publicados e invalidaria o registro do §12.
+
+Conferência pós-merge (uma linha por PR — todas devem responder `OK`):
 
 ```bash
-git merge-base --is-ancestor <sha-merged> <branch-head> && echo "OK: branch contém o merge" || echo "ATENÇÃO: branch não contém o merge"
+# após cada merge, na ordem #9 → #10 → #11 → #12:
+git merge-base --is-ancestor dabe6a6 main && echo "OK: main contém #9 (dabe6a6)"
+git merge-base --is-ancestor ca48594 main && echo "OK: main contém #10 (ca48594)"
+git merge-base --is-ancestor 84021e6 main && echo "OK: main contém #11 (84021e6)"
+git merge-base --is-ancestor 9952e70 main && echo "OK: main contém #12 (9952e70)"
+
+# e o diff de cada PR aberto deve ter encolhido para as mudanças próprias:
+git diff main...origin/fix/estorno-email-refunded --name-only | wc -l   # só #10
+git diff main...origin/feat/erp-evento-persistente --name-only | wc -l   # só #11
+git diff main...origin/chore/pg-real-docs --name-only | wc -l            # só #12
+```
+
+Retarget de base: quando o #10 fecha, o #11 passa a apontar `main`
+automaticamente (GitHub retargeta ao deletar a branch fundida); idem o #12
+após o #11. Sem `gh` neste ambiente, o retarget manual é um `PATCH` na API:
+
+```bash
+# só DEPOIS de o predecessor estar em main e o diff ter encolhido:
+# PATCH /repos/<owner>/<repo>/pulls/<n>  {"base": "main"}
+```
+
+**Se a estratégia virar squash**, os comandos acima não valem: nesse caso
+siga §1.2 — o re-sincronismo é obrigatório (`git merge main` em cada branch
+dependente) antes de qualquer retarget, senão o PR reapresenta as mudanças
+já incorporadas. Confira sempre a ancestralidade antes de retargetar:
+
+```bash
+git merge-base --is-ancestor <sha-do-merge-em-main> <branch-head> \
+  && echo "OK: branch contém o merge" \
+  || echo "ATENÇÃO: branch não contém o merge — sincronize antes de retargetar"
 ```
