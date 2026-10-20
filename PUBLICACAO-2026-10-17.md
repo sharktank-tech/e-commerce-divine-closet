@@ -53,9 +53,12 @@ git merge --no-ff "$(git rev-parse origin/chore/pg-real-docs)" \
 git push origin main
 ```
 
-**Conflito esperado** apenas ao mergear o #9 e o #10 (ambos acrescentam
-modelos ao fim de `schema.prisma`): manter os **dois** blocos — a ordem
-entre modelos é irrelevante. Não há outra divergência conhecida.
+**Conflitos**: nenhum — os 4 merges acima foram executados nesta rodada
+(composição `d5481ee`) e todos vieram **limpos**, sem resolução manual,
+justamente porque cada branch já contém o anterior. Só pode haver conflito
+se `main` receber outros commits entre um merge e o próximo: nesse caso
+resolva mantendo **os dois** blocos de `schema.prisma` (a ordem entre
+modelos é irrelevante) e repita os passos de §12.1 depois do último merge.
 
 ### 1.2 Se a estratégia for **squash**
 
