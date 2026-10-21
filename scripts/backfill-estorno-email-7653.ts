@@ -57,6 +57,82 @@ function mascararEmail(email: string): string {
   return `${local.slice(0, 1)}***@${dominio}`;
 }
 
+/**
+ * Evidência SOMENTE-LEITURA no provedor Resend (paginada, mascarada).
+ * Confirma o universo consultado e a ausência (ou presença) de mensagem
+ * correspondente; registra limitações (conta/retenção). Nunca envia.
+ */
+async function investigarResend(opts: {
+  destinatario: string;
+  assunto: string;
+  numero: string;
+}): Promise<void> {
+  const key = process.env.RESEND_API_KEY;
+  console.log("── Resend (provedor, somente leitura) ──");
+  if (!key) {
+    console.log("  RESEND_API_KEY ausente — LIMITAÇÃO: universo consultável não confirmado.");
+    return;
+  }
+  const H = { Authorization: `Bearer ${key}` };
+  try {
+    const d = await fetch("https://api.resend.com/domains", { headers: H });
+    const dj = (await d.json().catch(() => ({}))) as { data?: { name?: string }[] };
+    console.log(`  domínios da conta: ${(dj.data || []).map((x) => x?.name).join(", ") || "(sem)"}`);
+  } catch (e) {
+    console.log("  domains erro:", e instanceof Error ? e.message : e);
+  }
+
+  let cursor: string | undefined;
+  let page = 0;
+  let total = 0;
+  const all: unknown[] = [];
+  const pages: number[] = [];
+  do {
+    const u = `https://api.resend.com/emails?limit=100${cursor ? `&after=${cursor}` : ""}`;
+    const r = await fetch(u, { headers: H });
+    const j = (await r.json().catch(() => ({}))) as {
+      data?: Record<string, unknown>[];
+      has_more?: boolean;
+      next_cursor?: string;
+    };
+    page += 1;
+    const arr = Array.isArray(j.data) ? j.data : [];
+    pages.push(arr.length);
+    total += arr.length;
+    all.push(...arr);
+    cursor = j.has_more ? (j.next_cursor || (arr[arr.length - 1]?.id as string)) : undefined;
+    if (page > 50) break;
+  } while (cursor);
+
+  const ts = all
+    .map((m) => new Date(String((m as Record<string, unknown>).created_at)).getTime())
+    .filter((n) => !Number.isNaN(n));
+  const min = ts.length ? new Date(Math.min(...ts)).toISOString() : "(sem)";
+  const max = ts.length ? new Date(Math.max(...ts)).toISOString() : "(sem)";
+  console.log(`  pages=${page} pageSize=${JSON.stringify(pages)} total=${total}`);
+  console.log(`  período coberto: ${min} .. ${max}`);
+
+  const alvo = opts.destinatario.toLowerCase();
+  const numeroRegex = new RegExp(opts.numero.replace(/[.*+?^${}()|[\]\\]/g, ""), "i");
+  const corrNum = all.filter((m) => numeroRegex.test(String((m as Record<string, unknown>).subject || "")));
+  const corrTo = all.filter((m) => {
+    const to = (m as Record<string, unknown>).to;
+    const arr = Array.isArray(to) ? to : [to];
+    return arr.some((t) => String(t || "").toLowerCase() === alvo);
+  });
+  console.log(`  correlação assunto contém "${opts.numero}": ${corrNum.length}`);
+  console.log(`  correlação destinatário == esperado (${mascararEmail(opts.destinatario)}): ${corrTo.length}`);
+  const instantes = [Date.parse("2026-10-17T00:00:00Z"), Date.parse("2026-10-18T23:59:59Z")];
+  const janela = all.filter((m) => {
+    const t = new Date(String((m as Record<string, unknown>).created_at)).getTime();
+    return t >= instantes[0] && t <= instantes[1];
+  });
+  console.log(`  mensagens na janela do estorno (2026-10-17..18): ${janela.length}`);
+  console.log(
+    `  retenção cobre o instante do estorno? ${ts.length && Math.min(...ts) <= Date.parse("2026-10-17T18:34:54.611Z") ? "SIM" : "NÃO — LIMITAÇÃO"}`
+  );
+}
+
 async function main() {
   loadEnv();
   const aplicar = process.argv.includes("--aplicar");
@@ -121,6 +197,36 @@ async function main() {
       `  payload:    text=${mail.text.length} chars, html=${mail.html?.length ?? 0} chars`
     );
     console.log(`  dedupeKey:  ${dedupeKey}`);
+    console.log("────────────────────────────────────────");
+
+    // ── Evidência complementar (somente leitura) ──────────────────────────
+    const outboxRows = (await prisma.emailOutbox.findMany({
+      where: { OR: [{ orderId: pedido.id }, { dedupeKey }] },
+      select: {
+        dedupeKey: true, status: true, attempt: true,
+        sentAt: true, createdAt: true, recipient: true,
+      },
+      orderBy: { createdAt: "asc" },
+    })) as {
+      dedupeKey: string; status: string; attempt: number;
+      sentAt: Date | null; createdAt: Date; recipient: string;
+    }[];
+    console.log("── outbox / registros locais de envio (somente leitura) ──");
+    console.log(`  linhas p/ pedido ou dedupeKey: ${outboxRows.length}`);
+    for (const r of outboxRows) {
+      console.log(
+        `  - ${r.dedupeKey} | status=${r.status} attempt=${r.attempt} ` +
+          `sentAt=${r.sentAt?.toISOString() ?? "(sem)"} to=${mascararEmail(r.recipient)}`
+      );
+    }
+    if (outboxRows.length === 0) {
+      console.log("  → nenhum registro local: o e-mail REFUNDED nunca foi enfileirado.");
+    }
+    await investigarResend({
+      destinatario: mail.to,
+      assunto: mail.subject,
+      numero: pedido.number,
+    });
     console.log("────────────────────────────────────────");
 
     if (!aplicar) {
