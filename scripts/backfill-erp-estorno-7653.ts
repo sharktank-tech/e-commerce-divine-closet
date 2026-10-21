@@ -208,8 +208,18 @@ async function main() {
 
     console.log(
       "Entrega (NÃO feita aqui): configurar ERP_WEBHOOK_URL/SECRET em produção " +
-        "e deixar o dreno rodar — cron /api/cron/carrinho-abandonado (09h UTC) " +
-        "ou acionamento manual via POST /api/admin/erp (sessão admin)."
+        "e deixar o dreno rodar — cron /api/cron/carrinho-abandonado " +
+        "(12:00 UTC = 09h local) — ou acionamento manual via " +
+        "POST /api/admin/erp?acao=reprocessar (sessão admin). Sem URL+secret " +
+        "a linha fica guardada: fila com linhas PENDING não significa " +
+        "transporte ativo, e fila vazia não significa transporte desativado."
+    );
+    console.log(
+      "Atenção: o fallback automático (NEXT_PUBLIC_APP_URL + /erp/hooks) foi " +
+        "REMOVIDO de config() — ERP_WEBHOOK_URL precisa ser uma URL absoluta " +
+        "válida apontando para um receptor real antes de qualquer entrega " +
+        "(sem URL válida ou sem secret, config() = null e nada é enviado; a " +
+        "linha fica guardada)."
     );
   } finally {
     await prisma.$disconnect();

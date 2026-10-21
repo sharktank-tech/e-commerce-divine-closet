@@ -22,7 +22,12 @@
  * - idempotente: dedupeKey `status:{orderId}:REFUNDED` única no outbox
  *   (segunda execução → P2002, reporta a linha existente);
  * - só enfileira se o pedido realmente está REFUNDED (status e pagamento);
- * - sem envio aqui: SENT só é marcado quando o provedor aceitar, no cron.
+ * - sem envio aqui: o script só grava PENDING. O dreno (cron) é quem tenta
+ *   enviar e só marca SENT quando `sendEmail` resolve com um driver real
+ *   (smtp/resend). Com `EMAIL_DRIVER=mock` o outbox NÃO marca SENT (a linha
+ *   fica PENDING até um driver real entregar). Fila vazia não comprova
+ *   transporte ativo: isso depende de `EMAIL_DRIVER`+credenciais, não do
+ *   outbox.
  *
  * Obs.: DC-20261017-7653 é de cliente LOGADO (userId) → o link de
  * acompanhamento é estático (/conta?tab=pedidos) e a montagem NÃO cria token

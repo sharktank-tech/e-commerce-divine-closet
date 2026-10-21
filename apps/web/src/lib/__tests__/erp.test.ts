@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { assinarEvento, notificarErp, verificarAssinaturaErp } from "@/lib/erp";
+import { assinarEvento, erpConfigurado, notificarErp, verificarAssinaturaErp } from "@/lib/erp";
 
 // Fila ERP em memória — enough p/ enfileirar → entregar → atualizar.
 type Linha = {
@@ -93,6 +93,33 @@ describe("notificarErp", () => {
     // fila é fonte de verdade mesmo com ERP desativado (histórico intacto;
     // a entrega acontece quando houver URL+segredo, via dreno)
     expect(erpEventMock.createMany).toHaveBeenCalledTimes(1);
+    expect([...fila.values()][0].status).toBe("PENDING");
+  });
+
+  it("fallback /erp/hooks REMOVIDO: só NEXT_PUBLIC_APP_URL + segredo não configura (persiste, sem envio)", async () => {
+    delete process.env.ERP_WEBHOOK_URL;
+    process.env.ERP_WEBHOOK_SECRET = "s3";
+    process.env.NEXT_PUBLIC_APP_URL = "https://loja.com.br";
+    const fetchSpy = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(erpConfigurado()).toBe(false);
+    expect(await notificarErp("pedido_criado", { numero: "1" })).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // evento persistido mesmo assim (fila guarda o histórico)
+    expect(erpEventMock.createMany).toHaveBeenCalledTimes(1);
+    expect([...fila.values()][0].status).toBe("PENDING");
+  });
+
+  it("URL não-absoluta (relativa/lixo) é tratada como não configurada (persiste, sem envio)", async () => {
+    process.env.ERP_WEBHOOK_URL = "so/caminho/relativo";
+    process.env.ERP_WEBHOOK_SECRET = "s3";
+    const fetchSpy = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(erpConfigurado()).toBe(false);
+    expect(await notificarErp("pedido_pago", { numero: "2" })).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect([...fila.values()][0].status).toBe("PENDING");
   });
 

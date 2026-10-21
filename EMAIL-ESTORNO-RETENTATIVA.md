@@ -154,7 +154,14 @@ npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-estorno-email-7653.ts
   → link estático `/conta`, o dry-run é 100% leitura, sem token criado);
 - idempotente pela `dedupeKey` (segunda execução reporta a linha existente);
 - só enfileira com pedido realmente `REFUNDED`;
-- **o envio só acontece no cron pós-deploy** (o script nunca envia).
+- **o script nunca envia**: ele só grava `PENDING` e não chama
+  `processarEmailOutbox`. Nos fluxos de negócio a tentativa é IMEDIATA
+  (pós-commit); no backfill a próxima tentativa é o dreno do cron
+  (12:00/21:00 UTC). Fila vazia não indica transporte desativado e
+  `CRON_SECRET` protege acesso à rota, não liga/desliga o envio. Com
+  `EMAIL_DRIVER=mock` o outbox **não** marca `SENT` (a linha fica
+  `PENDING` até um driver real entregar) — logo `SENT` só ocorre com
+  envio real aceito por um provedor.
 
 ## 5. Pendências operacionais (não executadas nesta rodada)
 

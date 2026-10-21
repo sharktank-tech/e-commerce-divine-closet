@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { sendEmail, type SendEmailInput } from "@/lib/email";
+import { sendEmail, emailDriverAtual, type SendEmailInput } from "@/lib/email";
 import { montarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 
 // Outbox de e-mail transacional: persiste o payload renderizado ANTES de
@@ -17,8 +17,19 @@ import { montarEmailStatusPedido } from "@/lib/pedidos/notificar-status";
 //   esgotadas); SÓ PENDING volta ao dreno.
 //
 // A tentativa imediata roda logo após a enfileiração (fire-and-forget, sem
-// travar quem chama); o cron diário (09h via carrinho-abandonado + 18h via
-// /api/cron/emails) drena as vencidas.
+// travar quem chama); o dreno roda nos crons diários — 12:00 UTC (09h local,
+// em /api/cron/carrinho-abandonado) e 21:00 UTC (18h local, em
+// /api/cron/emails) — e pega as vencidas.
+//
+// Interpretação operacional (não confundir fila com transporte):
+// - fila VAZIA não significa transporte desativado: o outbox só recebe
+//   linhas quando há ocorrência a notificar; o transporte é EMAIL_DRIVER.
+// - CRON_SECRET protege o ACESSO às rotas cron; não é chave de
+//   desligamento do envio e sua presença não comprova transporte ativo.
+// - EMAIL_DRIVER=mock NÃO envia de verdade → a linha NUNCA vira SENT nesse
+//   modo: fica PENDING intacta (sem gastar tentativa) até um driver real
+//   (smtp/resend) entregar a mensagem já renderizada. Logo, SENT só ocorre
+//   com envio real aceito por um provedor.
 
 export const EMAIL_OUTBOX_MAX_TENTATIVAS = 6;
 /** Limite de linhas por rodada de dreno (mesma ordem de grandeza da fila ERP). */
@@ -164,6 +175,10 @@ export async function processarEmailOutbox(
   if (!row) return "PULADO";
   if (row.status !== "PENDING") return "PULADO";
   if (row.nextAttemptAt.getTime() > agora.getTime()) return "PULADO";
+  // EMAIL_DRIVER=mock não envia de verdade → a linha NUNCA vira SENT aqui.
+  // Mantém PENDING intacta (sem consumir tentativa) para que um driver real
+  // (smtp/resend) posteriormente entregue a mensagem já renderizada.
+  if (emailDriverAtual() === "mock") return "PULADO";
 
   const payload: SendEmailInput = {
     to: row.recipient,

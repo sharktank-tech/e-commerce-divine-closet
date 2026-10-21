@@ -147,4 +147,49 @@ npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-erp-estorno-7653.ts -
    no Vercel (item do PR #10) e configurar `ERP_WEBHOOK_URL` +
    `ERP_WEBHOOK_SECRET` quando a integração for ativada.
 4. Só quando autorizado: `--aplicar` dos dois backfills do 7653
-   (e-mail e evento ERP) e acompanhamento do dreno.
+   (e-mail e evento ERP) e acompanhamento do dreno. Dry-runs executados em
+   2026-10-20 (somente leitura; nenhum `--aplicar`).
+
+## 8. Receptor esperado e ativação gradual
+
+**Fallback removido (correção de comportamento)**: `config()` **exige**
+`ERP_WEBHOOK_URL` explícita (absoluta http/https) + `ERP_WEBHOOK_SECRET`.
+O fallback automático `NEXT_PUBLIC_APP_URL + "/erp/hooks"` foi **removido** —
+essa rota não existe (`/erp/hooks` → 404 em produção, verificado em
+2026-10-20) e faria "segredo sem URL" virar entrega a destino morto
+(`FAILED`/`DEAD`). Sem URL válida ou sem segredo, `config()` devolve
+`null`: **nenhuma entrega acontece**, mas o evento é **persistido**
+(fila guarda o histórico; `enfileirarEvento` não depende de configuração).
+
+**Contrato do envelope implementado** (`apps/web/src/lib/erp.ts`):
+
+| Item | Valor |
+|---|---|
+| Método/rota | `POST` na URL de `ERP_WEBHOOK_URL` |
+| Autenticação | header `x-erp-assinatura: v1=<hex>` = HMAC-SHA256(`${ts}.${corpo}`, `ERP_WEBHOOK_SECRET`) |
+| Timestamp | header `x-erp-ts` (ms) + campo `ocorrido_em` (ISO) |
+| Tipo | header `x-erp-evento` e campo `tipo` |
+| Versão | campo `versao: 1` (ignorado por receptores antigos) |
+| Identificador | campo `event_id` (uuid; PK da fila) |
+| Deduplicação | `businessKey` única (ex.: `pedido_estornado:{orderId}`) + `event_id` |
+| Resposta esperada | `2xx` = `DELIVERED`; `4xx` = `FAILED` (rejeição determinística); `408`/`429`/`5xx`/rede = retentativa `PENDING` |
+| Tempo/retentativas | timeout 10 s, 3 tentativas internas, depois backoff `min(2^n,60)` min, máx. 5 → `DEAD` |
+
+**Dados necessários do sistema receptor** (a configurar — não inventados
+aqui): URL real do endpoint, segredo compartilhado (≥32 bytes), formato
+esperado do `dados` por tipo de evento, e confirmação de que aceita o
+header `x-erp-assinatura` no formato `v1=`.
+
+**Plano de ativação gradual** (não executado):
+
+| Fase | Ação | Critério de saída |
+|---|---|---|
+| 0 | receptor de teste (ambiente de homologação do ERP) + `ERP_WEBHOOK_URL`/`SECRET` apontando para ele | receptor recebe e valida assinatura |
+| 1 | evento sintético sem dados pessoais (ex.: `tipo=produto_atualizado` com payload fake) via script/fila de teste | `DELIVERED` com `lastStatusCode=200` |
+| 2 | persistência histórica do 7653 (`--aplicar` do backfill ERP, **sem entrega** enquanto o receptor for de teste) | linha `PENDING` com `businessKey` correta |
+| 3 | dreno controlado (cron 12:00 UTC ou `POST /api/admin/erp?acao=reprocessar` com sessão admin) | evento entregue, fila limpa |
+| 4 | liberação dos fluxos reais (já ativos por código: `notificarErp()` persiste e entrega com configuração) | monitorar `ErpEvent` nas primeiras 24 h |
+
+Separação obrigatória: **persistência histórica** (grava `ErpEvent`, sem
+fetch) ≠ **entrega externa** (configuração + dreno). Fazer uma não faz a
+outra.

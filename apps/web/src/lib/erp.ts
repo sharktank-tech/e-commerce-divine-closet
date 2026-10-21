@@ -2,7 +2,9 @@ import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
 
 // Webhooks loja → ERP próprio (análise de vendas). Mesmo domínio, base
-// configurável (padrão: <APP_URL>/erp/hooks).
+// OBRIGATÓRIA e explícita (ERP_WEBHOOK_URL) — o fallback <APP_URL>/erp/hooks
+// foi REMOVIDO: essa rota não existe (404) e faria "segredo sem URL" virar
+// entrega a destino morto (FAILED/DEAD).
 //
 // Confiabilidade (fila persistente): cada evento é GRAVADO em ErpEvent
 // (PK = event_id → idempotente; businessKey = ocorrência de negócio, ex.:
@@ -48,14 +50,24 @@ type EventoLinha = {
 };
 
 function config(): { url: string; segredo: string } | null {
-  const base =
-    process.env.ERP_WEBHOOK_URL ||
-    (process.env.NEXT_PUBLIC_APP_URL
-      ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/erp/hooks`
-      : "");
-  const segredo = process.env.ERP_WEBHOOK_SECRET || "";
-  if (!base || !segredo) return null;
-  return { url: base, segredo };
+  const url = (process.env.ERP_WEBHOOK_URL || "").trim();
+  const segredo = (process.env.ERP_WEBHOOK_SECRET || "").trim();
+  // Sem URL explícita ou sem segredo: NADA é enviado (fila intacta —
+  // configuração ausente é estado normal, não perda de evento). O fallback
+  // implícito para <APP_URL>/erp/hooks foi removido: exige-se URL válida.
+  if (!url || !segredo) return null;
+  if (!ehUrlErpValida(url)) return null;
+  return { url, segredo };
+}
+
+/** URL de destino precisa ser absoluta http(s) — rejeita caminho relativo/lixo. */
+function ehUrlErpValida(v: string): boolean {
+  try {
+    const u = new URL(v);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export function assinarEvento(
