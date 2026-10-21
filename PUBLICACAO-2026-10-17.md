@@ -6,9 +6,9 @@
 > Merge commits, nesta ordem: #9 `aee5f87`, #10 `a99c71f`, #11 `45cd16d`,
 > #12 `da3ba94` (§1.1).
 > Composição de referência validada: `d5481ee` (merge #9→#10→#11→#12 sobre
-> `main` `ec22668`). **Referência de código aprovada para esta publicação**:
-> `9e878f9` (= `9e878f9f446760f6d99c29e51c71ce8bcc638e3d`, head do #12 no
-> instante das correções pré-publicação).
+> `main` `ec22668`). **Referência histórica pré-publicação**: `9e878f9`
+> (= `9e878f9f446760f6d99c29e51c71ce8bcc638e3d`, head do #12 no instante das
+> correções pré-publicação — hoje superada; a publicação usou `4455083`→`da3ba94`).
 > O tip desta branch **não é fixado aqui dentro** (auto-referência); a âncora
 > é o merge commit do #12 (`da3ba94`). Qualquer edição posterior deste
 > arquivo deve conter **apenas** `PUBLICACAO-2026-10-17.md` em relação a essa
@@ -619,11 +619,16 @@ git merge-base --is-ancestor 84021e6 origin/main && echo "OK: main contém #11 (
 git merge-base --is-ancestor 44550834e234c48e234d815746badde6cb265910 origin/main \
   && echo "OK: main contém #12 (4455083 = merge commit da3ba94)"
 
-# e o diff de cada PR aberto deve ter encolhido para as mudanças próprias:
-# (os 4 PRs estão fechados/merged; o comando continua válido para reabrir)
-git diff origin/main...origin/fix/estorno-email-refunded --name-only | wc -l   # só #10
-git diff origin/main...origin/feat/erp-evento-persistente --name-only | wc -l   # só #11
-git diff origin/main...origin/chore/pg-real-docs --name-only | wc -l            # só #12
+# diff de cada PR aberto deve ter encolhido para as mudanças próprias.
+# IMPORTANTE: este teste só faz sentido ANTES de mesclar cada PR. Depois que
+# a branch vira ancestral de main (merge concluído), o three-dot diff
+# main...branch retorna 0 (vazio) — não é "só as mudanças próprias", é vazio.
+# Por isso os 3 comandos abaixo retornam 0 hoje (todos os 4 já em main);
+# o teste real pós-merge é a ancestry acima + a igualdade de árvore (§12.1).
+# Rode cada linha logo APÓS retargetar aquele PR e ANTES de mergear:
+git diff origin/main...origin/fix/estorno-email-refunded --name-only | wc -l   # p/ #10, antes do merge
+git diff origin/main...origin/feat/erp-evento-persistente --name-only | wc -l   # p/ #11, antes do merge
+git diff origin/main...origin/chore/pg-real-docs --name-only | wc -l            # p/ #12, antes do merge
 
 # confirmação final registrada (20/10/2026):
 git rev-parse origin/main    # da3ba946e47bd250f467552b5c75932f1fad3855
