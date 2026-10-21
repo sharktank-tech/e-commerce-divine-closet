@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { assinarEvento, erpConfigurado, notificarErp, verificarAssinaturaErp } from "@/lib/erp";
+import {
+  assinarEvento,
+  erpConfigurado,
+  motivoConfigInvalida,
+  notificarErp,
+  verificarAssinaturaErp,
+} from "@/lib/erp";
 
 // Fila ERP em memória — enough p/ enfileirar → entregar → atualizar.
 type Linha = {
@@ -167,5 +173,71 @@ describe("notificarErp", () => {
     expect(linha.attempt).toBe(1);
     expect(linha.lastStatusCode).toBe(500);
     expect((linha.nextAttemptAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("configuração ERP — HTTPS por ambiente", () => {
+  beforeEach(() => {
+    fila.clear();
+    vi.clearAllMocks();
+    ligarFila();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    for (const k of ["ERP_WEBHOOK_URL", "ERP_WEBHOOK_SECRET"]) delete process.env[k];
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+
+  it("produção: HTTPS absoluto é válido (configurado=true)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.ERP_WEBHOOK_URL = "https://erp.local/hooks";
+    process.env.ERP_WEBHOOK_SECRET = "s3";
+    expect(motivoConfigInvalida()).toBeNull();
+    expect(erpConfigurado()).toBe(true);
+  });
+
+  it("produção: HTTP é RECUSADO — sem fetch, evento persiste, motivo sanitizado", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.ERP_WEBHOOK_URL = "http://erp.local/hooks";
+    process.env.ERP_WEBHOOK_SECRET = "s3";
+    expect(motivoConfigInvalida()).toBe(
+      "ERP_WEBHOOK_URL inválida (em produção exige HTTPS absoluto)"
+    );
+    expect(erpConfigurado()).toBe(false);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await notificarErp("pedido_pago", { numero: "1" })).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(erpEventMock.createMany).toHaveBeenCalledTimes(1);
+    expect([...fila.values()][0].status).toBe("PENDING");
+  });
+
+  it("dev/teste: HTTP é permitido (configurado=true)", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    process.env.ERP_WEBHOOK_URL = "http://erp.local/hooks";
+    process.env.ERP_WEBHOOK_SECRET = "s3";
+    expect(motivoConfigInvalida()).toBeNull();
+    expect(erpConfigurado()).toBe(true);
+  });
+
+  it("URL/secret ausentes → motivo sanitizado, sem vazar valores", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    delete process.env.ERP_WEBHOOK_URL;
+    delete process.env.ERP_WEBHOOK_SECRET;
+    expect(motivoConfigInvalida()).toBe("ausente ERP_WEBHOOK_URL");
+    process.env.ERP_WEBHOOK_URL = "https://segredo-host-interno.example";
+    expect(motivoConfigInvalida()).toBe("ausente ERP_WEBHOOK_SECRET");
+    // diagnosticos nunca contem valores de URL/segredo
+    expect(motivoConfigInvalida()).not.toContain("segredo-host-interno");
+  });
+
+  it("esquema não-http(s) (ex.: ftp:) é recusado em qualquer ambiente", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    process.env.ERP_WEBHOOK_URL = "ftp://erp.local/hooks";
+    process.env.ERP_WEBHOOK_SECRET = "s3";
+    expect(motivoConfigInvalida()).toBe("ERP_WEBHOOK_URL inválida (exige http(s) absoluto)");
+    expect(erpConfigurado()).toBe(false);
   });
 });

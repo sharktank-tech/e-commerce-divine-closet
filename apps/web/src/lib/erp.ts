@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 // Webhooks loja → ERP próprio (análise de vendas). Mesmo domínio, base
 // OBRIGATÓRIA e explícita (ERP_WEBHOOK_URL) — o fallback <APP_URL>/erp/hooks
 // foi REMOVIDO: essa rota não existe (404) e faria "segredo sem URL" virar
-// entrega a destino morto (FAILED/DEAD).
+// entrega a destino morto (FAILED/DEAD). A URL precisa ser absoluta e, em
+// produção (NODE_ENV=production), usar HTTPS — HTTP só é aceito em dev/teste.
 //
 // Confiabilidade (fila persistente): cada evento é GRAVADO em ErpEvent
 // (PK = event_id → idempotente; businessKey = ocorrência de negócio, ex.:
@@ -49,22 +50,50 @@ type EventoLinha = {
   createdAt: Date;
 };
 
-function config(): { url: string; segredo: string } | null {
-  const url = (process.env.ERP_WEBHOOK_URL || "").trim();
-  const segredo = (process.env.ERP_WEBHOOK_SECRET || "").trim();
-  // Sem URL explícita ou sem segredo: NADA é enviado (fila intacta —
-  // configuração ausente é estado normal, não perda de evento). O fallback
-  // implícito para <APP_URL>/erp/hooks foi removido: exige-se URL válida.
-  if (!url || !segredo) return null;
-  if (!ehUrlErpValida(url)) return null;
-  return { url, segredo };
+/** True em produção (NODE_ENV=production) — HTTP só é permitido fora dela. */
+function ehAmbienteProducao(): boolean {
+  return process.env.NODE_ENV === "production";
 }
 
-/** URL de destino precisa ser absoluta http(s) — rejeita caminho relativo/lixo. */
+function config(): { url: string; segredo: string } | null {
+  const motivo = motivoConfigInvalida();
+  if (motivo) {
+    avisoConfigInvalida(motivo);
+    return null;
+  }
+  return {
+    url: (process.env.ERP_WEBHOOK_URL || "").trim(),
+    segredo: (process.env.ERP_WEBHOOK_SECRET || "").trim(),
+  };
+}
+
+/**
+ * Motivo sanitizado (NUNCA contém valores de URL/segredo) pelo qual a
+ * configuração é inválida ou incompleta; null = configuração válida.
+ */
+export function motivoConfigInvalida(): string | null {
+  const url = (process.env.ERP_WEBHOOK_URL || "").trim();
+  const segredo = (process.env.ERP_WEBHOOK_SECRET || "").trim();
+  if (!url) return "ausente ERP_WEBHOOK_URL";
+  if (!segredo) return "ausente ERP_WEBHOOK_SECRET";
+  if (!ehUrlErpValida(url)) {
+    return ehAmbienteProducao()
+      ? "ERP_WEBHOOK_URL inválida (em produção exige HTTPS absoluto)"
+      : "ERP_WEBHOOK_URL inválida (exige http(s) absoluto)";
+  }
+  return null;
+}
+
+/**
+ * URL de destino: absoluta http(s); em produção exige HTTPS. Rejeita caminho
+ * relativo, outros esquemas e HTTP em produção (transporte deve ser cifrado).
+ */
 function ehUrlErpValida(v: string): boolean {
   try {
     const u = new URL(v);
-    return u.protocol === "http:" || u.protocol === "https:";
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    if (ehAmbienteProducao() && u.protocol !== "https:") return false;
+    return true;
   } catch {
     return false;
   }
@@ -140,11 +169,16 @@ export function erpConfigurado(): boolean {
 
 let avisoConfig = false;
 
-function avisoSemConfig() {
+/**
+ * Diagnóstico SANITIZADO (um motivo genérico, sem valores de URL/segredo)
+ * emitido UMA vez quando a configuração é inválida/incompleta: sem fetch,
+ * eventos permanecem na fila, entrega aguarda configuração válida.
+ */
+function avisoConfigInvalida(motivo: string) {
   if (!avisoConfig) {
     avisoConfig = true;
     console.warn(
-      "[erp:webhook] ERP não configurado (ERP_WEBHOOK_URL/SECRET) — eventos são persistidos; a entrega aguarda configuração"
+      `[erp:webhook] ERP não configurado (${motivo}) — sem fetch; eventos persistidos; entrega aguarda configuração válida`
     );
   }
 }
@@ -339,10 +373,9 @@ export async function notificarErp(
     return false;
   }
   if (!id) return false;
-  if (!config()) {
-    avisoSemConfig();
-    return false;
-  }
+  // config() inválida já emite o diagnóstico sanitizado (uma vez) e retorna
+  // null — sem fetch; o evento segue persistido na fila.
+  if (!config()) return false;
   try {
     return await entregarEvento(id);
   } catch (err) {

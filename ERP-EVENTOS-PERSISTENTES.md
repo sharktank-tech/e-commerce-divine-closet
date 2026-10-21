@@ -153,13 +153,21 @@ npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-erp-estorno-7653.ts -
 ## 8. Receptor esperado e ativação gradual
 
 **Fallback removido (correção de comportamento)**: `config()` **exige**
-`ERP_WEBHOOK_URL` explícita (absoluta http/https) + `ERP_WEBHOOK_SECRET`.
-O fallback automático `NEXT_PUBLIC_APP_URL + "/erp/hooks"` foi **removido** —
-essa rota não existe (`/erp/hooks` → 404 em produção, verificado em
-2026-10-20) e faria "segredo sem URL" virar entrega a destino morto
-(`FAILED`/`DEAD`). Sem URL válida ou sem segredo, `config()` devolve
-`null`: **nenhuma entrega acontece**, mas o evento é **persistido**
-(fila guarda o histórico; `enfileirarEvento` não depende de configuração).
+`ERP_WEBHOOK_URL` explícita + `ERP_WEBHOOK_SECRET`. O fallback automático
+`NEXT_PUBLIC_APP_URL + "/erp/hooks"` foi **removido** — essa rota não existe
+(`/erp/hooks` → 404 em produção, verificado em 2026-10-20) e faria "segredo
+sem URL" virar entrega a destino morto (`FAILED`/`DEAD`).
+
+**HTTPS obrigatório em produção**: a URL precisa ser **absoluta** e, quando
+`NODE_ENV=production`, usar **HTTPS** (`ehUrlErpValida`). HTTP é aceito apenas
+em dev/teste (receptor local de homologação). Configuração inválida ou
+incompleta (URL ausente/não-absoluta/HTTP em produção, ou secret ausente)
+faz `config()` devolver `null` **sem `fetch`**, **preserva** os eventos
+pendentes na fila e emite **diagnóstico sanitizado** (um motivo genérico, sem
+valores de URL/segredo — `motivoConfigInvalida()`). Sem URL válida ou sem
+segredo, `config()` = `null`: **nenhuma entrega acontece**, mas o evento é
+**persistido** (fila guarda o histórico; `enfileirarEvento` não depende de
+configuração).
 
 **Contrato do envelope implementado** (`apps/web/src/lib/erp.ts`):
 
