@@ -154,16 +154,26 @@ npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-estorno-email-7653.ts
   → link estático `/conta`, o dry-run é 100% leitura, sem token criado);
 - idempotente pela `dedupeKey` (segunda execução reporta a linha existente);
 - só enfileira com pedido realmente `REFUNDED`;
-- **o envio só acontece no cron pós-deploy** (o script nunca envia).
+- **o script nunca envia**: ele só grava `PENDING` e não chama
+  `processarEmailOutbox`. Nos fluxos de negócio a tentativa é IMEDIATA
+  (pós-commit); no backfill a próxima tentativa é o dreno do cron
+  (12:00/21:00 UTC). Fila vazia não indica transporte desativado, `SENT`
+  não comprova entrega real (com `EMAIL_DRIVER=mock` vira `SENT` sem
+  provedor) e `CRON_SECRET` protege acesso à rota, não liga/desliga o
+  envio.
 
 ## 5. Pendências operacionais (não executadas nesta rodada)
 
-1. Deploy desta branch → `prisma migrate deploy` aplica
-   `20261017210000_email_outbox` (nada de alteração manual no banco).
-2. Confirmar no painel Vercel: `EMAIL_DRIVER=resend`, `RESEND_API_KEY`,
-   `CRON_SECRET` presentes.
+1. ~~Deploy + `prisma migrate deploy`~~ — **CONCLUÍDO em 2026-10-20**
+   (migração `20261017210000_email_outbox` aplicada às 14:43 UTC; PR #10
+   mesclado em `a99c71f`, deploy de produção concluído).
+2. Confirmar no painel Vercel do deployment ativo: `EMAIL_DRIVER=resend`,
+   `RESEND_API_KEY`, `CRON_SECRET` presentes. **Pendente — não verificável
+   sem credencial do painel**; o `401` público das rotas cron não serve de
+   evidência (§5E do PUBLICACAO).
 3. Executar (só quando autorizado) o backfill do 7653 e acompanhar a linha
-   `PENDING → SENT` no outbox.
+   `PENDING → SENT` no outbox — e, se o driver for `mock`, considerar que
+   `SENT` não significa mensagem entregue.
 4. Eventos ERP ausentes do 7653 (`pedido_estornado` nunca persistido) —
-   tratados no PR dedicado de fila ERP (tarefa seguinte), com procedimento
-   de reconciliação equivalente (não executado aqui).
+   ver ERP-EVENTOS-PERSISTENTES.md; dry-run do backfill ERP executado em
+   2026-10-20 (somente leitura).

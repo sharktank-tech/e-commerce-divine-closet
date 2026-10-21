@@ -12,8 +12,7 @@
  *   npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-estorno-email-7653.ts
  *
  *   # enfileira a linha PENDING no outbox (única gravação). O ENVIO acontece
- *   # DEPOIS do deploy, pelo cron (/api/cron/emails ou as janelas de 09h/18h)
- *   # — este script NUNCA envia e-mail:
+ *   # DEPOIS, na próxima janela de dreno — este script NUNCA envia e-mail:
  *   npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-estorno-email-7653.ts --aplicar
  *
  * Garantias:
@@ -22,7 +21,11 @@
  * - idempotente: dedupeKey `status:{orderId}:REFUNDED` única no outbox
  *   (segunda execução → P2002, reporta a linha existente);
  * - só enfileira se o pedido realmente está REFUNDED (status e pagamento);
- * - sem envio aqui: SENT só é marcado quando o provedor aceitar, no cron.
+ * - sem envio aqui: o script só grava PENDING. O dreno (cron) é quem tenta
+ *   enviar e só marca SENT quando `sendEmail` resolve — cuidado: com
+ *   `EMAIL_DRIVER=mock` o envio resolve SEM provedor e a linha vira SENT
+ *   sem mensagem real. Fila vazia ou linha SENT não comprovam transporte
+ *   ativo: isso depende de `EMAIL_DRIVER`+credenciais, não do outbox.
  *
  * Obs.: DC-20261017-7653 é de cliente LOGADO (userId) → o link de
  * acompanhamento é estático (/conta?tab=pedidos) e a montagem NÃO cria token
@@ -121,7 +124,8 @@ async function main() {
     if (!aplicar) {
       console.log(
         "[dry-run] NENHUMA gravação. Para enfileirar, reexecute com --aplicar " +
-          "(após autorização; o envio só ocorre no cron pós-deploy)."
+          "(após autorização). Enfileirar NÃO envia: o script não chama " +
+          "processarEmailOutbox — só o dreno (cron) tenta enviar."
       );
       return;
     }
@@ -156,9 +160,14 @@ async function main() {
     }
 
     console.log(
-      "Próximo passo: após o deploy da migration, o cron /api/cron/emails " +
-        "(18h UTC, janelas de 09h/18h) drena e envia — ou dispare manualmente: " +
-        "curl -H \"Authorization: Bearer $CRON_SECRET\" https://<app>/api/cron/emails"
+      "Próximo passo (não executado aqui): o dreno tenta enviar na próxima " +
+        "janela — 12:00 UTC (09h local, via /api/cron/carrinho-abandonado) " +
+        "ou 21:00 UTC (18h local, via /api/cron/emails). Disparo manual do " +
+        "dreno: curl -H \"Authorization: Bearer $CRON_SECRET\" " +
+        "https://<app>/api/cron/emails — atenção: isso ENVIA a mensagem " +
+        "na hora. O CRON_SECRET só protege o acesso à rota; não é chave de " +
+        "desligamento do transporte e sua presença não comprova que " +
+        "`EMAIL_DRIVER`+credenciais estão configurados."
     );
   } finally {
     await prisma.$disconnect();

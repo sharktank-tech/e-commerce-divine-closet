@@ -138,13 +138,59 @@ npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-erp-estorno-7653.ts -
 
 ## 7. Pendências operacionais (não executadas nesta rodada)
 
-1. **Ordem de merge**: PR #9 (drift/migrações) → PR #10 (e-mail
-   estorno) → este PR (base = `fix/estorno-email-refunded`).
-2. Deploy → `prisma migrate deploy` aplica
-   `20261017210000_email_outbox` **e**
-   `20261017220000_erp_event_business_key`.
-3. Confirmar `EMAIL_DRIVER=resend` + `RESEND_API_KEY` + `CRON_SECRET`
-   no Vercel (item do PR #10) e configurar `ERP_WEBHOOK_URL` +
-   `ERP_WEBHOOK_SECRET` quando a integração for ativada.
+1. ~~Ordem de merge + deploy + migrações~~ — **CONCLUÍDO em 2026-10-20**
+   (#9→#10→#11→#12; `20261017210000_email_outbox` e
+   `20261017220000_erp_event_business_key` aplicadas às 14:43 UTC).
+2. Confirmar `EMAIL_DRIVER=resend` + `RESEND_API_KEY` + `CRON_SECRET`
+   no painel do deployment ativo. **Pendente — não verificável sem
+   credencial do painel** (o `401` público das rotas cron não prova nada).
+3. Configurar `ERP_WEBHOOK_URL` + `ERP_WEBHOOK_SECRET` **somente** quando a
+   integração for ativada (§8). Enquanto o `ERP_WEBHOOK_SECRET` não
+   existir, `config()` devolve `null` e **nenhuma entrega acontece** — o
+   evento fica guardado.
 4. Só quando autorizado: `--aplicar` dos dois backfills do 7653
-   (e-mail e evento ERP) e acompanhamento do dreno.
+   (e-mail e evento ERP) e acompanhamento do dreno. Dry-runs executados em
+   2026-10-20 (somente leitura; nenhum `--aplicar`).
+
+## 8. Receptor esperado e ativação gradual
+
+**Aviso de defeito de configuração implícita**: `config()` usa como
+fallback `NEXT_PUBLIC_APP_URL + "/erp/hooks"`. Essa rota **não existe**
+nesta aplicação (`/erp/hooks` → 404 em produção, verificado em
+2026-10-20). Ou seja, se algum dia existir `ERP_WEBHOOK_SECRET` sem
+`ERP_WEBHOOK_URL`, a entrega passa a tentar um destino morto e os eventos
+caem em `FAILED`/`DEAD` sem chegar a lugar algum. **`ERP_WEBHOOK_URL` é
+obrigatório na ativação** — o fallback não serve de receptor.
+
+**Contrato do envelope implementado** (`apps/web/src/lib/erp.ts`):
+
+| Item | Valor |
+|---|---|
+| Método/rota | `POST` na URL de `ERP_WEBHOOK_URL` |
+| Autenticação | header `x-erp-assinatura: v1=<hex>` = HMAC-SHA256(`${ts}.${corpo}`, `ERP_WEBHOOK_SECRET`) |
+| Timestamp | header `x-erp-ts` (ms) + campo `ocorrido_em` (ISO) |
+| Tipo | header `x-erp-evento` e campo `tipo` |
+| Versão | campo `versao: 1` (ignorado por receptores antigos) |
+| Identificador | campo `event_id` (uuid; PK da fila) |
+| Deduplicação | `businessKey` única (ex.: `pedido_estornado:{orderId}`) + `event_id` |
+| Resposta esperada | `2xx` = `DELIVERED`; `4xx` = `FAILED` (rejeição determinística); `408`/`429`/`5xx`/rede = retentativa `PENDING` |
+| Tempo/retentativas | timeout 10 s, 3 tentativas internas, depois backoff `min(2^n,60)` min, máx. 5 → `DEAD` |
+
+**Dados necessários do sistema receptor** (a configurar — não inventados
+aqui): URL real do endpoint, segredo compartilhado (≥32 bytes), formato
+esperado do `dados` por tipo de evento, e confirmação de que aceita o
+header `x-erp-assinatura` no formato `v1=`.
+
+**Plano de ativação gradual** (não executado):
+
+| Fase | Ação | Critério de saída |
+|---|---|---|
+| 0 | receptor de teste (ambiente de homologação do ERP) + `ERP_WEBHOOK_URL`/`SECRET` apontando para ele | receptor recebe e valida assinatura |
+| 1 | evento sintético sem dados pessoais (ex.: `tipo=produto_atualizado` com payload fake) via script/fila de teste | `DELIVERED` com `lastStatusCode=200` |
+| 2 | persistência histórica do 7653 (`--aplicar` do backfill ERP, **sem entrega** enquanto o receptor for de teste) | linha `PENDING` com `businessKey` correta |
+| 3 | dreno controlado (cron 12:00 UTC ou `POST /api/admin/erp?acao=reprocessar` com sessão admin) | evento entregue, fila limpa |
+| 4 | liberação dos fluxos reais (já ativos por código: `notificarErp()` persiste e entrega com configuração) | monitorar `ErpEvent` nas primeiras 24 h |
+
+Separação obrigatória: **persistência histórica** (grava `ErpEvent`, sem
+fetch) ≠ **entrega externa** (configuração + dreno). Fazer uma não faz a
+outra.
