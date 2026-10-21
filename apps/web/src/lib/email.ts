@@ -31,13 +31,22 @@ export class EmailNaoAceito extends Error {
 }
 
 /**
+ * Driver de e-mail vigente (fonte única: EMAIL_DRIVER, padrão "mock").
+ * O outbox usa isto para NUNCA marcar SENT com mock (ver email-outbox.ts).
+ */
+export function emailDriverAtual(): string {
+  return process.env.EMAIL_DRIVER || "mock";
+}
+
+/**
  * E-mail transacional.
- * - EMAIL_DRIVER=mock   → apenas loga no console (dev sem credenciais)
+ * - EMAIL_DRIVER=mock   → apenas loga no console (dev sem credenciais); o
+ *   outbox NÃO marca SENT nesse modo (a fila preserva a mensagem p/ envio real)
  * - EMAIL_DRIVER=smtp   → envio via SMTP (Zoho Mail; bloqueado a partir da Vercel)
  * - EMAIL_DRIVER=resend → envio via API Resend (produção; funciona de qualquer IP)
  */
 export async function sendEmail(input: SendEmailInput): Promise<ResultadoEnvio> {
-  const driver = process.env.EMAIL_DRIVER || "mock";
+  const driver = emailDriverAtual();
 
   if (driver === "mock") {
     console.log("────────────────────────────────────────");

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Outbox de e-mail transacional: payload imutável gravado na enfileiração,
 // dedupeKey única (webhook repetido/concordância simultânea = 1 linha),
@@ -66,10 +66,18 @@ function rowFake(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Os testes abaixo exercitam o caminho de provedor REAL (send injetado via
+  // deps). Com EMAIL_DRIVER=mock o processamento é pulado antes de enviar —
+  // por isso fixamos um driver não-mock aqui.
+  process.env.EMAIL_DRIVER = "resend";
   montarMock.mockResolvedValue(mailFake());
   sendMock.mockResolvedValue({ id: "re_abc" });
   prismaMock.emailOutbox.create.mockResolvedValue({ id: "row-1" });
   prismaMock.emailOutbox.updateMany.mockResolvedValue({ count: 1 });
+});
+
+afterEach(() => {
+  delete process.env.EMAIL_DRIVER;
 });
 
 describe("enfileirarEmailStatusPedido", () => {
@@ -250,6 +258,20 @@ describe("processarEmailOutbox", () => {
     );
     await expect(processarEmailOutbox("row-1")).resolves.toBe("PULADO");
     expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("EMAIL_DRIVER=mock → NUNCA vira SENT: PULADO, sem envio, fila intacta (preserva p/ envio real)", async () => {
+    process.env.EMAIL_DRIVER = "mock";
+    prismaMock.emailOutbox.findUnique.mockResolvedValue(rowFake());
+
+    const r = await processarEmailOutbox("row-1");
+
+    expect(r).toBe("PULADO");
+    // não chamou o provedor (send injetado) nem tocou no banco
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(prismaMock.emailOutbox.updateMany).not.toHaveBeenCalled();
+    // a linha permanece PENDING, sem gastar tentativa — um driver real
+    // posterior pode entregá-la
   });
 
   it("corrida perdida (guarda updateMany 0) → PULADO, sem efeito", async () => {

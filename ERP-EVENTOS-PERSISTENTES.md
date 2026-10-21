@@ -154,13 +154,22 @@ npx tsx --tsconfig apps/web/tsconfig.json scripts/backfill-erp-estorno-7653.ts -
 
 ## 8. Receptor esperado e ativação gradual
 
-**Aviso de defeito de configuração implícita**: `config()` usa como
-fallback `NEXT_PUBLIC_APP_URL + "/erp/hooks"`. Essa rota **não existe**
-nesta aplicação (`/erp/hooks` → 404 em produção, verificado em
-2026-10-20). Ou seja, se algum dia existir `ERP_WEBHOOK_SECRET` sem
-`ERP_WEBHOOK_URL`, a entrega passa a tentar um destino morto e os eventos
-caem em `FAILED`/`DEAD` sem chegar a lugar algum. **`ERP_WEBHOOK_URL` é
-obrigatório na ativação** — o fallback não serve de receptor.
+**Fallback removido (correção de comportamento)**: `config()` **exige**
+`ERP_WEBHOOK_URL` explícita + `ERP_WEBHOOK_SECRET`. O fallback automático
+`NEXT_PUBLIC_APP_URL + "/erp/hooks"` foi **removido** — essa rota não existe
+(`/erp/hooks` → 404 em produção, verificado em 2026-10-20) e faria "segredo
+sem URL" virar entrega a destino morto (`FAILED`/`DEAD`).
+
+**HTTPS obrigatório em produção**: a URL precisa ser **absoluta** e, quando
+`NODE_ENV=production`, usar **HTTPS** (`ehUrlErpValida`). HTTP é aceito apenas
+em dev/teste (receptor local de homologação). Configuração inválida ou
+incompleta (URL ausente/não-absoluta/HTTP em produção, ou secret ausente)
+faz `config()` devolver `null` **sem `fetch`**, **preserva** os eventos
+pendentes na fila e emite **diagnóstico sanitizado** (um motivo genérico, sem
+valores de URL/segredo — `motivoConfigInvalida()`). Sem URL válida ou sem
+segredo, `config()` = `null`: **nenhuma entrega acontece**, mas o evento é
+**persistido** (fila guarda o histórico; `enfileirarEvento` não depende de
+configuração).
 
 **Contrato do envelope implementado** (`apps/web/src/lib/erp.ts`):
 
@@ -194,3 +203,36 @@ header `x-erp-assinatura` no formato `v1=`.
 Separação obrigatória: **persistência histórica** (grava `ErpEvent`, sem
 fetch) ≠ **entrega externa** (configuração + dreno). Fazer uma não faz a
 outra.
+
+## Análise somente-leitura do histórico (candidatos a reconstrução)
+
+Levantamento da produção via pool de sessão (sem escrita) em 2026-10-21.
+Contagens: 9 pedidos, 1 `Refund`, 10 produtos, 1 `ErpEvent` já existente
+(`pedido_cancelado` de DC-20261017-8422, `PENDING`), 12 `AuditLog` (todos
+`Upload` — **sem** trilha de pagamento/cancelamento/estorno).
+
+**Eventos de negócio candidatos** (pago / cancelado / estornado), separados
+dos movimentos de estoque:
+
+| Tipo | Candidatos | Já enfileirados | Entrariam | Timestamp fonte | Precisão |
+|---|---|---|---|---|---|
+| `pedido_cancelado` | 8 | 1 (8422) | 7 novos | `Order.updatedAt` (proxy) | baixa — sem `cancelledAt` |
+| `pedido_pago` | 1 (7653) | 0 | 1 | `Order.updatedAt` (proxy) | baixa — proxy reflete o estorno, não o pagamento |
+| `pedido_estornado` | 1 (7653) | 0 | 1 | `Refund.resolvedAt` (preciso) | alta — `2026-10-17T18:34:54.611Z` |
+| **total negócio** | **10** | **1** | **9** | — | 1 preciso / 9 proxy |
+
+**Movimentos de estoque** (`estoque_atualizado`, `produto_criado`,
+`produto_atualizado`): categoria **separada**; 10 produtos, mas o estoque é
+*estado atual*, não histórico de diffs — **não reconstruível** retroativamente
+a partir do snapshot.
+
+**Conclusão / pendência operacional (sem decisão unilateral):**
+Nenhum evento falha na validação de enfileiramento (o `enfileirarEvento` não
+aplica schema de payload; todos 10 entrariam na fila). Porém **9 dos 10**
+carregariam `ocorrido_em` aproximado (`updatedAt` proxy), não o instante real
+da ocorrência — no caso do `pedido_pago` de 7653 o proxy é *provavelmente
+errado* (marca o estorno, não o pagamento). O contrato ERP **não define** se
+eventos retroativos devem ser reconstruídos; reconstruir pago/cancelado com
+timestamp impreciso é **decisão de negócio pendente**. O `pedido_estornado`
+de 7653 é o único com `resolvedAt` exato e já possui dry-run próprio
+(`backfill-erp-estorno-7653`).

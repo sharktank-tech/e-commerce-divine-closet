@@ -217,9 +217,11 @@ async function main() {
         "transporte ativo, e fila vazia não significa transporte desativado."
     );
     console.log(
-      "Atenção: o fallback automático (NEXT_PUBLIC_APP_URL + /erp/hooks) aponta " +
-        "para rota INEXISTENTE nesta aplicação (404) — ERP_WEBHOOK_URL precisa " +
-        "apontar para um receptor real antes de qualquer entrega."
+      "Atenção: o fallback automático (NEXT_PUBLIC_APP_URL + /erp/hooks) foi " +
+        "REMOVIDO de config() — ERP_WEBHOOK_URL precisa ser uma URL absoluta " +
+        "válida apontando para um receptor real antes de qualquer entrega " +
+        "(sem URL válida ou sem secret, config() = null e nada é enviado; a " +
+        "linha fica guardada)."
     );
   } finally {
     await prisma.$disconnect();
