@@ -1,9 +1,16 @@
 # Eventos ERP persistentes (PR de fila ERP)
 
-Estado: branch `feat/erp-evento-persistente` (empilhada sobre
-`fix/estorno-email-refunded` — PR #10), deste documento.
-Escopo desta rodada: **sem merge, sem deploy, sem entrega de eventos
-(webhook ERP nunca disparado aqui).**
+> **STATUS ATUAL (2026-10-22): integração ERP ADIADA por decisão de
+> produto — ver §9.** O código da fila permanece, intacto e ativo na
+> persistência; `ERP_WEBHOOK_URL`/`SECRET` seguem ausentes e **não serão
+> configurados** nesta fase. Nenhum pendente foi descartado.
+
+Histórico desta implementação: branch `feat/erp-evento-persistente`
+(empilhada sobre `fix/estorno-email-refunded` — PR #10), **merge
+concluído** em 2026-10-20/21 (PRs #11/#12 → `main`).
+Escopo original desta rodada: **sem merge, sem deploy, sem entrega de
+eventos (webhook ERP nunca disparado aqui)** — cumprido: nenhum evento
+ERP foi entregue até hoje.
 
 ## 1. Causa do defeito
 
@@ -236,3 +243,54 @@ eventos retroativos devem ser reconstruídos; reconstruir pago/cancelado com
 timestamp impreciso é **decisão de negócio pendente**. O `pedido_estornado`
 de 7653 é o único com `resolvedAt` exato e já possui dry-run próprio
 (`backfill-erp-estorno-7653`).
+
+## 9. Decisão de produto (2026-10-22) — integração ERP adiada
+
+> **Estado atual: ADIADA.** O plano de ativação da §8 **não está
+> agendado**. A infraestrutura descrita acima permanece no código,
+> preservada, mas **não será configurada nesta fase**.
+
+**Decisão da direção:** adiar a integração com o Sistema-CRM e a
+ativação de um ERP externo. As análises de vendas serão desenvolvidas
+**dentro do painel administrativo da própria Divine Closet**, a partir
+dos dados transacionais já existentes (`Order`, `OrderItem`, `Refund`).
+
+**O que muda:**
+
+- `ERP_WEBHOOK_URL` e `ERP_WEBHOOK_SECRET` **não serão configurados**
+  nesta fase. Nenhuma ação de configuração foi tomada nesta rodada.
+- A integração com o Sistema-CRM fica **adiada**. Diagnóstico de
+  compatibilidade (2026-10-22) concluiu que o Sistema-CRM é um CRM de
+  funil (contatos e negociação), **sem** modelos de pedido, pagamento,
+  produto, estoque ou estorno, **sem** endpoint de webhook, e com o
+  PocketBase em `umbrel.local:8090` — **inalcançável pela Vercel**
+  (rede local, sem túnel). Não atende ao objetivo, nem mesmo com
+  adaptações delimitadas.
+
+**O que NÃO muda (preservado de propósito):**
+
+- A **infraestrutura de eventos permanece**. `ErpEvent`, a persistência
+  incondicional de `enfileirarEvento` e a `businessKey` **não são
+  removidos** — continuam guardando as ocorrências de negócio.
+- **Nenhum registro pendente é descartado.** O evento
+  `pedido_cancelado` do pedido `DC-20261017-8422` segue `PENDING`,
+  intacto. A fila segue sendo histórico, não lixo.
+- A fila continua **acumulando** com a configuração ausente — exatamente
+  o comportamento já documentado na §3.3 ("sem config: fila acumula — é
+  o esperado até ativação; o histórico fica íntegro").
+- O **backfill do evento do 7653 permanece preparado e não executado**
+  (`scripts/backfill-erp-estorno-7653.ts`). Sem destino agora, continua
+  aguardando decisão futura. Os 9 eventos candidatos da seção anterior
+  **não** são reconstruídos.
+
+**Análise de vendas no lugar do ERP:**
+
+A proposta está em `ANALISE-DE-VENDAS.md`. Ponto central: o histórico é
+calculado **diretamente dos dados transacionais**, sem depender de
+reconstruir a fila `ErpEvent` — logo, esta decisão **não atrasa** a
+análise de vendas nem compromete o histórico de negócio.
+
+**Para reativar no futuro** (não previsto agora), nesta ordem: um
+receptor real alcançável pela Vercel (o Sistema-CRM atual não é),
+`ERP_WEBHOOK_URL` + `ERP_WEBHOOK_SECRET`, e então dreno controlado
+conforme a tabela da §8.
