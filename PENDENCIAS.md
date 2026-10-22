@@ -94,8 +94,24 @@ Ver `relatorio-duplicatas.md` (gerado por `npm run audit:slugs`).
 ### Login Google
 - Botão configurável no admin, porém chaves OAuth ainda não geradas.
 
-### Integração com ERP/envio
-- Webhooks para transportadoras ainda em estudo.
+### Integração com ERP/envio — **ADIADA por decisão de produto (2026-10-22)**
+- A direção definiu desenvolver as **análises de vendas dentro do próprio painel admin**, usando os dados da loja (`Order`/`OrderItem`/`Refund`).
+- Integração com o Sistema-CRM e ativação de ERP externo **adiadas**. Diagnóstico (2026-10-22): o Sistema-CRM é um CRM de funil, sem modelos de pedido/pagamento/estoque e sem webhook, com PocketBase em rede local inalcançável pela Vercel → **não atende**.
+- **Preservado:** infraestrutura `ErpEvent` intacta; nenhum pendente descartado (evento do 8422 segue `PENDING`); backfill do 7653 preparado e não executado; `ERP_WEBHOOK_URL`/`SECRET` **não configurados**.
+- Detalhes: `ERP-EVENTOS-PERSISTENTES.md` §9.
+- Webhooks para transportadoras: seguem em estudo (independente da decisão acima).
+
+### Análises de vendas no painel admin — **proposta registrada (2026-10-22)**
+- Proposta inicial em `ANALISE-DE-VENDAS.md`: indicadores (pedidos, pagamentos, cancelamentos, estornos, vendas brutas, descontos, ticket médio, produtos vendidos), filtros, permissões, lacunas e fases.
+- Regra central: histórico calculado dos **dados transacionais**, sem depender da fila ERP.
+- Separação obrigatória: **valor vendido × valor recebido × resultado financeiro** — o último **não é calculável hoje** (sem custo por pedido, sem taxa de gateway) e **não pode ser chamado de lucro**.
+- Nada implementado — aguarda priorização do dono.
+
+### Diagnóstico do fluxo de compra e venda — **registrado (2026-10-22)**
+- Relatório completo em `DIAGNOSTICO-FLUXO-COMPRA-VENDA.md` (SHA `1c79fa4`).
+- **4 bloqueadores P0 confirmados por leitura de código:** cartão em análise cancela pedido cobrado; criação de pedido sem idempotência (duplica cobrança no retry); webhook não idempotente (duplica baixa de estoque e cupom); estoque pode ficar negativo.
+- **P1:** cancelamento/estorno nunca devolvem estoque; pagamento aprovado + estoque baixo deixa pedido `PENDING` eterno; cupom de uso único ultrapassável; admin sem guarda de transição (consegue setar `REFUNDED` sem confirmação).
+- Sugestão: fechar os P0 antes de qualquer nova funcionalidade de vendas.
 
 ## 🔧 Dívida técnica — backlog de código
 
