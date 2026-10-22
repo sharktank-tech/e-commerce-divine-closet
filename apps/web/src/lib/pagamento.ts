@@ -27,6 +27,12 @@ export type PaymentParams = {
   installments?: number;
   paymentMethodId?: string;
   payerEmail?: string;
+  /**
+   * Chave de idempotência do CHECKOUT, repetida em todo retry da mesma
+   * tentativa de compra. Vai para o header `X-Idempotency-Key` do MP: sem
+   * ela, cada retry criava um pagamento novo (cobrança duplicada).
+   */
+  idempotencyKey?: string;
 };
 
 /** Erro do gateway real (config/MP): vira 502 com mensagem acionável. */
@@ -69,7 +75,7 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
   if (params.method === "pix") {
     let pag;
     try {
-      pag = await criarPagamentoPix(token, base);
+      pag = await criarPagamentoPix(token, base, params.idempotencyKey);
     } catch (err) {
       throw new PaymentError(traduzirErroMp(err instanceof Error ? err.message : "Falha no Pix (Mercado Pago)."));
     }
@@ -102,13 +108,28 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
         token: params.cardToken,
         parcelas: params.installments ?? 1,
         bandeira: params.paymentMethodId || "visa",
-      });
+      }, params.idempotencyKey);
     } catch (err) {
       throw new PaymentError(traduzirErroMp(err instanceof Error ? err.message : "Falha no cartão (Mercado Pago)."));
     }
+    // CORREÇÃO (defeito #1 do diagnóstico): `pending`/`in_process` NÃO é
+    // recusa. Cartão em análise antifraude devolve `in_process` no momento da
+    // criação e só depois vira `approved` — tratava-se aqui como FAILED, o
+    // cancelava o pedido, e quando o MP aprovava o webhook não encontrava o
+    // pedido (já CANCELLED) e descartava o pagamento. Agora vira PENDING: o
+    // pedido fica aguardando e a confirmação chega pelo webhook ou pela
+    // reconciliação.
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {
       return { success: true, paymentId: pag.id, status: "PAID", message: "Pagamento aprovado." };
+    }
+    if (estado === "PENDING") {
+      return {
+        success: true,
+        paymentId: pag.id,
+        status: "PENDING",
+        message: "Pagamento em análise. Você será notificado quando for aprovado.",
+      };
     }
     return { success: false, paymentId: pag.id, status: "FAILED", message: `Pagamento não aprovado (${pag.statusDetail || pag.status}).` };
   }

@@ -25,7 +25,8 @@ export type PagamentoMp = {
 async function mpFetch(
   token: string,
   caminho: string,
-  init?: RequestInit
+  init?: RequestInit,
+  idempotencyKey?: string
 ): Promise<unknown> {
   const ehPost = String(init?.method || "GET").toUpperCase() === "POST";
   const r = await fetch(`${MP_API}${caminho}`, {
@@ -33,9 +34,11 @@ async function mpFetch(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      // POST exige chave de idempotência: repetir a mesma chave em retry
-      // não duplica pagamento (UUID novo a cada requisição).
-      ...(ehPost ? { "X-Idempotency-Key": randomUUID() } : {}),
+      // POST exige chave de idempotência: repetir a MESMA chave em retry não
+      // duplica pagamento. A chave vem do chamador (geralmente derivada da
+      // chave de idempotência do checkout) — um UUID novo a cada requisição,
+      // como antes, anulava a proteção no retry do cliente.
+      ...(ehPost ? { "X-Idempotency-Key": idempotencyKey || randomUUID() } : {}),
       ...(init?.headers || {}),
     },
     signal: AbortSignal.timeout(15000),
@@ -129,12 +132,13 @@ function lerQr(resposta: Record<string, unknown>): QrPix | undefined {
 
 export async function criarPagamentoPix(
   token: string,
-  input: Parameters<typeof montarPix>[0]
+  input: Parameters<typeof montarPix>[0],
+  idempotencyKey?: string
 ): Promise<PagamentoMp> {
   const r = (await mpFetch(token, "/v1/payments", {
     method: "POST",
     body: JSON.stringify(montarPix(input)),
-  })) as Record<string, unknown>;
+  }, idempotencyKey)) as Record<string, unknown>;
   return {
     id: String(r.id),
     status: String(r.status),
@@ -145,12 +149,13 @@ export async function criarPagamentoPix(
 
 export async function criarPagamentoCartao(
   token: string,
-  input: Parameters<typeof montarCartao>[0]
+  input: Parameters<typeof montarCartao>[0],
+  idempotencyKey?: string
 ): Promise<PagamentoMp> {
   const r = (await mpFetch(token, "/v1/payments", {
     method: "POST",
     body: JSON.stringify(montarCartao(input)),
-  })) as Record<string, unknown>;
+  }, idempotencyKey)) as Record<string, unknown>;
   return {
     id: String(r.id),
     status: String(r.status),

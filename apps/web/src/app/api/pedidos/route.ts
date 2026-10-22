@@ -67,7 +67,25 @@ const checkoutSchema = z.object({
       campaign: z.string().nullish(),
     })
     .optional(),
+  // Chave de idempotência do checkout: o front gera UMA por tentativa de
+  // compra e a repete em todo retry. Aceita também no header `Idempotency-Key`
+  // (padrão de APIs) — o header tem prioridade sobre o corpo.
+  idempotencyKey: z.string().min(8).max(128).nullish(),
 });
+
+/**
+ * Detecta P2002 do Prisma causado pelo índice único de idempotência do
+ * checkout. O `meta.target` do erro lista a(s) coluna(s) violada(s); aceitamos
+ * tanto o formato de array quanto o string simples que o Prisma emite conforme
+ * a versão.
+ */
+function ehColisaoIdempotencia(err: unknown): boolean {
+  const e = err as { code?: string; meta?: { target?: unknown } } | null;
+  if (e?.code !== "P2002") return false;
+  const alvo = e.meta?.target;
+  const campos = Array.isArray(alvo) ? alvo.map(String) : alvo ? [String(alvo)] : [];
+  return campos.some((c) => c.includes("idempotencyKey"));
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -111,6 +129,20 @@ export const POST = comErro(async (req: NextRequest) => {
     const guestEmail = session ? null : parsed.data.guest!.email;
     const guestName = session ? session.name : parsed.data.guest!.name || null;
 
+    // Idempotência do checkout: header `Idempotency-Key` tem prioridade (padrão
+    // de APIs) sobre o campo no corpo. Ausente nos dois = fluxo antigo (cada
+    // requisição é um pedido novo); presente = retry devolve o MESMO pedido.
+    const idempotencyKey =
+      (req.headers.get("idempotency-key") || "").trim() ||
+      parsed.data.idempotencyKey?.trim() ||
+      null;
+    if (idempotencyKey && idempotencyKey.length < 8) {
+      return NextResponse.json(
+        { error: "Idempotency-Key muito curta (mínimo 8 caracteres)" },
+        { status: 400 }
+      );
+    }
+
     const guestId = req.cookies.get("dc_guest")?.value;
     const cartWhere: Array<{ userId?: string; guestId?: string }> = [];
     if (session) cartWhere.push({ userId: session.sub });
@@ -133,6 +165,9 @@ export const POST = comErro(async (req: NextRequest) => {
                       price: true,
                       stock: true,
                       isActive: true,
+                      // soft-delete: produto removido continua "isActive" no
+                      // banco — sem este filtro entrava no pedido
+                      deletedAt: true,
                       images: true,
                     },
                   },
@@ -152,7 +187,9 @@ export const POST = comErro(async (req: NextRequest) => {
     // o cliente resolve no checkout (aceitar novo preço ou remover o item).
     const bloqueios: Array<{ itemId: string; name: string; motivo: string }> = [];
     for (const item of cart.items) {
-      if (!item.product.isActive) {
+      // soft-delete: produto removido pelo admin não pode ser comprado (o
+      // filtro de listagem some com ele, mas um link antigo ainda chegava aqui)
+      if (!item.product.isActive || item.product.deletedAt) {
         bloqueios.push({ itemId: item.id, name: item.product.name, motivo: "indisponivel" });
         continue;
       }
@@ -167,30 +204,62 @@ export const POST = comErro(async (req: NextRequest) => {
       );
     }
 
+    // Estoque conferido contra a demanda AGREGADA por produto e por variação.
+    // O carrinho permite duas linhas do mesmo produto em tamanhos diferentes
+    // (chave única cartId+productId+size+color), então somar as linhas é
+    // obrigatório: antes cada linha era conferida sozinha contra o saldo total
+    // e um pedido 3+4 com saldo 5 passava na validação e estourava o estoque.
+    const demandaProduto = new Map<string, { qtd: number; nome: string }>();
     for (const item of cart.items) {
-      if (item.product.stock < item.quantity) {
+      const atual = demandaProduto.get(item.product.id);
+      if (atual) atual.qtd += item.quantity;
+      else demandaProduto.set(item.product.id, { qtd: item.quantity, nome: item.product.name });
+    }
+    for (const [produtoId, { qtd, nome }] of demandaProduto) {
+      const produto = cart.items.find((i) => i.product.id === produtoId)!.product;
+      if (produto.stock < qtd) {
         return NextResponse.json(
-          { error: `Estoque insuficiente para ${item.product.name}` },
+          { error: `Estoque insuficiente para ${nome}` },
           { status: 409 }
         );
       }
-      // valida estoque por variação (tamanho/cor) — seção 4.3
+    }
+
+    // Variação (tamanho/cor): mesma agregação — duas linhas do mesmo tamanho
+    // somam contra o saldo DAQUELA variação.
+    const demandaVariacao = new Map<string, { qtd: number; nome: string; variacaoId: string }>();
+    for (const item of cart.items) {
       const vars = await prisma.productVariation.findMany({
         where: { productId: item.product.id },
       });
-      if (vars.length > 0) {
-        const bySize = vars.filter((v) => v.size === item.size);
-        const exact = bySize.find((v) => (v.color ?? null) === (item.color ?? null));
-        const match = exact ?? (!item.color && bySize.length === 1 ? bySize[0] : undefined);
-        if (!match) {
+      if (vars.length === 0) continue;
+      const bySize = vars.filter((v) => v.size === item.size);
+      const exact = bySize.find((v) => (v.color ?? null) === (item.color ?? null));
+      const match = exact ?? (!item.color && bySize.length === 1 ? bySize[0] : undefined);
+      if (!match) {
+        return NextResponse.json(
+          { error: `Combinação indisponível para ${item.product.name}` },
+          { status: 409 }
+        );
+      }
+      const atual = demandaVariacao.get(match.id);
+      if (atual) atual.qtd += item.quantity;
+      else
+        demandaVariacao.set(match.id, {
+          qtd: item.quantity,
+          nome: item.product.name,
+          variacaoId: match.id,
+        });
+    }
+    if (demandaVariacao.size > 0) {
+      const variacoes = await prisma.productVariation.findMany({
+        where: { id: { in: [...demandaVariacao.keys()] } },
+      });
+      const porIdVar = new Map(variacoes.map((v) => [v.id, v]));
+      for (const { qtd, nome, variacaoId } of demandaVariacao.values()) {
+        if ((porIdVar.get(variacaoId)?.stock ?? 0) < qtd) {
           return NextResponse.json(
-            { error: `Combinação indisponível para ${item.product.name}` },
-            { status: 409 }
-          );
-        }
-        if (match.stock < item.quantity) {
-          return NextResponse.json(
-            { error: `Estoque insuficiente para ${item.product.name}` },
+            { error: `Estoque insuficiente para ${nome}` },
             { status: 409 }
           );
         }
@@ -254,7 +323,9 @@ export const POST = comErro(async (req: NextRequest) => {
 
     // Criação atômica: endereço + pedido + itens nascem juntos ou nada nasce.
     let eventoCriadoId: string | null = null;
-    const { order } = await prisma.$transaction(async (tx) => {
+    let order;
+    try {
+      ({ order } = await prisma.$transaction(async (tx) => {
       // addressId: reutiliza endereço salvo da própria conta (sem duplicar).
       // ID de outra conta ou sem sessão → EnderecoInvalidoError (400 fora).
       const address = await resolverEnderecoPedido(tx, {
@@ -273,6 +344,10 @@ export const POST = comErro(async (req: NextRequest) => {
         status: "PENDING",
         paymentStatus: "PENDING",
         paymentMethod,
+        // Mesma chave = mesmo pedido (índice único). O retry do cliente devolve
+        // o pedido já existente em vez de criar outro — e, com ele, outra
+        // cobrança. null = requisições sem o recurso de idempotência.
+        ...(idempotencyKey ? { idempotencyKey } : {}),
         couponCode: appliedCouponCode,
         subtotal: centavosParaReais(subtotalCentavos),
         shipping,
@@ -322,7 +397,31 @@ export const POST = comErro(async (req: NextRequest) => {
       );
 
       return { order };
-    });
+      }));
+    } catch (err) {
+      // Retry do MESMO checkout: a chave de idempotência colidiu com o pedido
+      // já criado por uma requisição anterior ou concorrente. Devolve o
+      // pedido existente e NÃO cobra de novo — é exatamente o que a chave
+      // de idempotência garante (índice único Order.idempotencyKey).
+      if (idempotencyKey && ehColisaoIdempotencia(err)) {
+        const existente = await prisma.order.findFirst({
+          where: { idempotencyKey },
+          include: { items: true, address: true },
+        });
+        if (existente) {
+          return NextResponse.json(
+            {
+              order: existente,
+              ok: true,
+              replayed: true,
+              pendente: existente.paymentStatus === "PENDING",
+            },
+            { status: 200 }
+          );
+        }
+      }
+      throw err;
+    }
 
     // ERP: entrega pós-commit, fire-and-forget (fila cuida das retentativas;
     // sem config fica PENDING até o dreno).
@@ -343,6 +442,9 @@ export const POST = comErro(async (req: NextRequest) => {
         installments: payment.installments ?? undefined,
         paymentMethodId: payment.paymentMethodId ?? undefined,
         payerEmail: session?.email || guestEmail || undefined,
+        // Retry da MESMA tentativa reusa a chave no MP: o header
+        // X-Idempotency-Key impede uma segunda cobrança pelo mesmo checkout.
+        idempotencyKey: idempotencyKey ?? undefined,
       });
     } catch (err) {
       // Gateway estourou sem resposta: não deixa PENDING órfão — cancela

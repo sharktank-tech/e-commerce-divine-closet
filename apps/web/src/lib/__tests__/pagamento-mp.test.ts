@@ -14,10 +14,44 @@ vi.mock("@/lib/email-outbox", () => ({
 }));
 
 function bancoFake(statusPagamento: string | null, estoque = 10) {
+  // O MESMO pedido serve ao fast-path (db.order.findUnique) e ao reload
+  // autoritativo DENTRO da tx (tx.order.findUnique) — na vida real os dois
+  // leem a mesma linha; em corrida o reload é quem decide.
+  const pedido =
+    statusPagamento == null
+      ? null
+      : {
+          id: "ped-1",
+          number: "DC-1",
+          paymentStatus: statusPagamento,
+          userId: null,
+          guestEmail: "c@c.com",
+          couponCode: "CUPOM10",
+          total: 199.9,
+          paymentMethod: "PIX",
+          user: null,
+          items: [
+            {
+              quantity: 2,
+              size: "M",
+              color: null,
+              productName: "Blusa",
+              unitPrice: 99.95,
+              product: { id: "prod-1" },
+            },
+          ],
+        };
   const tx = {
     $queryRawUnsafe: vi.fn(async () => []),
-    order: { update: vi.fn(async () => ({})) },
-    coupon: { update: vi.fn(async () => ({})) },
+    order: {
+      findUnique: vi.fn(async () => pedido),
+      update: vi.fn(async () => ({})),
+    },
+    coupon: {
+      // sem maxUses = ilimitado → incrementa normalmente
+      findUnique: vi.fn(async () => ({ code: "CUPOM10", maxUses: null, usedCount: 0 })),
+      update: vi.fn(async () => ({})),
+    },
     product: {
       findMany: vi.fn(async () => [
         { id: "prod-1", stock: estoque, variations: [] },
@@ -29,31 +63,7 @@ function bancoFake(statusPagamento: string | null, estoque = 10) {
   return {
     $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     order: {
-      findUnique: vi.fn(async () =>
-        statusPagamento == null
-          ? null
-          : {
-              id: "ped-1",
-              number: "DC-1",
-              paymentStatus: statusPagamento,
-              userId: null,
-              guestEmail: "c@c.com",
-              couponCode: "CUPOM10",
-              total: 199.9,
-              paymentMethod: "PIX",
-              user: null,
-              items: [
-                {
-                  quantity: 2,
-                  size: "M",
-                  color: null,
-                  productName: "Blusa",
-                  unitPrice: 99.95,
-                  product: { id: "prod-1" },
-                },
-              ],
-            }
-      ),
+      findUnique: vi.fn(async () => pedido),
     },
     __tx: tx,
   };
@@ -199,6 +209,107 @@ describe("processPayment (driver)", () => {
     await expect(
       mod.processPayment({ orderId: "p", amount: 10, method: "pix", payerEmail: "c@c.com" })
     ).rejects.toBeInstanceOf(mod.PaymentError);
+    Object.assign(process.env, envAnterior);
+  });
+
+  // Defeito #1 do diagnóstico: o cartão em análise antifraude devolve
+  // `in_process` no momento da criação e só depois vira `approved`. Tratava-se
+  // como FAILED, o cancelava o pedido — e quando o MP aprovava, o webhook não
+  // encontrava mais o pedido e descartava o pagamento.
+  it("cartão in_process → PENDING (não FAILED): pedido fica aguardando o webhook", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ id: 77, status: "in_process", status_detail: "pending_contingency" }),
+      }))
+    );
+    const processPayment = await driverComEnv({
+      PAYMENT_DRIVER: "mercadopago",
+      MP_ACCESS_TOKEN: "tok",
+    });
+    const r = await processPayment({
+      orderId: "p", amount: 10, method: "card", payerEmail: "c@c.com", cardToken: "tok-card",
+    });
+    expect(r).toMatchObject({ success: true, status: "PENDING", paymentId: "77" });
+    vi.unstubAllGlobals();
+    Object.assign(process.env, envAnterior);
+  });
+
+  it("cartão pending → PENDING (mesma proteção que in_process)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ id: 78, status: "pending" }) }))
+    );
+    const processPayment = await driverComEnv({
+      PAYMENT_DRIVER: "mercadopago",
+      MP_ACCESS_TOKEN: "tok",
+    });
+    const r = await processPayment({
+      orderId: "p", amount: 10, method: "card", payerEmail: "c@c.com", cardToken: "tok-card",
+    });
+    expect(r).toMatchObject({ success: true, status: "PENDING" });
+    vi.unstubAllGlobals();
+    Object.assign(process.env, envAnterior);
+  });
+
+  it("cartão rejected → FAILED (recusa de verdade continua recusando)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ id: 79, status: "rejected", status_detail: "cc_rejected_other_reason" }),
+      }))
+    );
+    const processPayment = await driverComEnv({
+      PAYMENT_DRIVER: "mercadopago",
+      MP_ACCESS_TOKEN: "tok",
+    });
+    const r = await processPayment({
+      orderId: "p", amount: 10, method: "card", payerEmail: "c@c.com", cardToken: "tok-card",
+    });
+    expect(r).toMatchObject({ success: false, status: "FAILED" });
+    vi.unstubAllGlobals();
+    Object.assign(process.env, envAnterior);
+  });
+
+  // Defeito #2: o header X-Idempotency-Key ia com UUID NOVO a cada requisição,
+  // anulando a proteção do MP no retry do cliente. Agora a chave do checkout é
+  // reutilizada — o mesmo retry devolve o mesmo pagamento.
+  it("reusa a chave de idempotência do checkout no header do MP", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: 80, status: "pending" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const processPayment = await driverComEnv({
+      PAYMENT_DRIVER: "mercadopago",
+      MP_ACCESS_TOKEN: "tok",
+    });
+    const chave = "chk-abcdef123456";
+    await processPayment({
+      orderId: "p", amount: 10, method: "pix", payerEmail: "c@c.com", idempotencyKey: chave,
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-Idempotency-Key"]).toBe(chave);
+    vi.unstubAllGlobals();
+    Object.assign(process.env, envAnterior);
+  });
+
+  it("sem chave do checkout: ainda envia UMA chave (fallback), nunca omite o header", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: 81, status: "pending" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const processPayment = await driverComEnv({
+      PAYMENT_DRIVER: "mercadopago",
+      MP_ACCESS_TOKEN: "tok",
+    });
+    await processPayment({ orderId: "p", amount: 10, method: "pix", payerEmail: "c@c.com" });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["X-Idempotency-Key"]).toBeTruthy();
+    vi.unstubAllGlobals();
     Object.assign(process.env, envAnterior);
   });
 });

@@ -7,32 +7,51 @@ import {
 } from "@/lib/email-outbox";
 import { entregarEvento, enfileirarEvento } from "@/lib/erp";
 
-// Reconciliação de Pix pendente — rede de segurança do webhook do MP.
+// Reconciliação de pagamento pendente — rede de segurança do webhook do MP.
 // Roda 1x/dia no cron de carrinho-abandonado (plano Hobby: no máximo 2
 // crons diários; a rota /api/cron/reconciliar-pix permite gatilho manual
 // com CRON_SECRET). Cobre: notificação perdida (pagou e ficou órfão) e
-// Pix expirado/recusado (pedido PENDING para sempre).
+// pagamento expirado/recusado (pedido PENDING para sempre).
+//
+// AMPLIAÇÃO (diagnóstico PR #15, defeito #1): antes só `paymentMethod: PIX`
+// entrava na varredura. Com o cartão `in_process` agora PRESERVADO como
+// PENDING (antes virava recusa e o pedido era cancelado), um cartão em
+// análise antifraude cuja notificação se perdesse ficaria pendurado para
+// sempre. A varredura passa a cobrir PIX, CARD e BOLETO, cada um com a sua
+// janela de expiração.
 
 export const HORAS_PARA_CANCELAR_PIX = 48;
+
+/** Janela de expiração por método de pagamento (horas desde a criação). */
+export const HORAS_PARA_CANCELAR: Record<string, number> = {
+  PIX: 48, // QR do Pix expira em ~30 min; 48h dá folga p/ notificação perdida
+  CARD: 168, // 7 dias — análise antifraude do cartão pode levar dias
+  BOLETO: 120, // 5 dias úteis de vencimento do boleto
+};
+
+/** Fallback para método desconhecido (mantém o valor histórico do Pix). */
+export const JANELA_PADRAO_HORAS = HORAS_PARA_CANCELAR_PIX;
 
 export type DecisaoReconciliacao = "finalizar" | "cancelar" | "manter";
 
 /**
- * Decide o que fazer com um pedido PIX ainda PENDING, dado o status bruto
- * do pagamento no Mercado Pago e a idade do pedido.
+ * Decide o que fazer com um pedido ainda PENDING, dado o status bruto do
+ * pagamento no Mercado Pago, a idade do pedido e o método de pagamento.
  */
 export function decidirReconciliacao(
   statusMp: string,
-  horasDesdeCriacao: number
+  horasDesdeCriacao: number,
+  metodoPagamento: string = "PIX"
 ): DecisaoReconciliacao {
   if (statusMp === "approved") return "finalizar";
   if (["expired", "rejected", "cancelled", "refused"].includes(statusMp)) {
     return "cancelar";
   }
   if (["pending", "in_process", "in_mediation"].includes(statusMp)) {
-    return horasDesdeCriacao >= HORAS_PARA_CANCELAR_PIX ? "cancelar" : "manter";
+    const janela = HORAS_PARA_CANCELAR[metodoPagamento] ?? JANELA_PADRAO_HORAS;
+    return horasDesdeCriacao >= janela ? "cancelar" : "manter";
   }
-  // Status fora do esperado para um Pix PENDING: não mexe (inspeção manual).
+  // Status fora do esperado: não mexe (inspeção manual).
   return "manter";
 }
 
@@ -65,20 +84,23 @@ export async function reconciliarPixPendentes(opcoes?: {
   }
 
   // Janela de carência: o webhook tem prioridade; não mexe em pedido de
-  // minutos atrás. Só Pix ainda PENDING (aprovado via webhook nunca entra).
+  // minutos atrás. Só pedido ainda PENDING (aprovado via webhook nunca entra).
   const carencia = new Date(agora.getTime() - 5 * 60 * 1000);
   const pedidos = await prisma.order.findMany({
     where: {
       status: "PENDING",
       paymentStatus: "PENDING",
-      paymentMethod: "PIX",
+      // Todos os métodos: Pix, cartão em análise (in_process) e boleto.
+      paymentMethod: { in: ["PIX", "CARD", "BOLETO"] },
       paymentId: { not: null },
       deletedAt: null,
       createdAt: { lte: carencia },
     },
     orderBy: { createdAt: "asc" },
-    take: opcoes?.limite ?? 30,
-    select: { id: true, number: true, paymentId: true, createdAt: true },
+    // Padrão subiu de 30 para 100: 30/dia deixava fila crescendo se a
+    // reconciliação falhasse alguns dias seguidos (só 30 pedidos/dia).
+    take: opcoes?.limite ?? 100,
+    select: { id: true, number: true, paymentId: true, createdAt: true, paymentMethod: true },
   });
 
   for (const pedido of pedidos) {
@@ -87,7 +109,7 @@ export async function reconciliarPixPendentes(opcoes?: {
       const pagamento = await buscarPagamento(token, pedido.paymentId as string);
       const horas =
         (agora.getTime() - pedido.createdAt.getTime()) / 3_600_000;
-      const decisao = decidirReconciliacao(pagamento.status, horas);
+      const decisao = decidirReconciliacao(pagamento.status, horas, pedido.paymentMethod);
 
       if (decisao === "finalizar") {
         const r = await finalizarPedidoPago(pedido.id, pagamento.id);

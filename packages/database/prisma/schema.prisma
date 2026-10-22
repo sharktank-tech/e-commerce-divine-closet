@@ -285,6 +285,12 @@ model Order {
   paymentStatus PaymentStatus @default(PENDING)
   paymentMethod PaymentMethod @default(CARD)
   paymentId     String?
+  // Chave de idempotência do CHECKOUT: o cliente (ou o front) gera uma chave
+  // estável por tentativa de compra e a repete no retry. O índice único
+  // transforma a corrida "duas requisições do mesmo checkout" em P2002, que a
+  // rota devolve como o MESMO pedido — nunca dois pedidos nem duas cobranças.
+  // null = pedidos anteriores ao recurso (não há backfill).
+  idempotencyKey String?   @unique
   couponCode    String?
   subtotal      Decimal       @db.Decimal(10, 2)
   shipping      Decimal       @default(0) @db.Decimal(10, 2)

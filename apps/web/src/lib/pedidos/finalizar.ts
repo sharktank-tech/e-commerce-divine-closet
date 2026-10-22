@@ -6,14 +6,39 @@ import { montarLinkAcompanhamento } from "@/lib/pedidos/notificar-status";
 import { dedupeKeyStatusPedido, enfileirarEmail, processarEmailOutbox } from "@/lib/email-outbox";
 
 // Pós-aprovação do pedido — caminho único para confirmação síncrona
-// (mock/cartão aprovado na hora) e assíncrona (Pix via webhook do MP).
-// Idempotente: só transita PENDING → PAID uma vez; repetição (webhook
-// reenviado) não duplica baixa de estoque, cupom nem e-mail.
-// Concorrência: trava as linhas dos produtos (FOR UPDATE) e revalida o
-// estoque DENTRO da transação — dois checkouts do último item em estoque
-// não vendem além do disponível. Eventos ERP (`pedido_pago` com businessKey
-// + `estoque_atualizado`) são GRAVADOS na MESMA tx da transição; I/O externo
-// (e-mail, entrega do webhook ERP) fica fora da tx, após o commit.
+// (mock/cartão aprovado na hora) e assíncrona (Pix/cartão in_process via
+// webhook do MP).
+//
+// CORREÇÕES DE INTEGRIDADE (diagnóstico PR #15, defeitos #3 e #4):
+//
+//  1. A guarda de transição é AUTORITATIVA dentro da transação. Antes a
+//     leitura `paymentStatus !== "PENDING"` era feita FORA da tx e o update
+//     dentro dela era incondicional: dois webhooks simultâneos liam PENDING,
+//     ambos passavam e ambos baixavam estoque/cupom/e-mail. Agora a linha do
+//     pedido é travada (FOR UPDATE) e recarregada dentro da tx — quem perde a
+//     corrida enxerga o estado já liquidado e sai sem escrever nada.
+//
+//  2. A demanda de estoque é AGREGADA por produto e por variação. Antes cada
+//     OrderItem era conferido separadamente contra o saldo total, então um
+//     pedido com duas linhas do mesmo produto (3 + 4 com saldo 5) passava nas
+//     duas conferências e deixava o estoque em -2.
+//
+//  3. Variações também são travadas (antes só Product), e o cupom passa por
+//     trava + checagem de `maxUses` antes do incremento (antes incrementava
+//     incondicionalmente, podendo ultrapassar o limite).
+//
+// Eventos ERP (`pedido_pago` com businessKey + `estoque_atualizado`) são
+// GRAVADOS na MESMA tx da transição; I/O externo (e-mail, entrega do webhook
+// ERP) fica fora da tx, após o commit.
+
+type ItemPedido = {
+  quantity: number;
+  size: string | null;
+  color: string | null;
+  productName: string;
+  unitPrice: unknown;
+  product: { id: string };
+};
 
 type BancoFinalizar = {
   $transaction(fn: (tx: TxFinalizar) => Promise<unknown>): Promise<unknown>;
@@ -39,14 +64,7 @@ type BancoFinalizar = {
       total: unknown;
       paymentMethod: string;
       user: { email: string } | null;
-      items: Array<{
-        quantity: number;
-        size: string | null;
-        color: string | null;
-        productName: string;
-        unitPrice: unknown;
-        product: { id: string };
-      }>;
+      items: ItemPedido[];
     } | null>;
   };
 };
@@ -54,9 +72,25 @@ type BancoFinalizar = {
 type TxFinalizar = {
   $queryRawUnsafe(query: string, ...valores: unknown[]): Promise<unknown>;
   order: {
+    // reload autoritativo DENTRO da tx, após travar a linha do pedido
+    findUnique(args: unknown): Promise<{
+      id: string;
+      number: string;
+      paymentStatus: string;
+      userId: string | null;
+      guestEmail: string | null;
+      couponCode: string | null;
+      total: unknown;
+      paymentMethod: string;
+      user: { email: string } | null;
+      items: ItemPedido[];
+    } | null>;
     update(args: unknown): Promise<unknown>;
   };
-  coupon: { update(args: unknown): Promise<unknown> };
+  coupon: {
+    findUnique(args: unknown): Promise<{ code: string; maxUses: number | null; usedCount: number } | null>;
+    update(args: unknown): Promise<unknown>;
+  };
   product: {
     findMany(args: unknown): Promise<
       Array<{
@@ -78,11 +112,26 @@ type TxFinalizar = {
   };
 };
 
+/** Localiza a variação que atende um item (mesma regra do checkout). */
+function localizarVariacao(
+  variacoes: Array<{ id: string; size: string; color: string | null; stock: number }>,
+  item: ItemPedido
+) {
+  const bySize = variacoes.filter((v) => v.size === item.size);
+  return (
+    bySize.find((v) => (v.color ?? null) === (item.color ?? null)) ??
+    (!item.color && bySize.length === 1 ? bySize[0] : undefined)
+  );
+}
+
 export async function finalizarPedidoPago(
   orderId: string,
   paymentId?: string,
   db: BancoFinalizar = prisma as unknown as BancoFinalizar
 ): Promise<{ ok: boolean; jaFinalizado: boolean }> {
+  // Fast-path de leitura: evita abrir transação quando o pedido já está
+  // liquidado (reenvio de webhook). É SÓ otimização — a autoridade é a trava +
+  // recarga dentro da tx, porque esta leitura pode estar defasada em corrida.
   const order = await db.order.findUnique({
     where: { id: orderId },
     include: {
@@ -95,12 +144,40 @@ export async function finalizarPedidoPago(
 
   const estoquesNovos = new Map<string, number>();
   const eventosErp: string[] = [];
+  let jaFinalizadoDentroDaTx = false;
 
   await db.$transaction(async (tx) => {
-    const ids = [...new Set(order.items.map((i) => i.product.id))];
+    // 1) Trava a linha do PEDIDO primeiro: serializa webhook, reconciliação e
+    //    caminho síncrono concorrentes do mesmo pedido. Quem espera a trava
+    //    enxerga o estado já liquidado no passo 2 e sai sem escrever.
+    await tx.$queryRawUnsafe(
+      `SELECT id FROM "Order" WHERE id = $1::uuid FOR UPDATE`,
+      orderId
+    );
+
+    // 2) Recarrega o pedido COM os itens dentro da tx — estado autoritativo.
+    const atual = await tx.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: { include: { product: { select: { id: true } } } },
+        user: { select: { email: true } },
+      },
+    });
+    if (!atual || atual.paymentStatus !== "PENDING") {
+      jaFinalizadoDentroDaTx = true;
+      return;
+    }
+
+    // 3) Trava produtos e variações em ordem DETERMINÍSTICA (id crescente) para
+    //    dois checkouts concorrentes nunca provocarem deadlock entre si.
+    const ids = [...new Set(atual.items.map((i) => i.product.id))].sort();
     if (ids.length > 0) {
       await tx.$queryRawUnsafe(
-        `SELECT id FROM "Product" WHERE id IN (${ids.map((_, k) => `$${k + 1}::uuid`).join(",")}) FOR UPDATE`,
+        `SELECT id FROM "Product" WHERE id IN (${ids.map((_, k) => `$${k + 1}::uuid`).join(",")}) ORDER BY id FOR UPDATE`,
+        ...ids
+      );
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "ProductVariation" WHERE "productId" IN (${ids.map((_, k) => `$${k + 1}::uuid`).join(",")}) ORDER BY id FOR UPDATE`,
         ...ids
       );
     }
@@ -109,24 +186,44 @@ export async function finalizarPedidoPago(
       include: { variations: true },
     });
     const porId = new Map(produtos.map((p) => [p.id, p]));
-    for (const item of order.items) {
-      const prod = porId.get(item.product.id);
-      if (!prod || prod.stock < item.quantity) {
-        throw new Error("Estoque insuficiente na finalização");
-      }
-      if (prod.variations.length > 0) {
-        const bySize = prod.variations.filter((v) => v.size === item.size);
-        const match =
-          bySize.find((v) => (v.color ?? null) === (item.color ?? null)) ??
-          (!item.color && bySize.length === 1 ? bySize[0] : undefined);
-        if (!match || match.stock < item.quantity) {
+
+    // 4) Agrega a demanda ANTES de conferir: duas linhas do mesmo produto
+    //    somam, e cada variação é conferida contra o saldo DAQUELA variação.
+    const demandaProduto = new Map<string, number>();
+    const demandaVariacao = new Map<string, number>();
+    for (const item of atual.items) {
+      const produtoId = item.product.id;
+      demandaProduto.set(produtoId, (demandaProduto.get(produtoId) ?? 0) + item.quantity);
+      const prod = porId.get(produtoId);
+      if (prod && prod.variations.length > 0) {
+        const match = localizarVariacao(prod.variations, item);
+        if (!match) {
           throw new Error("Estoque insuficiente na finalização (variação)");
         }
+        demandaVariacao.set(match.id, (demandaVariacao.get(match.id) ?? 0) + item.quantity);
       }
     }
 
+    // 5) Confere o saldo AGREGADO de cada produto e de cada variação.
+    for (const [produtoId, demanda] of demandaProduto) {
+      const prod = porId.get(produtoId);
+      if (!prod || prod.stock < demanda) {
+        throw new Error("Estoque insuficiente na finalização");
+      }
+    }
+    for (const [variacaoId, demanda] of demandaVariacao) {
+      const variacao = produtos
+        .flatMap((p) => p.variations)
+        .find((v) => v.id === variacaoId);
+      if (!variacao || variacao.stock < demanda) {
+        throw new Error("Estoque insuficiente na finalização (variação)");
+      }
+    }
+
+    // 6) Transição PENDING → PAID. Já segura a trava do pedido, então o update
+    //    incondicional aqui é seguro: nenhum outro fluxo consegue intervir.
     await tx.order.update({
-      where: { id: order.id },
+      where: { id: atual.id },
       data: {
         status: "PAID",
         paymentStatus: "PAID",
@@ -134,34 +231,48 @@ export async function finalizarPedidoPago(
       },
     });
 
-    if (order.couponCode) {
-      await tx.coupon.update({
-        where: { code: order.couponCode },
-        data: { usedCount: { increment: 1 } },
-      });
-      invalidarCupom(order.couponCode);
-    }
-
-    for (const item of order.items) {
-      await tx.product.update({
-        where: { id: item.product.id },
-        data: { stock: { decrement: item.quantity } },
-      });
-      const prod = porId.get(item.product.id);
-      estoquesNovos.set(
-        item.product.id,
-        Math.max(0, (prod?.stock ?? 0) - item.quantity)
+    // 7) Cupom: trava a linha, recarrega e só incrementa se ainda houver vaga.
+    //    `usedCount` nunca ultrapassa `maxUses`. Se a vaga esgotou (outro
+    //    pedido concorrente consumiu a última), NÃO se aborta a confirmação:
+    //    o pagamento já foi irreversível no provedor — deixar o pedido pago
+    //    pendurado para sempre seria pior que o contador. Alerta explícito.
+    if (atual.couponCode) {
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "Coupon" WHERE code = $1 FOR UPDATE`,
+        atual.couponCode
       );
-      const bySize = (prod?.variations ?? []).filter((v) => v.size === item.size);
-      const match =
-        bySize.find((v) => (v.color ?? null) === (item.color ?? null)) ??
-        (!item.color && bySize.length === 1 ? bySize[0] : undefined);
-      if (match) {
-        await tx.productVariation.update({
-          where: { id: match.id },
-          data: { stock: { decrement: item.quantity } },
+      const cupom = await tx.coupon.findUnique({ where: { code: atual.couponCode } });
+      if (cupom && cupom.maxUses != null && cupom.usedCount >= cupom.maxUses) {
+        console.error(
+          "[finalizar:cupom-esgotado]",
+          atual.couponCode,
+          `pedido=${atual.id} usedCount=${cupom.usedCount} maxUses=${cupom.maxUses}`
+        );
+      } else {
+        await tx.coupon.update({
+          where: { code: atual.couponCode },
+          data: { usedCount: { increment: 1 } },
         });
       }
+      invalidarCupom(atual.couponCode);
+    }
+
+    // 8) Baixa AGREGADA de estoque (uma escrita por produto/variação, não uma
+    //    por linha do pedido). O saldo nunca fica negativo: o passo 5 já
+    //    conferiu a demanda total contra o saldo travado.
+    for (const [produtoId, demanda] of demandaProduto) {
+      await tx.product.update({
+        where: { id: produtoId },
+        data: { stock: { decrement: demanda } },
+      });
+      const prod = porId.get(produtoId);
+      estoquesNovos.set(produtoId, Math.max(0, (prod?.stock ?? 0) - demanda));
+    }
+    for (const [variacaoId, demanda] of demandaVariacao) {
+      await tx.productVariation.update({
+        where: { id: variacaoId },
+        data: { stock: { decrement: demanda } },
+      });
     }
 
     // Eventos ERP na MESMA transição da baixa: `pedido_pago` (venda
@@ -174,18 +285,18 @@ export async function finalizarPedidoPago(
       const pagoId = await enfileirarEvento(
         "pedido_pago",
         {
-          numero: order.number,
-          total: Number(String(order.total)),
-          metodo_pagamento: order.paymentMethod,
-          cupom: order.couponCode,
-          itens: order.items.map((i) => ({
+          numero: atual.number,
+          total: Number(String(atual.total)),
+          metodo_pagamento: atual.paymentMethod,
+          cupom: atual.couponCode,
+          itens: atual.items.map((i) => ({
             produto_id: i.product.id,
             nome: i.productName,
             qtd: i.quantity,
             preco_unit: Number(String(i.unitPrice)),
           })),
         },
-        { db: erpDb, businessKey: `pedido_pago:${order.id}` }
+        { db: erpDb, businessKey: `pedido_pago:${atual.id}` }
       );
       if (pagoId) eventosErp.push(pagoId);
       for (const [produto_id, estoque] of estoquesNovos) {
@@ -198,6 +309,10 @@ export async function finalizarPedidoPago(
       }
     }
   });
+
+  // Corrida perdida: outro fluxo já confirmou este pedido dentro da tx — nada
+  // foi escrito por nós, então não há e-mail nem evento a disparar.
+  if (jaFinalizadoDentroDaTx) return { ok: true, jaFinalizado: true };
 
   // Pós-commit: entrega imediata (sem travar); sem config ERP a fila
   // fica PENDING e o dreno do cron entrega depois.
