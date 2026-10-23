@@ -19,11 +19,20 @@ import {
   processarEmailOutbox,
 } from "@/lib/email-outbox";
 import { obterCupom } from "@/lib/cupom-cache";
+import { liberarCupomReservado, reservarCupom } from "@/lib/pedidos/cupom-reserva";
 import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { cookies } from "next/headers";
+
+/** Cupom sem vaga restante: 400 claro, antes de qualquer cobrança. */
+class CupomEsgotadoError extends Error {
+  constructor() {
+    super("Cupom esgotado ou inativo");
+    this.name = "CupomEsgotadoError";
+  }
+}
 
 const checkoutSchema = z.object({
   address: enderecoSchema.extend({ label: z.string().optional() }),
@@ -85,6 +94,125 @@ function ehColisaoIdempotencia(err: unknown): boolean {
   const alvo = e.meta?.target;
   const campos = Array.isArray(alvo) ? alvo.map(String) : alvo ? [String(alvo)] : [];
   return campos.some((c) => c.includes("idempotencyKey"));
+}
+
+type PedidoReplay = {
+  id: string;
+  number: string;
+  status: string;
+  paymentStatus: string;
+  paymentId: string | null;
+  idempotencyKey: string | null;
+  couponCode: string | null;
+  couponReserved: boolean;
+  total: unknown;
+};
+
+/**
+ * RETOMADA de pagamento num replay do checkout (revisão PR #16).
+ *
+ * Antes o replay devolvia o pedido já criado e seguia — se a tentativa
+ * anterior tivesse sido interrompida ANTES (ou DURANTE) a chamada ao Mercado
+ * Pago, o pedido ficava PENDING para sempre sem `paymentId`: sem QR para o
+ * cliente, sem `paymentId` para o webhook (ele busca por id) e sem `paymentId`
+ * para a reconciliação (filtro `paymentId != null`). Ninguém jamais o
+ * recuperava.
+ *
+ * Agora o replay RETOMA a cobrança com a MESMA chave de idempotência do MP
+ * (derivada do pedido persistido — nunca um UUID novo por chamada): se o
+ * pagamento já existir no provedor, a API o devolve de volta em vez de criar
+ * outro; se nunca chegou a ser criado, cria-se agora (o cliente ainda não
+ * pagou). A gravação do `paymentId` é CONDICIONADA a `status=PENDING`, para
+ * não sobrescrever uma finalização que já tenha acontecido pelo webhook.
+ */
+async function retomarPagamentoPendente(args: {
+  pedido: PedidoReplay;
+  pagamento: {
+    method: string;
+    card?: { number?: string; name?: string };
+    cardToken?: string | null;
+    installments?: number | null;
+    paymentMethodId?: string | null;
+  };
+  payerEmail?: string;
+}): Promise<NextResponse> {
+  const { pedido, pagamento } = args;
+
+  // Nada a retomar: pagamento já registrado, ou pedido fora de PENDING.
+  if (pedido.paymentId || pedido.status !== "PENDING") {
+    return NextResponse.json(
+      { order: pedido, ok: true, replayed: true, pendente: pedido.paymentStatus === "PENDING" },
+      { status: 200 }
+    );
+  }
+
+  let result;
+  try {
+    result = await processPayment({
+      orderId: pedido.id,
+      amount: Number(pedido.total),
+      method: pagamento.method || "card",
+      card: pagamento.card,
+      cardToken: pagamento.cardToken ?? undefined,
+      installments: pagamento.installments ?? undefined,
+      paymentMethodId: pagamento.paymentMethodId ?? undefined,
+      payerEmail: args.payerEmail,
+      // Chave derivada do PEDIDO persistido: o retry reenvia a mesma chave ao
+      // MP e recebe o MESMO pagamento de volta (nunca uma segunda cobrança).
+      idempotencyKey: pedido.idempotencyKey ?? undefined,
+    });
+  } catch (err) {
+    // Falha de comunicação: o estado no provedor é DESCONHECIDO. Não se
+    // cancela o pedido — pode ter sido cobrado. Deixa PENDING: a
+    // reconciliação (por `external_reference`) recupera depois.
+    const mensagem = err instanceof Error ? err.message : "Falha na comunicação com o gateway";
+    console.error("[pedidos:replay-retomada]", pedido.id, mensagem);
+    return NextResponse.json(
+      {
+        order: pedido,
+        ok: false,
+        replayed: true,
+        pendente: true,
+        error: mensagem,
+        recupera: true,
+      },
+      { status: 502 }
+    );
+  }
+
+  if (result.status === "PENDING") {
+    await prisma.order.updateMany({
+      where: { id: pedido.id, status: "PENDING" },
+      data: { paymentId: result.paymentId },
+    });
+  } else if (result.success) {
+    await finalizarPedidoPago(pedido.id, result.paymentId);
+  } else {
+    // Recusa definitiva: cancela (condicionado a PENDING) e devolve a vaga
+    // do cupom reservada na criação.
+    await prisma.$transaction(async (tx) => {
+      const { count } = await tx.order.updateMany({
+        where: { id: pedido.id, status: "PENDING" },
+        data: { status: "CANCELLED", paymentStatus: "FAILED", paymentId: result.paymentId },
+      });
+      if (count === 1 && pedido.couponReserved && pedido.couponCode) {
+        await liberarCupomReservado(tx, pedido.couponCode);
+      }
+    });
+  }
+
+  const finalOrder = await prisma.order.findUnique({ where: { id: pedido.id } });
+  return NextResponse.json(
+    {
+      order: finalOrder ?? pedido,
+      payment: result,
+      ok: result.success,
+      replayed: true,
+      pendente: result.status === "PENDING",
+      ...(result.success ? {} : { error: result.message }),
+    },
+    { status: result.success ? 200 : 402 }
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -334,6 +462,16 @@ export const POST = comErro(async (req: NextRequest) => {
         dados: addr,
       });
 
+      // RESERVA ATÔMICA DO CUPOM (revisão PR #16): consome a vaga ANTES de
+      // criar o pedido e de qualquer cobrança, por UPDATE condicional no
+      // banco. Sem vaga → aborta a transação inteira (o pedido não nasce) e a
+      // rota responde 400; nada foi cobrado. `couponReserved` marca que o
+      // contador já foi consumido por ESTE pedido (a finalização não repete).
+      if (appliedCouponCode) {
+        const reservado = await reservarCupom(tx, appliedCouponCode);
+        if (!reservado) throw new CupomEsgotadoError();
+      }
+
       const order = await tx.order.create({
         data: {
           number: orderNumber(),
@@ -349,6 +487,7 @@ export const POST = comErro(async (req: NextRequest) => {
         // cobrança. null = requisições sem o recurso de idempotência.
         ...(idempotencyKey ? { idempotencyKey } : {}),
         couponCode: appliedCouponCode,
+        couponReserved: Boolean(appliedCouponCode),
         subtotal: centavosParaReais(subtotalCentavos),
         shipping,
         discount,
@@ -406,18 +545,27 @@ export const POST = comErro(async (req: NextRequest) => {
       if (idempotencyKey && ehColisaoIdempotencia(err)) {
         const existente = await prisma.order.findFirst({
           where: { idempotencyKey },
-          include: { items: true, address: true },
+          select: {
+            id: true,
+            number: true,
+            status: true,
+            paymentStatus: true,
+            paymentId: true,
+            idempotencyKey: true,
+            couponCode: true,
+            couponReserved: true,
+            total: true,
+          },
         });
         if (existente) {
-          return NextResponse.json(
-            {
-              order: existente,
-              ok: true,
-              replayed: true,
-              pendente: existente.paymentStatus === "PENDING",
-            },
-            { status: 200 }
-          );
+          // Replay: se a tentativa anterior foi interrompida antes de gravar
+          // o pagamento, RETOMA a cobrança com a mesma chave do MP em vez de
+          // devolver um pedido PENDING irrecuperável.
+          return retomarPagamentoPendente({
+            pedido: existente,
+            pagamento: payment,
+            payerEmail: session?.email || guestEmail || undefined,
+          });
         }
       }
       throw err;
@@ -447,36 +595,35 @@ export const POST = comErro(async (req: NextRequest) => {
         idempotencyKey: idempotencyKey ?? undefined,
       });
     } catch (err) {
-      // Gateway estourou sem resposta: não deixa PENDING órfão — cancela
-      // e devolve a mensagem real (o carrinho fica intacto p/ retry).
-      // Evento de cancelamento na MESMA tx da transição.
-      const eventoCancelId = await prisma.$transaction(async (tx) => {
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: "CANCELLED", paymentStatus: "FAILED" },
-        });
-        return enfileirarEvento(
-          "pedido_cancelado",
-          { numero: order.number, motivo: "Falha na comunicação com o gateway" },
-          { db: tx, businessKey: `pedido_cancelado:${order.id}` }
-        );
-      });
-      if (eventoCancelId) {
-        void entregarEvento(eventoCancelId).catch((err) =>
-          console.error("[pedidos:erp]", err)
-        );
-      }
+      // Estado DESCONHECIDO no provedor (timeout, rede, 5xx): o pagamento
+      // PODE ter sido criado. Cancelar o pedido aqui transformaria um possível
+      // pagamento aprovado em pedido morto — o webhook e a reconciliação só
+      // enxergam pedidos PENDING, então o dinheiro ficaria tomado sem pedido.
+      // O pedido permanece PENDING: a reconciliação o recupera pela
+      // `external_reference` (o próprio orderId) no `/v1/payments/search`.
+      // O carrinho NÃO é esvaziado (o cliente pode tentar de novo; o replay
+      // retoma com a mesma chave de idempotência do MP).
+      console.error(
+        "[pedidos:gateway-incerto]",
+        order.id,
+        err instanceof Error ? err.message : String(err)
+      );
       if (err instanceof PaymentError) {
-        return NextResponse.json({ error: err.message }, { status: 502 });
+        return NextResponse.json(
+          { error: err.message, orderId: order.id, recupera: true },
+          { status: 502 }
+        );
       }
       throw err;
     }
 
     if (result.status === "PENDING") {
-      // Pix aguardando: pedido continua PENDING com o id do pagamento; a
-      // confirmação (baixa de estoque, cupom, e-mail) chega no webhook.
-      await prisma.order.update({
-        where: { id: order.id },
+      // Pix/cartão em análise: pedido continua PENDING com o id do pagamento;
+      // a confirmação (baixa de estoque, cupom, e-mail) chega no webhook.
+      // Condicional a `status=PENDING`: se o webhook já tiver finalizado o
+      // pedido (corrida), gravar o paymentId por cima não pode reabrir nada.
+      await prisma.order.updateMany({
+        where: { id: order.id, status: "PENDING" },
         data: { paymentId: result.paymentId },
       });
     } else if (result.success) {
@@ -484,6 +631,8 @@ export const POST = comErro(async (req: NextRequest) => {
     } else {
       // Cancelamento (pagamento recusado): evento ERP + e-mail na MESMA
       // transação (dedupeKey única); envio pós-commit com retentativa.
+      // A vaga do cupom reservada na criação é DEVOLVIDA aqui — recusa
+      // definitiva não deve consumir limite comercial.
       const { eventoId: eventoCancelId, emailId } = await prisma.$transaction(async (tx) => {
         await tx.order.update({
           where: { id: order.id },
@@ -493,6 +642,9 @@ export const POST = comErro(async (req: NextRequest) => {
             paymentId: result.paymentId,
           },
         });
+        if (appliedCouponCode && order.couponReserved) {
+          await liberarCupomReservado(tx, appliedCouponCode);
+        }
         const eventoId = await enfileirarEvento(
           "pedido_cancelado",
           { numero: order.number, motivo: result.message },
@@ -546,6 +698,11 @@ export const POST = comErro(async (req: NextRequest) => {
     console.error("[pedidos:create]", err);
     // addressId de outra conta / sem sessão: 400 claro (não vaza existência).
     if (err instanceof EnderecoInvalidoError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    // Cupom sem vaga na RESERVA (tx abortada antes de criar o pedido):
+    // 400 claro, nada foi cobrado.
+    if (err instanceof CupomEsgotadoError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     // Perdeu a corrida pelo último item: 409 claro em vez de 500 genérico.

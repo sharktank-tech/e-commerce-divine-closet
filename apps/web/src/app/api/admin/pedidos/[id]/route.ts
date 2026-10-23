@@ -9,6 +9,7 @@ import {
   processarEmailOutbox,
 } from "@/lib/email-outbox";
 import { deveNotificarStatus } from "@/lib/pedidos/notificar-status";
+import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 
 const schema = z.object({
   status: z.enum([
@@ -26,7 +27,15 @@ const schema = z.object({
   // Link externo de rastreio: validado no servidor (HTTPS + allowlist);
   // URL fora da regra é gravada como null (nunca exibida ao cliente).
   trackingUrl: z.string().trim().max(2048).nullish(),
+  // Liberação de RETENÇÃO (hold): pedido pago sem estoque. O admin repõe o
+  // saldo, marca `liberarHold: true` e o servidor re-tenta a finalização
+  // (baixa de estoque + evento de venda). Se o saldo ainda não cobre, o
+  // pedido volta para a retenção — nunca é faturado no escuro.
+  liberarHold: z.boolean().optional(),
 });
+
+/** Status que representam faturamento/envio — bloqueados enquanto há hold. */
+const STATUS_DE_FATURAMENTO = new Set(["PROCESSING", "SHIPPED", "DELIVERED"]);
 
 // MÁQUINA DE ESTADOS DO PEDIDO.
 // Antes o PATCH aceitava qualquer alvo: o admin podia regredir DELIVERED →
@@ -98,9 +107,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     // da tx, mas a checagem aqui evita abrir transação para um alvo inválido).
     const anterior = await prisma.order.findUnique({
       where: { id },
-      select: { status: true, paymentStatus: true, trackingCode: true },
+      select: { status: true, paymentStatus: true, trackingCode: true, holdCode: true },
     });
     if (!anterior) return NextResponse.json({ error: "Não encontrado" }, { status: 404 });
+
+    // RETENÇÃO (hold): pagamento aprovado, sem estoque. Enquanto existir,
+    // o pedido não pode faturar/enviar — o dinheiro foi recebido, mas a
+    // operação ainda não resolveu a falta de saldo.
+    const emRetencao = Boolean(anterior.holdCode);
+    if (emRetencao && !parsed.data.liberarHold) {
+      if (STATUS_DE_FATURAMENTO.has(parsed.data.status)) {
+        return NextResponse.json(
+          {
+            error:
+              `Pedido em retenção (${anterior.holdCode}): pagamento aprovado, mas o estoque não cobre a demanda. ` +
+              "Reponha o estoque e envie `liberarHold: true` para liberar, ou use o fluxo de estorno.",
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     // REFUNDED é exclusivo do fluxo de estorno (registra a linha Refund 1:1
     // com o idempotencyKey do provedor). Setar à mão deixava o pedido
@@ -125,6 +151,35 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         { error: `Transição inválida: ${anterior.status} → ${parsed.data.status}` },
         { status: 409 }
       );
+    }
+
+    // LIBERAÇÃO DE RETENÇÃO: limpa o hold e RE-TENTA a finalização (a
+    // finalização tem trava própria e confere o estoque de novo). Se o saldo
+    // ainda não cobre, o pedido volta para a retenção e a resposta diz isso —
+    // nunca se fatura sem estoque. O status alvo do PATCH é ignorado aqui
+    // (a finalização decide: PAID ou retenção).
+    if (parsed.data.liberarHold) {
+      if (!emRetencao) {
+        return NextResponse.json(
+          { error: "Pedido não está em retenção." },
+          { status: 409 }
+        );
+      }
+      await prisma.order.updateMany({
+        where: { id, holdCode: { not: null } },
+        data: { holdCode: null, holdReason: null, holdAt: null },
+      });
+      const r = await finalizarPedidoPago(id);
+      const depois = await prisma.order.findUnique({
+        where: { id },
+        select: { id: true, status: true, paymentStatus: true, holdCode: true, holdReason: true },
+      });
+      return NextResponse.json({
+        order: depois,
+        liberado: Boolean(depois && !depois.holdCode && depois.status !== "PENDING"),
+        emRetencao: Boolean(depois?.holdCode),
+        ...(r.emEspera ? { hold: r.hold ?? null } : {}),
+      });
     }
 
     // Transição + evento ERP + notificação na MESMA transação (evento só ao

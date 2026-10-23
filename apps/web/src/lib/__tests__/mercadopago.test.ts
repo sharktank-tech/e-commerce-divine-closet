@@ -145,7 +145,13 @@ describe("criarPagamentoCartao / buscarPagamento", () => {
   it("busca por id com referência externa", async () => {
     mockFetch({ id: 7, status: "approved", external_reference: "ped-9" });
     const r = await buscarPagamento("tok", "7");
-    expect(r).toEqual({ id: "7", status: "approved", referenciaExterna: "ped-9" });
+    expect(r).toEqual(
+      expect.objectContaining({
+        id: "7",
+        status: "approved",
+        referenciaExterna: "ped-9",
+      })
+    );
   });
 });
 

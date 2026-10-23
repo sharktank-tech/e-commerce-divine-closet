@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { buscarPagamento } from "@/lib/mercadopago";
+import { buscarPagamento, buscarPagamentoPorReferencia, validarIdentidadePagamento } from "@/lib/mercadopago";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
+import { liberarCupomReservado } from "@/lib/pedidos/cupom-reserva";
 import {
   enfileirarEmailStatusPedido,
   processarEmailOutbox,
@@ -64,6 +65,56 @@ export type ResumoReconciliacao = {
   ignorado?: string;
 };
 
+/**
+ * Cancela um pedido PENDING que NUNCA teve pagamento criado no provedor
+ * (resposta perdida e busca por `external_reference` não achou nada). Devolve
+ * a vaga do cupom reservada na criação e dispara evento + notificação.
+ * Condicional a `status=PENDING` para não sobrescrever uma finalização
+ * concorrente. Devolve true quando o cancelamento foi aplicado.
+ */
+async function cancelarPedidoNaoCobrado(
+  pedido: { id: string; number: string; couponCode: string | null; couponReserved: boolean },
+  resumo: ResumoReconciliacao
+): Promise<boolean> {
+  const { count, eventoId, emailId } = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.order.updateMany({
+      where: { id: pedido.id, status: "PENDING", paymentStatus: "PENDING" },
+      data: { status: "CANCELLED", paymentStatus: "FAILED" },
+    });
+    let id: string | null = null;
+    let mailId: string | null = null;
+    if (count === 1) {
+      if (pedido.couponReserved && pedido.couponCode) {
+        await liberarCupomReservado(tx, pedido.couponCode);
+      }
+      id = await enfileirarEvento(
+        "pedido_cancelado",
+        { numero: pedido.number, motivo: "Pagamento nunca confirmado no provedor" },
+        { db: tx, businessKey: `pedido_cancelado:${pedido.id}` }
+      );
+      mailId = await enfileirarEmailStatusPedido(
+        pedido.id,
+        "CANCELLED",
+        tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
+      );
+    }
+    return { count, eventoId: id, emailId: mailId };
+  });
+  if (count !== 1) return false;
+  resumo.cancelados++;
+  if (eventoId) {
+    void entregarEvento(eventoId).catch((err) =>
+      console.error("[reconciliar-pix:erp]", eventoId, err)
+    );
+  }
+  if (emailId) {
+    void processarEmailOutbox(emailId).catch((err) =>
+      console.error("[reconciliar-pix:email]", emailId, err)
+    );
+  }
+  return true;
+}
+
 export async function reconciliarPixPendentes(opcoes?: {
   limite?: number;
   agora?: Date;
@@ -85,6 +136,13 @@ export async function reconciliarPixPendentes(opcoes?: {
 
   // Janela de carência: o webhook tem prioridade; não mexe em pedido de
   // minutos atrás. Só pedido ainda PENDING (aprovado via webhook nunca entra).
+  //
+  // AMPLIAÇÃO (revisão PR #16): o filtro `paymentId != null` foi REMOVIDO.
+  // Um pedido cuja chamada ao MP foi interrompida (timeout/crash) antes de
+  // gravar `Order.paymentId` nunca era enxergado aqui — e também não pelo
+  // webhook (que busca o pagamento por id). Esses "pedidos de resposta
+  // perdida" agora entram na varredura e são recuperados pela
+  // `external_reference` no `/v1/payments/search`.
   const carencia = new Date(agora.getTime() - 5 * 60 * 1000);
   const pedidos = await prisma.order.findMany({
     where: {
@@ -92,7 +150,6 @@ export async function reconciliarPixPendentes(opcoes?: {
       paymentStatus: "PENDING",
       // Todos os métodos: Pix, cartão em análise (in_process) e boleto.
       paymentMethod: { in: ["PIX", "CARD", "BOLETO"] },
-      paymentId: { not: null },
       deletedAt: null,
       createdAt: { lte: carencia },
     },
@@ -100,15 +157,62 @@ export async function reconciliarPixPendentes(opcoes?: {
     // Padrão subiu de 30 para 100: 30/dia deixava fila crescendo se a
     // reconciliação falhasse alguns dias seguidos (só 30 pedidos/dia).
     take: opcoes?.limite ?? 100,
-    select: { id: true, number: true, paymentId: true, createdAt: true, paymentMethod: true },
+    select: {
+      id: true,
+      number: true,
+      paymentId: true,
+      createdAt: true,
+      paymentMethod: true,
+      total: true,
+      couponCode: true,
+      couponReserved: true,
+    },
   });
 
   for (const pedido of pedidos) {
     resumo.processados++;
     try {
-      const pagamento = await buscarPagamento(token, pedido.paymentId as string);
+      // Recuperação: com paymentId busca-se por id; sem paymentId (resposta
+      // perdida) busca-se pela referência externa — o próprio orderId.
+      const pagamento = pedido.paymentId
+        ? await buscarPagamento(token, pedido.paymentId)
+        : await buscarPagamentoPorReferencia(token, pedido.id);
       const horas =
         (agora.getTime() - pedido.createdAt.getTime()) / 3_600_000;
+
+      // Nenhum pagamento no provedor = nunca chegou a ser cobrado. Passada a
+      // janela do método, cancela (e devolve a vaga do cupom reservado).
+      if (!pagamento) {
+        const janela = HORAS_PARA_CANCELAR[pedido.paymentMethod] ?? JANELA_PADRAO_HORAS;
+        if (horas >= janela) {
+          const cancelado = await cancelarPedidoNaoCobrado(pedido, resumo);
+          if (cancelado) continue;
+        }
+        resumo.mantidos++;
+        continue;
+      }
+
+      // Identidade: mesmo pedido, mesma moeda, mesmo valor. Divergência não
+      // finaliza nem cancela — mantém e registra (inspeção manual).
+      // Em modo webhook, verifica-se associação por paymentId. Em modo
+      // reconciliação (lost-response), a associação por paymentId é dispensada
+      // quando a referência externa for exata (orderId), mas a moeda e o valor
+      // ainda são conferidos. Em caso de paymentId diferente, investiga-se sem
+      // bloquear imediatamente se a referência externa for compatível.
+      const divergencia = validarIdentidadePagamento(pagamento, {
+        id: pedido.id,
+        total: Number(pedido.total),
+        paymentId: pedido.paymentId,
+      }, "reconciliacao");
+      if (!divergencia.ok) {
+        console.error(
+          `[reconciliar:divergencia-${divergencia.tipo}]`,
+          divergencia.detalhe
+        );
+        resumo.mantidos++;
+        continue;
+      }
+
       const decisao = decidirReconciliacao(pagamento.status, horas, pedido.paymentMethod);
 
       if (decisao === "finalizar") {
@@ -116,21 +220,27 @@ export async function reconciliarPixPendentes(opcoes?: {
         if (!r.jaFinalizado) resumo.finalizados++;
         else resumo.mantidos++;
       } else if (decisao === "cancelar") {
-        // Guarda de corrida + evento + notificação na MESMA transação: só
-        // cancela se ainda estiver PENDING; o evento e a linha do outbox
-        // (dedupeKey status:orderId:CANCELLED) nascem junto — rollback
-        // descarta os três. O envio é pós-commit, com retentativa.
+        // Guarda de corrida + evento + notificação + devolução da vaga do
+        // cupom na MESMA transação: só cancela se ainda estiver PENDING; o
+        // evento, a linha do outbox (dedupeKey status:orderId:CANCELLED) e o
+        // decremento do contador nascem juntos — rollback descarta os quatro.
+        // O envio é pós-commit, com retentativa.
         const { count, eventoId, emailId } = await prisma.$transaction(async (tx) => {
           const { count } = await tx.order.updateMany({
-            where: { id: pedido.id, paymentStatus: "PENDING" },
+            where: { id: pedido.id, status: "PENDING", paymentStatus: "PENDING" },
             data: { status: "CANCELLED", paymentStatus: "FAILED" },
           });
           let id: string | null = null;
           let mailId: string | null = null;
           if (count === 1) {
+            // Pagamento não confirmou em definitivo → a reserva feita na
+            // criação do pedido não deve consumir limite comercial.
+            if (pedido.couponReserved && pedido.couponCode) {
+              await liberarCupomReservado(tx, pedido.couponCode);
+            }
             id = await enfileirarEvento(
               "pedido_cancelado",
-              { numero: pedido.number, motivo: `Pix não confirmado (${pagamento.status})` },
+              { numero: pedido.number, motivo: `Pagamento não confirmado (${pagamento.status})` },
               { db: tx, businessKey: `pedido_cancelado:${pedido.id}` }
             );
             mailId = await enfileirarEmailStatusPedido(

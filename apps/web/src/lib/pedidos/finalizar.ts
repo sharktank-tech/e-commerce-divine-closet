@@ -27,9 +27,30 @@ import { dedupeKeyStatusPedido, enfileirarEmail, processarEmailOutbox } from "@/
 //     trava + checagem de `maxUses` antes do incremento (antes incrementava
 //     incondicionalmente, podendo ultrapassar o limite).
 //
+//  4. RETENÇÃO OPERACIONAL (pagamento aprovado sem estoque): a finalização não
+//     `throw` mais quando o saldo não cobre a demanda. Antes isso gerava 500
+//     no webhook, que o Mercado Pago reenviava para sempre, e a aprovação
+//     financeira ficava sem registro local. Agora grava-se
+//     `paymentStatus=PAID` (fato no provedor) + `holdCode/holdReason/holdAt`,
+//     mantendo `status=PENDING` (não fatura/envia), sem baixar estoque e sem
+//     evento ERP de venda. A liberação é ADMIN (repõe estoque e limpa o hold);
+//     a re-entrada chama esta função de novo — a guarda passou a ser
+//     `status !== "PENDING"`, não `paymentStatus`.
+//
 // Eventos ERP (`pedido_pago` com businessKey + `estoque_atualizado`) são
 // GRAVADOS na MESMA tx da transição; I/O externo (e-mail, entrega do webhook
 // ERP) fica fora da tx, após o commit.
+
+/** Código do hold aplicado quando o pagamento aprovou sem estoque. */
+export const HOLD_ESTOQUE_INSUFICIENTE = "ESTOQUE_INSUFICIENTE";
+
+export type ResultadoFinalizacao = {
+  ok: boolean;
+  jaFinalizado: boolean;
+  /** Pagamento aprovado, mas o pedido ficou em retenção (sem estoque). */
+  emEspera?: boolean;
+  hold?: string | null;
+};
 
 type ItemPedido = {
   quantity: number;
@@ -57,7 +78,10 @@ type BancoFinalizar = {
     findUnique(args: unknown): Promise<{
       id: string;
       number: string;
+      status: string;
       paymentStatus: string;
+      holdCode: string | null;
+      couponReserved: boolean;
       userId: string | null;
       guestEmail: string | null;
       couponCode: string | null;
@@ -76,7 +100,10 @@ type TxFinalizar = {
     findUnique(args: unknown): Promise<{
       id: string;
       number: string;
+      status: string;
       paymentStatus: string;
+      holdCode: string | null;
+      couponReserved: boolean;
       userId: string | null;
       guestEmail: string | null;
       couponCode: string | null;
@@ -86,6 +113,8 @@ type TxFinalizar = {
       items: ItemPedido[];
     } | null>;
     update(args: unknown): Promise<unknown>;
+    // usado só na retenção (hold): transição condicional PENDING → retido
+    updateMany(args: unknown): Promise<{ count: number }>;
   };
   coupon: {
     findUnique(args: unknown): Promise<{ code: string; maxUses: number | null; usedCount: number } | null>;
@@ -128,10 +157,16 @@ export async function finalizarPedidoPago(
   orderId: string,
   paymentId?: string,
   db: BancoFinalizar = prisma as unknown as BancoFinalizar
-): Promise<{ ok: boolean; jaFinalizado: boolean }> {
-  // Fast-path de leitura: evita abrir transação quando o pedido já está
-  // liquidado (reenvio de webhook). É SÓ otimização — a autoridade é a trava +
+): Promise<ResultadoFinalizacao> {
+  // Fast-path de leitura: evita abrir transação quando o pedido já saiu de
+  // PENDING (reenvio de webhook). É SÓ otimização — a autoridade é a trava +
   // recarga dentro da tx, porque esta leitura pode estar defasada em corrida.
+  //
+  // A guarda é por `status`, não por `paymentStatus`: um pedido em RETENÇÃO
+  // (pagamento aprovado, sem estoque) tem paymentStatus=PAID e status=PENDING
+  // e PRECISA poder re-entrar aqui quando o admin repõe o estoque e limpa o
+  // hold. Já um pedido totalmente finalizado tem status=PAID/SHIPPED/... e
+  // nunca mais re-entra (baixa de estoque, cupom, ERP e e-mail não repetem).
   const order = await db.order.findUnique({
     where: { id: orderId },
     include: {
@@ -140,11 +175,12 @@ export async function finalizarPedidoPago(
     },
   });
   if (!order) return { ok: false, jaFinalizado: false };
-  if (order.paymentStatus !== "PENDING") return { ok: true, jaFinalizado: true };
+  if (order.status !== "PENDING") return { ok: true, jaFinalizado: true };
 
   const estoquesNovos = new Map<string, number>();
   const eventosErp: string[] = [];
   let jaFinalizadoDentroDaTx = false;
+  let emEspera = false;
 
   await db.$transaction(async (tx) => {
     // 1) Trava a linha do PEDIDO primeiro: serializa webhook, reconciliação e
@@ -163,7 +199,7 @@ export async function finalizarPedidoPago(
         user: { select: { email: true } },
       },
     });
-    if (!atual || atual.paymentStatus !== "PENDING") {
+    if (!atual || atual.status !== "PENDING") {
       jaFinalizadoDentroDaTx = true;
       return;
     }
@@ -189,8 +225,11 @@ export async function finalizarPedidoPago(
 
     // 4) Agrega a demanda ANTES de conferir: duas linhas do mesmo produto
     //    somam, e cada variação é conferida contra o saldo DAQUELA variação.
+    //    Falha de saldo NÃO lança mais: vira retenção (hold) — o pagamento já
+    //    foi aprovado no provedor e precisa ficar registrado localmente.
     const demandaProduto = new Map<string, number>();
     const demandaVariacao = new Map<string, number>();
+    const motivosHold: string[] = [];
     for (const item of atual.items) {
       const produtoId = item.product.id;
       demandaProduto.set(produtoId, (demandaProduto.get(produtoId) ?? 0) + item.quantity);
@@ -198,17 +237,23 @@ export async function finalizarPedidoPago(
       if (prod && prod.variations.length > 0) {
         const match = localizarVariacao(prod.variations, item);
         if (!match) {
-          throw new Error("Estoque insuficiente na finalização (variação)");
+          motivosHold.push(
+            `variação indisponível: ${item.productName} (${item.size ?? "-"} / ${item.color ?? "-"})`
+          );
+          continue;
         }
         demandaVariacao.set(match.id, (demandaVariacao.get(match.id) ?? 0) + item.quantity);
       }
     }
 
     // 5) Confere o saldo AGREGADO de cada produto e de cada variação.
+    const nomePorProduto = new Map(atual.items.map((i) => [i.product.id, i.productName]));
     for (const [produtoId, demanda] of demandaProduto) {
       const prod = porId.get(produtoId);
       if (!prod || prod.stock < demanda) {
-        throw new Error("Estoque insuficiente na finalização");
+        motivosHold.push(
+          `estoque ${prod ? prod.stock : 0} < demanda ${demanda} em ${nomePorProduto.get(produtoId) ?? produtoId}`
+        );
       }
     }
     for (const [variacaoId, demanda] of demandaVariacao) {
@@ -216,44 +261,78 @@ export async function finalizarPedidoPago(
         .flatMap((p) => p.variations)
         .find((v) => v.id === variacaoId);
       if (!variacao || variacao.stock < demanda) {
-        throw new Error("Estoque insuficiente na finalização (variação)");
+        motivosHold.push(
+          `estoque de variação ${variacao ? variacao.stock : 0} < demanda ${demanda} (variação ${variacaoId})`
+        );
       }
     }
 
-    // 6) Transição PENDING → PAID. Já segura a trava do pedido, então o update
+    if (motivosHold.length > 0) {
+      // RETENÇÃO: grava a aprovação financeira (fato no provedor) sem liberar
+      // o pedido para faturamento. `status` permanece PENDING; o admin enxerga
+      // o hold e decide (repõe estoque e limpa, ou estorna pelo fluxo próprio).
+      // NÃO baixa estoque, NÃO mexe em cupom, NÃO dispara evento de venda.
+      // Guardado por `status = PENDING` para não sobrescrever uma finalização
+      // concorrente que já saiu de PENDING.
+      const { count } = await tx.order.updateMany({
+        where: { id: atual.id, status: "PENDING" },
+        data: {
+          paymentStatus: "PAID",
+          ...(paymentId ? { paymentId } : {}),
+          holdCode: HOLD_ESTOQUE_INSUFICIENTE,
+          holdReason: motivosHold.join("; ").slice(0, 500),
+          holdAt: new Date(),
+        },
+      });
+      if (count === 0) {
+        // Outro fluxo finalizou/concorreu enquanto travávamos: nada a fazer.
+        jaFinalizadoDentroDaTx = true;
+        return;
+      }
+      emEspera = true;
+      return;
+    }
+
+    // 6) Transição PENDING → PAID (limpa qualquer hold anterior: o estoque
+    //    agora cobre a demanda). Já segura a trava do pedido, então o update
     //    incondicional aqui é seguro: nenhum outro fluxo consegue intervir.
     await tx.order.update({
       where: { id: atual.id },
       data: {
         status: "PAID",
         paymentStatus: "PAID",
+        holdCode: null,
+        holdReason: null,
+        holdAt: null,
         ...(paymentId ? { paymentId } : {}),
       },
     });
 
-    // 7) Cupom: trava a linha, recarrega e só incrementa se ainda houver vaga.
-    //    `usedCount` nunca ultrapassa `maxUses`. Se a vaga esgotou (outro
-    //    pedido concorrente consumiu a última), NÃO se aborta a confirmação:
-    //    o pagamento já foi irreversível no provedor — deixar o pedido pago
-    //    pendurado para sempre seria pior que o contador. Alerta explícito.
+    // 7) Cupom — só para pedidos SEM reserva na criação (legado). Um pedido
+    //    novo já consumiu `usedCount` na criação do pedido (tx condicional),
+    //    então incrementar de novo aqui duplicaria o uso. `couponReserved`
+    //    distingue os dois mundos sem backfill.
     if (atual.couponCode) {
-      await tx.$queryRawUnsafe(
-        `SELECT id FROM "Coupon" WHERE code = $1 FOR UPDATE`,
-        atual.couponCode
-      );
-      const cupom = await tx.coupon.findUnique({ where: { code: atual.couponCode } });
-      if (cupom && cupom.maxUses != null && cupom.usedCount >= cupom.maxUses) {
-        console.error(
-          "[finalizar:cupom-esgotado]",
-          atual.couponCode,
-          `pedido=${atual.id} usedCount=${cupom.usedCount} maxUses=${cupom.maxUses}`
+      if (!atual.couponReserved) {
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM "Coupon" WHERE code = $1 FOR UPDATE`,
+          atual.couponCode
         );
-      } else {
-        await tx.coupon.update({
-          where: { code: atual.couponCode },
-          data: { usedCount: { increment: 1 } },
-        });
+        const cupom = await tx.coupon.findUnique({ where: { code: atual.couponCode } });
+        if (cupom && cupom.maxUses != null && cupom.usedCount >= cupom.maxUses) {
+          console.error(
+            "[finalizar:cupom-esgotado]",
+            atual.couponCode,
+            `pedido=${atual.id} usedCount=${cupom.usedCount} maxUses=${cupom.maxUses}`
+          );
+        } else {
+          await tx.coupon.update({
+            where: { code: atual.couponCode },
+            data: { usedCount: { increment: 1 } },
+          });
+        }
       }
+      // Cache: o contador mudou (na reserva da criação ou aqui no legado).
       invalidarCupom(atual.couponCode);
     }
 
@@ -314,6 +393,19 @@ export async function finalizarPedidoPago(
   // foi escrito por nós, então não há e-mail nem evento a disparar.
   if (jaFinalizadoDentroDaTx) return { ok: true, jaFinalizado: true };
 
+  // Retenção: a aprovação foi GRAVADA, mas o pedido não faturou. Sem evento
+  // de venda, sem baixa de estoque e sem e-mail "pedido pago" (o pedido ainda
+  // não saiu). O diagnóstico sai por log estruturado + hold no banco — o
+  // admin enxerga em /admin/pedidos e decide (repõe/limpa ou estorna).
+  if (emEspera) {
+    console.error(
+      "[finalizar:retencao]",
+      orderId,
+      `paymentId=${paymentId ?? "-"} motivo=estoque insuficiente — pagamento aprovado, pedido em hold`
+    );
+    return { ok: true, jaFinalizado: false, emEspera: true, hold: HOLD_ESTOQUE_INSUFICIENTE };
+  }
+
   // Pós-commit: entrega imediata (sem travar); sem config ERP a fila
   // fica PENDING e o dreno do cron entrega depois.
   for (const eventoId of eventosErp) {
@@ -363,5 +455,5 @@ export async function finalizarPedidoPago(
     }
   })();
 
-  return { ok: true, jaFinalizado: false };
+  return { ok: true, jaFinalizado: false, emEspera: false, hold: null };
 }

@@ -81,18 +81,18 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
     }
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {
-      return { success: true, paymentId: pag.id, status: "PAID", message: "Pix aprovado." };
+      return { success: true, paymentId: pag.id!, status: "PAID", message: "Pix aprovado." };
     }
     if (estado === "PENDING") {
       return {
         success: true,
-        paymentId: pag.id,
+        paymentId: pag.id!,
         status: "PENDING",
         message: "Aguardando pagamento do Pix.",
         qr: pag.qr,
       };
     }
-    return { success: false, paymentId: pag.id, status: "FAILED", message: `Pix não aprovado (${pag.statusDetail || pag.status}).` };
+    return { success: false, paymentId: pag.id!, status: "FAILED", message: `Pix não aprovado (${pag.statusDetail || pag.status}).` };
   }
 
   if (params.method === "card") {
@@ -121,17 +121,17 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
     // reconciliação.
     const estado = mapearStatusMp(pag.status);
     if (estado === "PAID") {
-      return { success: true, paymentId: pag.id, status: "PAID", message: "Pagamento aprovado." };
+      return { success: true, paymentId: pag.id!, status: "PAID", message: "Pagamento aprovado." };
     }
     if (estado === "PENDING") {
       return {
         success: true,
-        paymentId: pag.id,
+        paymentId: pag.id!,
         status: "PENDING",
         message: "Pagamento em análise. Você será notificado quando for aprovado.",
       };
     }
-    return { success: false, paymentId: pag.id, status: "FAILED", message: `Pagamento não aprovado (${pag.statusDetail || pag.status}).` };
+    return { success: false, paymentId: pag.id!, status: "FAILED", message: `Pagamento não aprovado (${pag.statusDetail || pag.status}).` };
   }
 
   throw new PaymentError(`Método não suportado no Mercado Pago: ${params.method}`);

@@ -13,23 +13,33 @@ vi.mock("@/lib/email-outbox", () => ({
   processarEmailOutbox: processarMock,
 }));
 
-function bancoFake(statusPagamento: string | null, estoque = 10) {
+function bancoFake(
+  statusPagamento: string | null,
+  estoque = 10,
+  extras: Record<string, unknown> = {}
+) {
   // O MESMO pedido serve ao fast-path (db.order.findUnique) e ao reload
   // autoritativo DENTRO da tx (tx.order.findUnique) — na vida real os dois
-  // leem a mesma linha; em corrida o reload é quem decide.
+  // leem a mesma linha; em corrida o reload é quem decide. `status` acompanha
+  // o paymentStatus: a guarda de finalização passou a ser por `status`
+  // (um pedido em retenção tem paymentStatus=PAID e status=PENDING).
   const pedido =
     statusPagamento == null
       ? null
       : {
           id: "ped-1",
           number: "DC-1",
+          status: statusPagamento === "PENDING" ? "PENDING" : statusPagamento,
           paymentStatus: statusPagamento,
+          holdCode: null as string | null,
+          couponReserved: false,
           userId: null,
           guestEmail: "c@c.com",
           couponCode: "CUPOM10",
           total: 199.9,
           paymentMethod: "PIX",
           user: null,
+          ...extras,
           items: [
             {
               quantity: 2,
@@ -41,11 +51,13 @@ function bancoFake(statusPagamento: string | null, estoque = 10) {
             },
           ],
         };
+  const updateMany = vi.fn(async () => ({ count: 1 }));
   const tx = {
     $queryRawUnsafe: vi.fn(async () => []),
     order: {
       findUnique: vi.fn(async () => pedido),
       update: vi.fn(async () => ({})),
+      updateMany,
     },
     coupon: {
       // sem maxUses = ilimitado → incrementa normalmente
@@ -64,6 +76,7 @@ function bancoFake(statusPagamento: string | null, estoque = 10) {
     $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     order: {
       findUnique: vi.fn(async () => pedido),
+      updateMany,
     },
     __tx: tx,
   };
@@ -73,11 +86,18 @@ describe("finalizarPedidoPago", () => {
   it("PENDING → PAID com baixa de estoque, cupom e sem duplicar", async () => {
     const db = bancoFake("PENDING");
     const r = await finalizarPedidoPago("ped-1", "pay-1", db);
-    expect(r).toEqual({ ok: true, jaFinalizado: false });
+    expect(r).toEqual({ ok: true, jaFinalizado: false, emEspera: false, hold: null });
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     expect(db.__tx.order.update).toHaveBeenCalledWith({
       where: { id: "ped-1" },
-      data: { status: "PAID", paymentStatus: "PAID", paymentId: "pay-1" },
+      data: {
+        status: "PAID",
+        paymentStatus: "PAID",
+        holdCode: null,
+        holdReason: null,
+        holdAt: null,
+        paymentId: "pay-1",
+      },
     });
     expect(db.__tx.coupon.update).toHaveBeenCalledTimes(1);
     expect(db.__tx.product.update).toHaveBeenCalledTimes(1);
@@ -96,14 +116,32 @@ describe("finalizarPedidoPago", () => {
     expect(r).toEqual({ ok: false, jaFinalizado: false });
   });
 
-  it("estoque insuficiente na finalização: falha sem escrever", async () => {
+  it("estoque insuficiente: RETÉM (hold) com aprovação gravada, sem baixar estoque", async () => {
     const db = bancoFake("PENDING", 1);
-    await expect(finalizarPedidoPago("ped-1", "pay-1", db)).rejects.toThrow(
-      "Estoque insuficiente"
-    );
+    const r = await finalizarPedidoPago("ped-1", "pay-1", db);
+    // Aprovação financeira é GRAVADA (não lança mais 500 no webhook) e o
+    // pedido fica em retenção — status permanece PENDING (não fatura).
+    expect(r).toEqual({ ok: true, jaFinalizado: false, emEspera: true, hold: "ESTOQUE_INSUFICIENTE" });
+    expect(db.__tx.order.updateMany).toHaveBeenCalledWith({
+      where: { id: "ped-1", status: "PENDING" },
+      data: expect.objectContaining({
+        paymentStatus: "PAID",
+        paymentId: "pay-1",
+        holdCode: "ESTOQUE_INSUFICIENTE",
+      }),
+    });
     expect(db.__tx.order.update).not.toHaveBeenCalled();
     expect(db.__tx.coupon.update).not.toHaveBeenCalled();
     expect(db.__tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it("cupom com reserva na criação (couponReserved): finalização NÃO incrementa de novo", async () => {
+    const db2 = bancoFake("PENDING", 10, { couponReserved: true });
+    const r = await finalizarPedidoPago("ped-1", "pay-1", db2);
+    expect(r.ok).toBe(true);
+    expect(r.emEspera).toBe(false);
+    // sem incremento de cupom: a vaga já foi consumida na criação do pedido
+    expect(db2.__tx.coupon.update).not.toHaveBeenCalled();
   });
 
   it("e-mail 'pedido pago' sai pelo OUTBOX com dedupeKey status:{id}:PAID (não direto)", async () => {

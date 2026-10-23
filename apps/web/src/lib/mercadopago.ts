@@ -324,3 +324,107 @@ export async function listarEstornosMp(
     return { ok: false, motivo: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * Busca um pagamento pelo external_reference (recovery por lost-response).
+ * Retorna o primeiro resultado encontrado ou null.
+ */
+export async function buscarPagamentoPorReferencia(
+  token: string,
+  referenciaExterna: string
+): Promise<{ id: string; status: string; referenciaExterna: string | null } | null> {
+  const r = (await mpFetch(
+    token,
+    `/v1/payments/search?external_reference=${encodeURIComponent(referenciaExterna)}&criteria=desc&sort=date_created`
+  )) as { results?: unknown };
+  const lista = Array.isArray(r.results) ? r.results : [];
+  if (lista.length === 0) return null;
+  const maisRecente = lista[0] as Record<string, unknown>;
+  if (maisRecente == null || maisRecente.id == null) return null;
+  return {
+    id: String(maisRecente.id),
+    status: String(maisRecente.status),
+    referenciaExterna:
+      typeof maisRecente.external_reference === "string" ? maisRecente.external_reference : null,
+  };
+}
+
+/**
+ * Valida a identidade do pagamento comparando os dados do webhook com o pedido.
+ * recoveryContext:
+ * - "webhook": validação rigorosa (paymentId deve corresponder)
+ * - "reconciliacao": lost-response recovery (aceita external_reference como confirmação)
+ */
+export function validarIdentidadePagamento(
+  pagamento: { id: string; status: string; referenciaExterna: string | null; currencyId?: string | null; transactionAmount?: number | null },
+  pedido: { id: string; total: number | string; paymentId: string | null },
+  recoveryContext: "webhook" | "reconciliacao" = "webhook"
+): { ok: boolean; tipo?: "associacao" | "moeda" | "valor"; detalhe?: string } {
+  // Caso 1: paymentId ausente (resposta perdida)
+  if (!pedido.paymentId) {
+    if (recoveryContext === "reconciliacao") {
+      if (pagamento.referenciaExterna !== pedido.id) {
+        return {
+          ok: false,
+          tipo: "associacao",
+          detalhe: `external_reference ${pagamento.referenciaExterna} não corresponde ao pedido ${pedido.id} (recuperação por referência perdida)`,
+        };
+      }
+    } else {
+      console.error(
+        `[webhook:divergencia-associacao]`,
+        `paymentId ausente no pedido ${pedido.id} — webhook ignorado`
+      );
+      return {
+        ok: false,
+        tipo: "associacao",
+        detalhe: `paymentId ausente no pedido ${pedido.id}; webhook ignorado por segurança`,
+      };
+    }
+  }
+
+  // Caso 2: Verificação de associação (paymentId)
+  if (pedido.paymentId) {
+    if (pedido.paymentId !== pagamento.id) {
+      if (recoveryContext === "webhook") {
+        return {
+          ok: false,
+          tipo: "associacao",
+          detalhe: `pedido ${pedido.id} já referencia o pagamento ${pedido.paymentId}; a notificação descreve o pagamento ${pagamento.id}`,
+        };
+      }
+      // Em reconciliacao: se external_reference confirmar, permite prosseguir
+      const externalConfirmada = !!pagamento.referenciaExterna && pagamento.referenciaExterna === pedido.id;
+      if (!externalConfirmada) {
+        console.warn(
+          `[reconciliar:divergencia-associacao]`,
+          `paymentId mismatch: pedido ${pedido.id} tem ${pedido.paymentId}, pagamento notify tem ${pagamento.id}`
+        );
+      }
+    }
+  }
+
+  // Validação de moeda
+  if (pagamento.currencyId != null && pagamento.currencyId !== "BRL") {
+    return {
+      ok: false,
+      tipo: "moeda",
+      detalhe: `moeda ${pagamento.currencyId} (esperado BRL) no pagamento ${pagamento.id}`,
+    };
+  }
+
+  // Validação de valor ( tolerância de 1 centavo)
+  if (pagamento.transactionAmount != null) {
+    const totalPedido = Math.round(Number(pedido.total) * 100) / 100;
+    const valor = Math.round(pagamento.transactionAmount * 100) / 100;
+    if (Math.abs(valor - totalPedido) >= 0.01) {
+      return {
+        ok: false,
+        tipo: "valor",
+        detalhe: `valor ${valor.toFixed(2)} ≠ total do pedido ${totalPedido.toFixed(2)} (pagamento ${pagamento.id}, pedido ${pedido.id})`,
+      };
+    }
+  }
+
+  return { ok: true };
+}

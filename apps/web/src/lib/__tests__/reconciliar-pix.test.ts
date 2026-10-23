@@ -20,7 +20,7 @@ const { findMany, updateMany, buscarPagamento, finalizarPedidoPago, enfileirarEv
   });
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
-vi.mock("@/lib/mercadopago", () => ({ buscarPagamento }));
+vi.mock("@/lib/mercadopago", () => ({ buscarPagamento: vi.fn(), validarIdentidadePagamento: vi.fn(() => ({ ok: true })) }));
 vi.mock("@/lib/pedidos/finalizar", () => ({ finalizarPedidoPago }));
 vi.mock("@/lib/erp", () => ({ enfileirarEvento, entregarEvento }));
 vi.mock("@/lib/email-outbox", () => ({
@@ -38,7 +38,7 @@ const AGORA = new Date("2026-10-17T15:00:00Z");
 const pedido = (horas: number) => ({
   id: "ord-1",
   number: "DC-20261017-0001",
-  paymentId: "184666023462",
+  paymentId: "p2",
   createdAt: new Date(AGORA.getTime() - horas * 3_600_000),
 });
 
@@ -96,11 +96,11 @@ describe("reconciliarPixPendentes", () => {
 
   it("pagamento aprovado → finaliza o pedido (sem webhook)", async () => {
     findMany.mockResolvedValue([pedido(3)]);
-    buscarPagamento.mockResolvedValue({ id: "184666023462", status: "approved", referenciaExterna: "ord-1" });
+    buscarPagamento.mockResolvedValue({ id: "p2", status: "approved", referenciaExterna: "ord-1" });
     finalizarPedidoPago.mockResolvedValue({ ok: true, jaFinalizado: false });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
-    expect(finalizarPedidoPago).toHaveBeenCalledWith("ord-1", "184666023462");
+    expect(finalizarPedidoPago).toHaveBeenCalledWith("ord-1", "p2");
     expect(r).toMatchObject({ processados: 1, finalizados: 1, erros: 0 });
   });
 
