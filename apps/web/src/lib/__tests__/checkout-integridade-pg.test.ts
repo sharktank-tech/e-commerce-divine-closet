@@ -184,12 +184,14 @@ describe("finalizarPedidoPago — integridade de estoque em PostgreSQL real", ()
       ],
     });
 
-    await expect(finalizarPedidoPago(pedido.id, "pay-1", comoBanco(prismaA))).rejects.toThrow(
-      /Estoque insuficiente/
-    );
+    const r = await finalizarPedidoPago(pedido.id, "pay-1", comoBanco(prismaA));
+    // Retenção: pagamento aprovado, pedido em hold (status=PENDING, paymentStatus=PAID)
+    expect(r).toMatchObject({ ok: true, jaFinalizado: false, emEspera: true, hold: "ESTOQUE_INSUFICIENTE" });
 
-    // Nada foi escrito: pedido segue PENDING e o saldo intacto.
-    expect(await estadoPedido(prismaA, pedido.id)).toMatchObject({ paymentStatus: "PENDING" });
+    // Pedido segue PENDING (hold) e o saldo intacto.
+    const estado = await estadoPedido(prismaA, pedido.id);
+    expect(estado?.status).toBe("PENDING");
+    expect(estado?.paymentStatus).toBe("PAID");
     const estoque = await prismaA.product.findUnique({ where: { id: produto.id } });
     expect(estoque?.stock).toBe(5);
   });
@@ -204,19 +206,22 @@ describe("finalizarPedidoPago — integridade de estoque em PostgreSQL real", ()
       finalizarPedidoPago(pedidoB.id, "pay-b", comoBanco(prismaB)),
     ]);
 
-    const vitorias = resultados.filter((r) => r.status === "fulfilled");
-    const derrotas = resultados.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
-    expect(vitorias).toHaveLength(1);
-    expect(derrotas).toHaveLength(1);
-    expect(String(derrotas[0].reason)).toMatch(/Estoque insuficiente/);
+    // Um finaliza (PAID), o outro entra em hold (estoque insuficiente)
+    const fulfilled = resultados.filter((r) => r.status === "fulfilled");
+    expect(fulfilled).toHaveLength(2);
+
+    const pagos = await prismaA.order.count({
+      where: { id: { in: [pedidoA.id, pedidoB.id] }, status: "PAID" },
+    });
+    expect(pagos).toBe(1);
 
     const estoque = await prismaA.product.findUnique({ where: { id: produto.id } });
     expect(estoque?.stock).toBe(0); // nunca negativo
 
-    const pagos = await prismaA.order.count({
-      where: { id: { in: [pedidoA.id, pedidoB.id] }, paymentStatus: "PAID" },
+    const holdCount = await prismaA.order.count({
+      where: { id: { in: [pedidoA.id, pedidoB.id] }, status: "PENDING" },
     });
-    expect(pagos).toBe(1);
+    expect(holdCount).toBe(1);
   });
 
   it("#4c duas encomendas da MESMA variação: trava da variação impede oversell", async () => {
@@ -238,10 +243,22 @@ describe("finalizarPedidoPago — integridade de estoque em PostgreSQL real", ()
       finalizarPedidoPago(pedidoA.id, "pay-a", comoBanco(prismaA)),
       finalizarPedidoPago(pedidoB.id, "pay-b", comoBanco(prismaB)),
     ]);
-    expect(resultados.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    // Um finaliza (fulfilled), o outro entra em hold (fulfilled também, pois não lança erro)
+    const fulfilled = resultados.filter((r) => r.status === "fulfilled");
+    expect(fulfilled).toHaveLength(2);
 
     const depois = await prismaA.productVariation.findUnique({ where: { id: variacao.id } });
     expect(depois?.stock).toBe(0);
+
+    const pagos = await prismaA.order.count({
+      where: { id: { in: [pedidoA.id, pedidoB.id] }, status: "PAID" },
+    });
+    expect(pagos).toBe(1);
+
+    const holdCount = await prismaA.order.count({
+      where: { id: { in: [pedidoA.id, pedidoB.id] }, status: "PENDING" },
+    });
+    expect(holdCount).toBe(1);
   });
 });
 
@@ -293,8 +310,8 @@ describe("finalizarPedidoPago — idempotência sob webhook duplicado/concorrent
     const primeira = await finalizarPedidoPago(pedido.id, "pay-1", comoBanco(prismaA));
     const segunda = await finalizarPedidoPago(pedido.id, "pay-1", comoBanco(prismaA));
 
-    expect(primeira).toEqual({ ok: true, jaFinalizado: false });
-    expect(segunda).toEqual({ ok: true, jaFinalizado: true });
+    expect(primeira).toMatchObject({ ok: true, jaFinalizado: false, emEspera: false, hold: null });
+    expect(segunda).toMatchObject({ ok: true, jaFinalizado: true });
 
     const estoque = await prismaA.product.findUnique({ where: { id: produto.id } });
     expect(estoque?.stock).toBe(9);
@@ -346,7 +363,7 @@ describe("cupom — maxUses nunca é ultrapassado", () => {
 
     // O pagamento é irreversível: o pedido confirma, mas o contador não passa
     // do limite (e o incidente fica visível no log).
-    expect(r).toEqual({ ok: true, jaFinalizado: false });
+    expect(r).toMatchObject({ ok: true, jaFinalizado: false, emEspera: false, hold: null });
     const depois = await prismaA.coupon.findUnique({ where: { code: cupom.code } });
     expect(depois?.usedCount).toBe(1);
     expect(await estadoPedido(prismaA, pedido.id)).toMatchObject({ paymentStatus: "PAID" });
