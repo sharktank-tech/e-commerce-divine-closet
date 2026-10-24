@@ -45,11 +45,17 @@ export async function reservarCupom(tx: TxSql, code: string): Promise<boolean> {
  * Devolve UMA vaga ao cupom (piso 0, nunca negativo). Chamado quando um
  * pedido que JÁ reservou o cupom termina em falha definitiva.
  */
-export async function liberarCupomReservado(tx: TxSql, code: string): Promise<void> {
+export async function liberarCupomReservado(tx: TxSql, orderId: string): Promise<void> {
+  // A posse da reserva é consumida atomicamente. Repetição não toca reservas alheias.
   await tx.$queryRawUnsafe(
-    `UPDATE "Coupon"
-        SET "usedCount" = GREATEST("usedCount" - 1, 0), "updatedAt" = now()
-      WHERE "code" = $1`,
-    code
+    `WITH liberado AS (
+       UPDATE "Order" SET "couponReserved" = false, "updatedAt" = now()
+       WHERE id = $1::uuid AND "couponReserved" = true
+         AND status = 'CANCELLED' AND "paymentStatus" = 'FAILED'
+       RETURNING "couponCode"
+     )
+     UPDATE "Coupon" SET "usedCount" = GREATEST("usedCount" - 1, 0), "updatedAt" = now()
+     WHERE code IN (SELECT "couponCode" FROM liberado)`,
+    orderId
   );
 }

@@ -204,3 +204,51 @@ describe("assinatura do webhook", () => {
     expect(verificarAssinaturaWebhook("99", "", "1700000000", v1, "segredo")).toBe(true);
   });
 });
+
+import { buscarPagamentoPorReferencia, PagamentosAmbiguosError, validarIdentidadePagamento } from "@/lib/mercadopago";
+
+describe("identidade financeira e busca de tentativas", () => {
+  const pedido = { id: "ord", paymentId: "1", total: 32.99 };
+  const raw = (id: number, status = "approved") => ({ id, status, external_reference: "ord", currency_id: "BRL", transaction_amount: 32.99 });
+  const pagamento = { id: "1", status: "approved", referenciaExterna: "ord", currencyId: "BRL", transactionAmount: 32.99 };
+  it("adaptador expõe moeda e valor consultados", async () => {
+    mockFetch(raw(1));
+    expect(await buscarPagamento("tok", "1")).toEqual(pagamento);
+  });
+  it("webhook antes de persistir paymentId aceita apenas referência, moeda e valor exatos", () => {
+    expect(validarIdentidadePagamento(pagamento, { ...pedido, paymentId: null }).ok).toBe(true);
+    for (const p of [{ ...pagamento, referenciaExterna: "outra" }, { ...pagamento, currencyId: null }, { ...pagamento, transactionAmount: null }]) {
+      expect(validarIdentidadePagamento(p, { ...pedido, paymentId: null }).ok).toBe(false);
+    }
+  });
+  it.each([undefined, null, NaN, Infinity, 32.98, 33])("valor inválido %s nunca confirma", valor => {
+    expect(validarIdentidadePagamento({ ...pagamento, transactionAmount: valor }, pedido).ok).toBe(false);
+  });
+  it("reconciliação exige referência exata mesmo com paymentId diferente ou igual", () => {
+    for (const paymentId of ["1", "outro", null]) {
+      expect(validarIdentidadePagamento({ ...pagamento, referenciaExterna: "outra" }, { ...pedido, paymentId }, "reconciliacao").ok).toBe(false);
+    }
+  });
+  it.each([{}, { status: "approved" }, { id: 1 }, { id: null, status: "approved" }])("resposta incompleta não vira id undefined: %j", async resposta => {
+    mockFetch(resposta);
+    await expect(criarPagamentoPix("tok", { valor: 32.99, email: "a@example.com", referenciaExterna: "ord", descricao: "d" }, "estavel")).rejects.toThrow(/incompleta/);
+  });
+  it("aprovação prevalece sobre recusa mais recente, sem depender da ordem", async () => {
+    for (const results of [[raw(2, "rejected"), raw(1)], [raw(1), raw(2, "rejected")]]) {
+      mockFetch({ results });
+      expect((await buscarPagamentoPorReferencia("tok", "ord"))?.id).toBe("1");
+    }
+  });
+  it("duas aprovações distintas exigem revisão, nunca escolhe só a primeira", async () => {
+    mockFetch({ results: [raw(1), raw(2)] });
+    await expect(buscarPagamentoPorReferencia("tok", "ord")).rejects.toBeInstanceOf(PagamentosAmbiguosError);
+  });
+  it("busca vazia é distinta de resposta inválida/erro", async () => {
+    mockFetch({ results: [] });
+    expect(await buscarPagamentoPorReferencia("tok", "ord")).toBeNull();
+    mockFetch({});
+    await expect(buscarPagamentoPorReferencia("tok", "ord")).rejects.toThrow(/incompleta/);
+    mockFetch({ message: "erro" }, false);
+    await expect(buscarPagamentoPorReferencia("tok", "ord")).rejects.toThrow();
+  });
+});

@@ -12,6 +12,7 @@ const { prismaMock, requireAuthMock, enfileirarEvento, entregarEvento, enfileira
     const prismaMock = {
       order: { findUnique: vi.fn(), update: vi.fn() },
       $transaction: vi.fn(),
+      $queryRawUnsafe: vi.fn(),
     };
     return {
       prismaMock,
@@ -132,6 +133,7 @@ describe("PATCH /api/admin/pedidos/[id] — notificação via outbox", () => {
     prismaMock.order.update.mockResolvedValue(orderAtualizado({ status: "CANCELLED" }));
     enfileirarEvento.mockResolvedValue("evt-1");
 
+    prismaMock.order.findUnique.mockResolvedValue({ status: "PENDING", paymentStatus: "PENDING", holdCode: null });
     const res = await PATCH(reqDe({ status: "CANCELLED" }), params);
     expect(res.status).toBe(200);
     expect(enfileirarEvento).toHaveBeenCalledWith(
@@ -143,5 +145,23 @@ describe("PATCH /api/admin/pedidos/[id] — notificação via outbox", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(entregarEvento).toHaveBeenCalledWith("evt-1");
     expect(processarOutbox).toHaveBeenCalledWith("outbox-1");
+  });
+});
+
+describe("guardas financeiras do admin", () => {
+  it("não cancela nem libera por estoque uma revisão financeira", async () => {
+    prismaMock.order.findUnique.mockResolvedValue({ status: "PENDING", paymentStatus: "PENDING", holdCode: "REVISAO_FINANCEIRA" });
+    expect((await PATCH(reqDe({ status: "CANCELLED" }), params)).status).toBe(409);
+    expect((await PATCH(reqDe({ status: "PENDING", liberarHold: true }), params)).status).toBe(409);
+    expect(prismaMock.order.update).not.toHaveBeenCalled();
+  });
+  it("não altera pagamento aprovado para FAILED manualmente", async () => {
+    expect((await PATCH(reqDe({ status: "PAID", paymentStatus: "FAILED" }), params)).status).toBe(409);
+    expect(prismaMock.order.update).not.toHaveBeenCalled();
+  });
+  it("mudança concorrente rejeita atualização desatualizada sem notificação", async () => {
+    prismaMock.order.update.mockRejectedValueOnce({ code: "P2025" });
+    expect((await PATCH(reqDe({ status: "SHIPPED" }), params)).status).toBe(409);
+    expect(enfileirarEmail).not.toHaveBeenCalled();
   });
 });

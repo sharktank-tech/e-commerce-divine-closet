@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buscarPagamento as buscarPagamentoReal, validarIdentidadePagamento } from "@/lib/mercadopago";
+import { buscarPagamento as buscarPagamentoReal, buscarPagamentoPorReferencia } from "@/lib/mercadopago";
 
 const buscarPagamento = buscarPagamentoReal as unknown as ReturnType<typeof vi.fn>;
 
@@ -22,7 +22,10 @@ const { findMany, updateMany, finalizarPedidoPago, enfileirarEvento, entregarEve
   });
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
-vi.mock("@/lib/mercadopago", () => ({ buscarPagamento: vi.fn(), validarIdentidadePagamento: vi.fn(() => ({ ok: true })) }));
+vi.mock("@/lib/mercadopago", async (original) => ({
+  ...await original<typeof import("@/lib/mercadopago")>(),
+  buscarPagamento: vi.fn(), buscarPagamentoPorReferencia: vi.fn(),
+}));
 vi.mock("@/lib/pedidos/finalizar", () => ({ finalizarPedidoPago }));
 vi.mock("@/lib/erp", () => ({ enfileirarEvento, entregarEvento }));
 vi.mock("@/lib/email-outbox", () => ({
@@ -41,11 +44,13 @@ const pedido = (horas: number) => ({
   id: "ord-1",
   number: "DC-20261017-0001",
   paymentId: "184666023462",
+  total: 100, paymentMethod: "PIX", couponReserved: false, couponCode: null,
   createdAt: new Date(AGORA.getTime() - horas * 3_600_000),
 });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(buscarPagamentoPorReferencia).mockResolvedValue({ id: "184666023462", status: "expired", referenciaExterna: "ord-1", currencyId: "BRL", transactionAmount: 100 });
   prismaMock.$transaction.mockImplementation(
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock)
   );
@@ -72,9 +77,9 @@ describe("decidirReconciliacao", () => {
     expect(decidirReconciliacao("in_process", 12)).toBe("manter");
   });
 
-  it(`pending com >= ${HORAS_PARA_CANCELAR_PIX}h → cancelar (Pix já expirou)`, () => {
-    expect(decidirReconciliacao("pending", HORAS_PARA_CANCELAR_PIX)).toBe("cancelar");
-    expect(decidirReconciliacao("pending", 100)).toBe("cancelar");
+  it(`pending com >= ${HORAS_PARA_CANCELAR_PIX}h → manter até confirmação do provedor`, () => {
+    expect(decidirReconciliacao("pending", HORAS_PARA_CANCELAR_PIX)).toBe("manter");
+    expect(decidirReconciliacao("pending", 100)).toBe("manter");
     expect(decidirReconciliacao("pending", HORAS_PARA_CANCELAR_PIX - 1)).toBe("manter");
   });
 
@@ -98,7 +103,7 @@ describe("reconciliarPixPendentes", () => {
 
   it("pagamento aprovado → finaliza o pedido (sem webhook)", async () => {
     findMany.mockResolvedValue([pedido(3)]);
-    buscarPagamento.mockResolvedValue({ id: "184666023462", status: "approved", referenciaExterna: "ord-1" });
+    buscarPagamento.mockResolvedValue({ id: "184666023462", status: "approved", referenciaExterna: "ord-1", currencyId: "BRL", transactionAmount: 100 });
     finalizarPedidoPago.mockResolvedValue({ ok: true, jaFinalizado: false });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
@@ -108,7 +113,7 @@ describe("reconciliarPixPendentes", () => {
 
   it("pix expirado → cancela o pedido (só se ainda PENDING) e avisa ERP", async () => {
     findMany.mockResolvedValue([pedido(2)]);
-    buscarPagamento.mockResolvedValue({ id: "p1", status: "expired", referenciaExterna: "ord-1" });
+    buscarPagamento.mockResolvedValue({ id: "184666023462", status: "expired", referenciaExterna: "ord-1", currencyId: "BRL", transactionAmount: 100 });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
     expect(updateMany).toHaveBeenCalledWith({
@@ -135,7 +140,7 @@ describe("reconciliarPixPendentes", () => {
 
   it("pedido já finalizado em corrida (updateMany count=0) → não conta nem avisa", async () => {
     findMany.mockResolvedValue([pedido(2)]);
-    buscarPagamento.mockResolvedValue({ id: "p1", status: "expired", referenciaExterna: "ord-1" });
+    buscarPagamento.mockResolvedValue({ id: "184666023462", status: "expired", referenciaExterna: "ord-1", currencyId: "BRL", transactionAmount: 100 });
     updateMany.mockResolvedValue({ count: 0 });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
@@ -147,7 +152,7 @@ describe("reconciliarPixPendentes", () => {
 
   it("pendente recente → mantém (dá tempo do webhook)", async () => {
     findMany.mockResolvedValue([pedido(1)]);
-    buscarPagamento.mockResolvedValue({ id: "p1", status: "pending", referenciaExterna: "ord-1" });
+    buscarPagamento.mockResolvedValue({ id: "184666023462", status: "pending", referenciaExterna: "ord-1", currencyId: "BRL", transactionAmount: 100 });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });
     expect(finalizarPedidoPago).not.toHaveBeenCalled();
@@ -159,7 +164,7 @@ describe("reconciliarPixPendentes", () => {
     findMany.mockResolvedValue([pedido(3), { ...pedido(4), id: "ord-2" }]);
     buscarPagamento
       .mockRejectedValueOnce(new Error("timeout"))
-      .mockResolvedValueOnce({ id: "p2", status: "approved", referenciaExterna: "ord-2" });
+      .mockResolvedValueOnce({ id: "184666023462", status: "approved", referenciaExterna: "ord-2", currencyId: "BRL", transactionAmount: 100 });
     finalizarPedidoPago.mockResolvedValue({ ok: true, jaFinalizado: false });
 
     const r = await reconciliarPixPendentes({ token: "tok", agora: AGORA });

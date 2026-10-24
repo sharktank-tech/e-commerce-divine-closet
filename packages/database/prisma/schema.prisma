@@ -291,6 +291,8 @@ model Order {
   // rota devolve como o MESMO pedido — nunca dois pedidos nem duas cobranças.
   // null = pedidos anteriores ao recurso (não há backfill).
   idempotencyKey String?   @unique
+  // Hash de parâmetros não sensíveis: impede mudar método/parcelas/bandeira no retry.
+  paymentRequestHash String?
   // Reserva de cupom na CRIAÇÃO do pedido (tx atômica: UPDATE condicional
   // só incrementa enquanto houver vaga em maxUses). true = o contador já
   // foi consumido por ESTE pedido; a finalização não incrementa de novo e a

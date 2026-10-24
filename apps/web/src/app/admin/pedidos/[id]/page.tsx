@@ -13,6 +13,9 @@ type Order = {
   number: string;
   status: string;
   paymentStatus: string;
+  holdCode?: string | null;
+  holdReason?: string | null;
+  holdAt?: string | null;
   paymentMethod: string;
   subtotal: string | number;
   shipping: string | number;
@@ -90,14 +93,14 @@ export default function AdminPedidoDetalhePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function updateStatus(status: string) {
+  async function updateStatus(status: string, liberarHold = false) {
     if (!order) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/pedidos/${order.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...(liberarHold ? { liberarHold: true } : {}) }),
       });
       if (res.ok) await load();
       else alert("Erro ao atualizar");
@@ -269,10 +272,19 @@ export default function AdminPedidoDetalhePage({
           <section className="rounded-xl border border-ink/10 bg-white p-5">
             <h2 className="font-semibold text-ink">Atualizar status</h2>
             <div className="mt-4 flex flex-wrap gap-2">
+              {order.holdCode && (
+                <div role="alert" className="w-full rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+                  <p className="font-semibold">Pedido em retenção: {order.holdCode}</p>
+                  <p>{order.holdReason}</p>
+                  {order.holdCode === "ESTOQUE_INSUFICIENTE" && order.paymentStatus === "PAID" ? (
+                    <Button disabled={saving} onClick={() => updateStatus(order.status, true)}>Revalidar estoque e liberar</Button>
+                  ) : <p>Revisão financeira necessária. Confira os pagamentos no provedor antes de alterar o pedido.</p>}
+                </div>
+              )}
               {nextStatuses.map((s) => (
                 <button
                   key={s}
-                  disabled={saving || s === order.status}
+                  disabled={saving || s === order.status || s === "PAID" || s === "REFUNDED" || Boolean(order.holdCode)}
                   onClick={() => updateStatus(s)}
                   className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 ${
                     s === order.status

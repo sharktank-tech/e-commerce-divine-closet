@@ -1,3 +1,4 @@
+import { registrarDivergenciaPagamento } from "@/lib/pedidos/divergencia-pagamento";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { comErro } from "@/lib/erros";
@@ -104,13 +105,15 @@ export const POST = comErro(async (req: NextRequest) => {
   });
   if (!divergencia.ok) {
     console.error(`[webhook:divergencia-${divergencia.tipo}]`, divergencia.detalhe);
+    await registrarDivergenciaPagamento(order.id, `IDENTIDADE_${divergencia.tipo}`, [pagamento.id]);
     return NextResponse.json({ received: true, divergencia: divergencia.tipo });
   }
 
   // Fora de PENDING: nada a fazer (idempotente). Um pedido em RETENÇÃO
   // (paymentStatus=PAID + hold por falta de estoque) também cai aqui — a
   // aprovação já está registrada e a resolução é do admin.
-  if (order.status !== "PENDING" || order.paymentStatus !== "PENDING") {
+  if (order.status !== "PENDING") {
+    if (order.status === "CANCELLED") await registrarDivergenciaPagamento(order.id, "APROVACAO_TARDIA", [pagamento.id], true);
     return NextResponse.json({ received: true });
   }
 

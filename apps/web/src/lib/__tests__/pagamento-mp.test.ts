@@ -107,7 +107,9 @@ describe("finalizarPedidoPago", () => {
     const db = bancoFake("PAID");
     const r = await finalizarPedidoPago("ped-1", "pay-1", db);
     expect(r).toEqual({ ok: true, jaFinalizado: true });
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(db.__tx.order.update).not.toHaveBeenCalled();
+    expect(db.__tx.product.update).not.toHaveBeenCalled();
   });
 
   it("pedido inexistente: ok false", async () => {
@@ -158,7 +160,8 @@ describe("finalizarPedidoPago", () => {
         kind: "order_paid",
         orderId: "ped-1",
         mail: expect.objectContaining({ to: "c@c.com" }),
-      })
+      }),
+      db.__tx
     );
     expect(processarMock).toHaveBeenCalledWith("ob-1");
   });

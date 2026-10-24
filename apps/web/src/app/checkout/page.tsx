@@ -92,6 +92,7 @@ const STEPS = ["Identificação", "Endereço", "Frete", "Pagamento"];
 
 export default function CheckoutPage() {
   const router = useRouter();
+  const tentativaRef = useRef<{ key: string; extra?: { cardToken: string; installments: number; paymentMethodId: string } } | null>(null);
   const [cart, setCart] = useState<CartData | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -588,19 +589,26 @@ export default function CheckoutPage() {
       }
 
       // No modo MP, o cartão vai tokenizado (nunca o número cru).
-      let pagamentoExtra = {};
+      if (!tentativaRef.current) {
+        const salva = lerSessao("dc_checkout_idempotency");
+        tentativaRef.current = { key: typeof salva === "string" && salva ? salva : crypto.randomUUID() };
+        gravarSessao("dc_checkout_idempotency", tentativaRef.current.key);
+      }
+      let pagamentoExtra = tentativaRef.current.extra ?? {};
       if (method === "card" && mpAtivo) {
         if (!mpPronto) {
           setError("Carregando Mercado Pago, aguarde e tente de novo.");
           return;
         }
         try {
-          const { token, bandeira } = await tokenizarCartao();
-          pagamentoExtra = {
+          const anterior = tentativaRef.current.extra;
+          const { token, bandeira } = anterior ? { token: anterior.cardToken, bandeira: anterior.paymentMethodId } : await tokenizarCartao();
+          tentativaRef.current.extra = {
             cardToken: token,
             installments: Number(parcelas) || 1,
             paymentMethodId: bandeira,
           };
+          pagamentoExtra = tentativaRef.current.extra;
         } catch (err) {
           setError(err instanceof Error ? err.message : "Cartão inválido.");
           return;
@@ -608,7 +616,7 @@ export default function CheckoutPage() {
       }
       const res = await fetch("/api/pedidos", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": tentativaRef.current.key },
         body: JSON.stringify({
           address: {
             street: form.street,
@@ -637,6 +645,10 @@ export default function CheckoutPage() {
 
       const data = await res.json();
 
+      if ((res.ok && data.ok) || (res.status === 402 && data.order?.paymentStatus === "FAILED")) {
+        apagarSessao("dc_checkout_idempotency");
+        tentativaRef.current = null;
+      }
       if (res.ok && data.ok) {
         // Compra confirmada: limpa a escolha desta compra — a próxima
         // volta a usar o endereço padrão (autofill).

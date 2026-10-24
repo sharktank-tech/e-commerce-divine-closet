@@ -80,6 +80,7 @@ type BancoFinalizar = {
       number: string;
       status: string;
       paymentStatus: string;
+      paymentId?: string | null;
       holdCode: string | null;
       couponReserved: boolean;
       userId: string | null;
@@ -102,6 +103,7 @@ type TxFinalizar = {
       number: string;
       status: string;
       paymentStatus: string;
+      paymentId?: string | null;
       holdCode: string | null;
       couponReserved: boolean;
       userId: string | null;
@@ -156,17 +158,11 @@ function localizarVariacao(
 export async function finalizarPedidoPago(
   orderId: string,
   paymentId?: string,
-  db: BancoFinalizar = prisma as unknown as BancoFinalizar
+  db: BancoFinalizar = prisma as unknown as BancoFinalizar,
+  liberarEstoqueHold = false
 ): Promise<ResultadoFinalizacao> {
-  // Fast-path de leitura: evita abrir transação quando o pedido já saiu de
-  // PENDING (reenvio de webhook). É SÓ otimização — a autoridade é a trava +
-  // recarga dentro da tx, porque esta leitura pode estar defasada em corrida.
-  //
-  // A guarda é por `status`, não por `paymentStatus`: um pedido em RETENÇÃO
-  // (pagamento aprovado, sem estoque) tem paymentStatus=PAID e status=PENDING
-  // e PRECISA poder re-entrar aqui quando o admin repõe o estoque e limpa o
-  // hold. Já um pedido totalmente finalizado tem status=PAID/SHIPPED/... e
-  // nunca mais re-entra (baixa de estoque, cupom, ERP e e-mail não repetem).
+  // Leitura inicial só verifica existência. Duplicatas e aprovações distintas
+  // são decididas com a linha travada dentro da transação.
   const order = await db.order.findUnique({
     where: { id: orderId },
     include: {
@@ -175,12 +171,13 @@ export async function finalizarPedidoPago(
     },
   });
   if (!order) return { ok: false, jaFinalizado: false };
-  if (order.status !== "PENDING") return { ok: true, jaFinalizado: true };
 
   const estoquesNovos = new Map<string, number>();
   const eventosErp: string[] = [];
+  let emailId: string | null = null;
   let jaFinalizadoDentroDaTx = false;
   let emEspera = false;
+  let motivoEspera: string = HOLD_ESTOQUE_INSUFICIENTE;
 
   await db.$transaction(async (tx) => {
     // 1) Trava a linha do PEDIDO primeiro: serializa webhook, reconciliação e
@@ -199,11 +196,29 @@ export async function finalizarPedidoPago(
         user: { select: { email: true } },
       },
     });
+    if (atual && paymentId && atual.paymentId && atual.paymentId !== paymentId && atual.paymentStatus === "PAID") {
+      await tx.order.update({ where: { id: atual.id }, data: {
+        holdCode: "REVISAO_FINANCEIRA", holdReason: `MULTIPLOS_APROVADOS: ${atual.paymentId},${paymentId}`, holdAt: new Date(),
+      } });
+      motivoEspera = "REVISAO_FINANCEIRA"; emEspera = true; return;
+    }
+    if (atual && atual.status === "CANCELLED" && paymentId) {
+      await tx.order.update({ where: { id: atual.id }, data: {
+        paymentStatus: "PAID", paymentId,
+        holdCode: "REVISAO_FINANCEIRA", holdReason: `APROVACAO_TARDIA: ${paymentId}`, holdAt: new Date(),
+      } });
+      motivoEspera = "REVISAO_FINANCEIRA"; emEspera = true; return;
+    }
     if (!atual || atual.status !== "PENDING") {
       jaFinalizadoDentroDaTx = true;
       return;
     }
 
+    if (atual.holdCode && !(liberarEstoqueHold && atual.holdCode === HOLD_ESTOQUE_INSUFICIENTE)) {
+      motivoEspera = atual.holdCode;
+      emEspera = true;
+      return;
+    }
     // 3) Trava produtos e variações em ordem DETERMINÍSTICA (id crescente) para
     //    dois checkouts concorrentes nunca provocarem deadlock entre si.
     const ids = [...new Set(atual.items.map((i) => i.product.id))].sort();
@@ -387,6 +402,16 @@ export async function finalizarPedidoPago(
         if (eid) eventosErp.push(eid);
       }
     }
+    const { link } = await montarLinkAcompanhamento(
+      { id: atual.id, userId: atual.userId, guestEmail: atual.guestEmail },
+      tx as unknown as Parameters<typeof montarLinkAcompanhamento>[1]
+    );
+    const mail = emails.orderPaid(atual.number, link);
+    emailId = await enfileirarEmail({
+      dedupeKey: dedupeKeyStatusPedido(atual.id, "PAID"), kind: "order_paid", orderId: atual.id,
+      mail: { to: atual.user?.email || atual.guestEmail || "", subject: mail.subject, text: mail.text },
+    }, tx as unknown as Parameters<typeof enfileirarEmail>[1]);
+
   });
 
   // Corrida perdida: outro fluxo já confirmou este pedido dentro da tx — nada
@@ -401,9 +426,9 @@ export async function finalizarPedidoPago(
     console.error(
       "[finalizar:retencao]",
       orderId,
-      `paymentId=${paymentId ?? "-"} motivo=estoque insuficiente — pagamento aprovado, pedido em hold`
+      `paymentId=${paymentId ?? "-"} hold=${motivoEspera}`
     );
-    return { ok: true, jaFinalizado: false, emEspera: true, hold: HOLD_ESTOQUE_INSUFICIENTE };
+    return { ok: true, jaFinalizado: false, emEspera: true, hold: motivoEspera };
   }
 
   // Pós-commit: entrega imediata (sem travar); sem config ERP a fila
@@ -414,46 +439,8 @@ export async function finalizarPedidoPago(
     );
   }
 
-  // Link de acompanhamento no e-mail de confirmação: logado → /conta;
-  // convidado → link privado novo (só se não existe token ativo).
-  // Best-effort: falha de link nunca derruba a finalização.
-  let linkAcompanhar: string | null = null;
-  try {
-    const { link } = await montarLinkAcompanhamento(
-      { id: order.id, userId: order.userId ?? null, guestEmail: order.guestEmail },
-      db as unknown as Parameters<typeof montarLinkAcompanhamento>[1]
-    );
-    linkAcompanhar = link;
-  } catch (err) {
-    console.error("[finalizar:link-acompanhar]", err);
-  }
-
-  // E-mail "pedido pago" via OUTBOX (antes: sendEmail direto — perdia a
-  // mensagem se falhasse e podia duplicar em webhook repetido/concorrente).
-  // A dedupeKey única (status:{orderId}:PAID) garante NO MÁXIMO UMA linha por
-  // pedido: repetição PENDING→PAID não re-enfileira (a guarda de transição já
-  // retorna cedo) e, mesmo que enfileirasse, o P2002 devolve a linha existente
-  // → nenhum segundo envio. Fire-and-forget: não trava a finalização; falha
-  // fica PENDING e o dreno dos crons (12:00/21:00 UTC = 09h/18h local) retenta
-  // com backoff.
-  const mail = emails.orderPaid(order.number, linkAcompanhar);
-  void (async () => {
-    try {
-      const outboxId = await enfileirarEmail({
-        dedupeKey: dedupeKeyStatusPedido(order.id, "PAID"),
-        kind: "order_paid",
-        orderId: order.id,
-        mail: {
-          to: order.user?.email || order.guestEmail || "",
-          subject: mail.subject,
-          text: mail.text,
-        },
-      });
-      if (outboxId) await processarEmailOutbox(outboxId);
-    } catch (err) {
-      console.error("[finalizar:email]", err);
-    }
-  })();
+  // Somente transporte após commit; a linha de e-mail já existe atomicamente.
+  if (emailId) void processarEmailOutbox(emailId).catch(err => console.error("[finalizar:email]", err));
 
   return { ok: true, jaFinalizado: false, emEspera: false, hold: null };
 }

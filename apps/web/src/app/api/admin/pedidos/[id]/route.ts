@@ -1,3 +1,4 @@
+import { liberarCupomReservado } from "@/lib/pedidos/cupom-reserva";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -128,6 +129,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
     }
 
+    if (anterior.holdCode === "REVISAO_FINANCEIRA" && parsed.data.status !== anterior.status) {
+      return NextResponse.json({ error: "Resolva a revisão financeira antes de alterar o estado comercial." }, { status: 409 });
+    }
+
     // REFUNDED é exclusivo do fluxo de estorno (registra a linha Refund 1:1
     // com o idempotencyKey do provedor). Setar à mão deixava o pedido
     // "estornado" sem nenhum registro de quem devolveu o dinheiro.
@@ -165,11 +170,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           { status: 409 }
         );
       }
-      await prisma.order.updateMany({
-        where: { id, holdCode: { not: null } },
-        data: { holdCode: null, holdReason: null, holdAt: null },
-      });
-      const r = await finalizarPedidoPago(id);
+      if (anterior.holdCode !== "ESTOQUE_INSUFICIENTE" || anterior.paymentStatus !== "PAID") {
+        return NextResponse.json({ error: "Retenção financeira exige revisão; liberação de estoque não permitida." }, { status: 409 });
+      }
+      const r = await finalizarPedidoPago(id, undefined, undefined, true);
       const depois = await prisma.order.findUnique({
         where: { id },
         select: { id: true, status: true, paymentStatus: true, holdCode: true, holdReason: true },
@@ -182,16 +186,22 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       });
     }
 
+    if ((parsed.data.paymentStatus && parsed.data.paymentStatus !== anterior.paymentStatus) ||
+        (anterior.status === "PENDING" && parsed.data.status === "PAID") ||
+        (parsed.data.status === "CANCELLED" && anterior.paymentStatus === "PAID")) {
+      return NextResponse.json({ error: "Estado financeiro só pode mudar pelo fluxo de pagamento/estorno." }, { status: 409 });
+    }
+
     // Transição + evento ERP + notificação na MESMA transação (evento só ao
     // entrar em CANCELLED; e-mail só com mudança real — businessKey/dedupeKey
     // únicas: se outro caminho (estorno, reconciliação) já registrou, não
     // duplica). O envio em si é pós-commit, com retentativa via outbox.
     const { order, eventoId: eventoCancelId, emailId } = await prisma.$transaction(async (tx) => {
       const order = await tx.order.update({
-        where: { id },
+        where: { id, status: anterior.status, paymentStatus: anterior.paymentStatus, holdCode: anterior.holdCode ?? null },
         data: {
           status: parsed.data.status,
-          ...(parsed.data.paymentStatus ? { paymentStatus: parsed.data.paymentStatus } : {}),
+          ...(parsed.data.status === "CANCELLED" && anterior.paymentStatus === "PENDING" ? { paymentStatus: "FAILED" as const } : {}),
           ...(parsed.data.trackingCode !== undefined
             ? { trackingCode: parsed.data.trackingCode || null }
             : {}),
@@ -209,6 +219,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           user: { select: { email: true, name: true } },
         },
       });
+      if (order.status === "CANCELLED" && anterior.status !== "CANCELLED") await liberarCupomReservado(tx, id);
       let eventoId: string | null = null;
       if (order.status === "CANCELLED" && anterior.status !== "CANCELLED") {
         eventoId = await enfileirarEvento(
@@ -247,6 +258,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     return NextResponse.json({ order });
   } catch (err) {
+    if ((err as { code?: string })?.code === "P2025") return NextResponse.json({ error: "Pedido mudou; atualize e tente novamente." }, { status: 409 });
     console.error("[admin:pedido:patch]", err);
     return NextResponse.json({ error: "Erro ao atualizar" }, { status: 500 });
   }

@@ -1,5 +1,6 @@
+import { registrarDivergenciaPagamento } from "@/lib/pedidos/divergencia-pagamento";
 import { prisma } from "@/lib/prisma";
-import { buscarPagamento, buscarPagamentoPorReferencia, validarIdentidadePagamento } from "@/lib/mercadopago";
+import { buscarPagamento, buscarPagamentoPorReferencia, validarIdentidadePagamento, PagamentosAmbiguosError } from "@/lib/mercadopago";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 import { liberarCupomReservado } from "@/lib/pedidos/cupom-reserva";
 import {
@@ -25,9 +26,9 @@ export const HORAS_PARA_CANCELAR_PIX = 48;
 
 /** Janela de expiração por método de pagamento (horas desde a criação). */
 export const HORAS_PARA_CANCELAR: Record<string, number> = {
-  PIX: 48, // QR do Pix expira em ~30 min; 48h dá folga p/ notificação perdida
+  PIX: 48, // Referência operacional: não autoriza cancelamento local.
   CARD: 168, // 7 dias — análise antifraude do cartão pode levar dias
-  BOLETO: 120, // 5 dias úteis de vencimento do boleto
+  BOLETO: 120, // Horas corridas de referência, não dias úteis.
 };
 
 /** Fallback para método desconhecido (mantém o valor histórico do Pix). */
@@ -48,10 +49,8 @@ export function decidirReconciliacao(
   if (["expired", "rejected", "cancelled", "refused"].includes(statusMp)) {
     return "cancelar";
   }
-  if (["pending", "in_process", "in_mediation"].includes(statusMp)) {
-    const janela = HORAS_PARA_CANCELAR[metodoPagamento] ?? JANELA_PADRAO_HORAS;
-    return horasDesdeCriacao >= janela ? "cancelar" : "manter";
-  }
+  // Idade local não comprova expiração no provedor.
+  void horasDesdeCriacao; void metodoPagamento;
   // Status fora do esperado: não mexe (inspeção manual).
   return "manter";
 }
@@ -64,56 +63,6 @@ export type ResumoReconciliacao = {
   erros: number;
   ignorado?: string;
 };
-
-/**
- * Cancela um pedido PENDING que NUNCA teve pagamento criado no provedor
- * (resposta perdida e busca por `external_reference` não achou nada). Devolve
- * a vaga do cupom reservada na criação e dispara evento + notificação.
- * Condicional a `status=PENDING` para não sobrescrever uma finalização
- * concorrente. Devolve true quando o cancelamento foi aplicado.
- */
-async function cancelarPedidoNaoCobrado(
-  pedido: { id: string; number: string; couponCode: string | null; couponReserved: boolean },
-  resumo: ResumoReconciliacao
-): Promise<boolean> {
-  const { count, eventoId, emailId } = await prisma.$transaction(async (tx) => {
-    const { count } = await tx.order.updateMany({
-      where: { id: pedido.id, status: "PENDING", paymentStatus: "PENDING" },
-      data: { status: "CANCELLED", paymentStatus: "FAILED" },
-    });
-    let id: string | null = null;
-    let mailId: string | null = null;
-    if (count === 1) {
-      if (pedido.couponReserved && pedido.couponCode) {
-        await liberarCupomReservado(tx, pedido.couponCode);
-      }
-      id = await enfileirarEvento(
-        "pedido_cancelado",
-        { numero: pedido.number, motivo: "Pagamento nunca confirmado no provedor" },
-        { db: tx, businessKey: `pedido_cancelado:${pedido.id}` }
-      );
-      mailId = await enfileirarEmailStatusPedido(
-        pedido.id,
-        "CANCELLED",
-        tx as Parameters<typeof enfileirarEmailStatusPedido>[2]
-      );
-    }
-    return { count, eventoId: id, emailId: mailId };
-  });
-  if (count !== 1) return false;
-  resumo.cancelados++;
-  if (eventoId) {
-    void entregarEvento(eventoId).catch((err) =>
-      console.error("[reconciliar-pix:erp]", eventoId, err)
-    );
-  }
-  if (emailId) {
-    void processarEmailOutbox(emailId).catch((err) =>
-      console.error("[reconciliar-pix:email]", emailId, err)
-    );
-  }
-  return true;
-}
 
 export async function reconciliarPixPendentes(opcoes?: {
   limite?: number;
@@ -172,25 +121,20 @@ export async function reconciliarPixPendentes(opcoes?: {
   for (const pedido of pedidos) {
     resumo.processados++;
     try {
-      // Recuperação: com paymentId busca-se por id; sem paymentId (resposta
-      // perdida) busca-se pela referência externa — o próprio orderId.
-      const pagamento = pedido.paymentId
+      // Consulta conhecida + busca por referência para examinar todas as tentativas.
+      let pagamento = pedido.paymentId
         ? await buscarPagamento(token, pedido.paymentId)
-        : await buscarPagamentoPorReferencia(token, pedido.id);
+        : null;
       const horas =
         (agora.getTime() - pedido.createdAt.getTime()) / 3_600_000;
 
-      // Nenhum pagamento no provedor = nunca chegou a ser cobrado. Passada a
-      // janela do método, cancela (e devolve a vaga do cupom reservado).
-      if (!pagamento) {
-        const janela = HORAS_PARA_CANCELAR[pedido.paymentMethod] ?? JANELA_PADRAO_HORAS;
-        if (horas >= janela) {
-          const cancelado = await cancelarPedidoNaoCobrado(pedido, resumo);
-          if (cancelado) continue;
-        }
-        resumo.mantidos++;
-        continue;
+      // Examina outras tentativas também: recusa antiga não prevalece sobre aprovação.
+      const alternativa = await buscarPagamentoPorReferencia(token, pedido.id);
+      if (alternativa?.status === "approved" || !pagamento ||
+          ["rejected", "cancelled", "expired", "refused"].includes(pagamento.status)) {
+        pagamento = alternativa;
       }
+      if (!pagamento) { resumo.mantidos++; continue; }
 
       // Identidade: mesmo pedido, mesma moeda, mesmo valor. Divergência não
       // finaliza nem cancela — mantém e registra (inspeção manual).
@@ -209,6 +153,7 @@ export async function reconciliarPixPendentes(opcoes?: {
           `[reconciliar:divergencia-${divergencia.tipo}]`,
           divergencia.detalhe
         );
+        await registrarDivergenciaPagamento(pedido.id, `IDENTIDADE_${divergencia.tipo}`, [pagamento.id]);
         resumo.mantidos++;
         continue;
       }
@@ -236,7 +181,7 @@ export async function reconciliarPixPendentes(opcoes?: {
             // Pagamento não confirmou em definitivo → a reserva feita na
             // criação do pedido não deve consumir limite comercial.
             if (pedido.couponReserved && pedido.couponCode) {
-              await liberarCupomReservado(tx, pedido.couponCode);
+              await liberarCupomReservado(tx, pedido.id);
             }
             id = await enfileirarEvento(
               "pedido_cancelado",
@@ -271,6 +216,7 @@ export async function reconciliarPixPendentes(opcoes?: {
       }
     } catch (err) {
       // Um pedido com problema não derruba a leitura dos demais.
+      if (err instanceof PagamentosAmbiguosError) await registrarDivergenciaPagamento(pedido.id, "MULTIPLOS_APROVADOS", err.paymentIds);
       console.error("[reconciliar-pix]", pedido.id, err);
       resumo.erros++;
     }

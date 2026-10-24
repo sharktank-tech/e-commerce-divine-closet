@@ -15,6 +15,29 @@ export type QrPix = {
   ticketUrl: string | null;
 };
 
+export type PagamentoConsultado = {
+  id: string; status: string; referenciaExterna: string | null;
+  currencyId: string | null; transactionAmount: number | null;
+};
+
+function lerPagamento(r: Record<string, unknown>): PagamentoConsultado {
+  if (r.id == null || !String(r.id).trim() || typeof r.status !== "string" || !r.status) {
+    throw new Error("Mercado Pago: resposta incompleta; estado financeiro desconhecido");
+  }
+  return {
+    id: String(r.id), status: r.status,
+    referenciaExterna: typeof r.external_reference === "string" ? r.external_reference : null,
+    currencyId: typeof r.currency_id === "string" ? r.currency_id : null,
+    transactionAmount: typeof r.transaction_amount === "number" && Number.isFinite(r.transaction_amount) ? r.transaction_amount : null,
+  };
+}
+
+export class PagamentosAmbiguosError extends Error {
+  constructor(public readonly paymentIds: string[]) {
+    super("Mais de um pagamento aprovado para o pedido; revisão financeira necessária");
+  }
+}
+
 export type PagamentoMp = {
   id: string;
   status: "approved" | "pending" | "rejected" | "cancelled" | string;
@@ -52,11 +75,11 @@ async function mpFetch(
   return corpo;
 }
 
-/** approved → PAID; pending/in_process → PENDENTE; resto → FALHOU. */
+/** Só recusa/expiração explícita falha; estado desconhecido permanece pendente. */
 export function mapearStatusMp(status: string): "PAID" | "PENDING" | "FAILED" {
   if (status === "approved") return "PAID";
-  if (status === "pending" || status === "in_process") return "PENDING";
-  return "FAILED";
+  if (["rejected", "cancelled", "expired", "refused"].includes(status)) return "FAILED";
+  return "PENDING";
 }
 
 /**
@@ -140,8 +163,8 @@ export async function criarPagamentoPix(
     body: JSON.stringify(montarPix(input)),
   }, idempotencyKey)) as Record<string, unknown>;
   return {
-    id: String(r.id),
-    status: String(r.status),
+    id: lerPagamento(r).id,
+    status: lerPagamento(r).status,
     statusDetail: typeof r.status_detail === "string" ? r.status_detail : undefined,
     qr: lerQr(r),
   };
@@ -157,8 +180,8 @@ export async function criarPagamentoCartao(
     body: JSON.stringify(montarCartao(input)),
   }, idempotencyKey)) as Record<string, unknown>;
   return {
-    id: String(r.id),
-    status: String(r.status),
+    id: lerPagamento(r).id,
+    status: lerPagamento(r).status,
     statusDetail: typeof r.status_detail === "string" ? r.status_detail : undefined,
   };
 }
@@ -166,17 +189,9 @@ export async function criarPagamentoCartao(
 export async function buscarPagamento(
   token: string,
   pagamentoId: string
-): Promise<{ id: string; status: string; referenciaExterna: string | null }> {
-  const r = (await mpFetch(
-    token,
-    `/v1/payments/${encodeURIComponent(pagamentoId)}`
-  )) as Record<string, unknown>;
-  return {
-    id: String(r.id),
-    status: String(r.status),
-    referenciaExterna:
-      typeof r.external_reference === "string" ? r.external_reference : null,
-  };
+): Promise<PagamentoConsultado> {
+  const r = await mpFetch(token, `/v1/payments/${encodeURIComponent(pagamentoId)}`) as Record<string, unknown>;
+  return lerPagamento(r);
 }
 
 /**
@@ -325,106 +340,48 @@ export async function listarEstornosMp(
   }
 }
 
-/**
- * Busca um pagamento pelo external_reference (recovery por lost-response).
- * Retorna o primeiro resultado encontrado ou null.
- */
+/** Examina todas as páginas limitadas; nunca trata uma lista truncada como ausência. */
 export async function buscarPagamentoPorReferencia(
-  token: string,
-  referenciaExterna: string
-): Promise<{ id: string; status: string; referenciaExterna: string | null } | null> {
-  const r = (await mpFetch(
-    token,
-    `/v1/payments/search?external_reference=${encodeURIComponent(referenciaExterna)}&criteria=desc&sort=date_created`
-  )) as { results?: unknown };
-  const lista = Array.isArray(r.results) ? r.results : [];
-  if (lista.length === 0) return null;
-  const maisRecente = lista[0] as Record<string, unknown>;
-  if (maisRecente == null || maisRecente.id == null) return null;
-  return {
-    id: String(maisRecente.id),
-    status: String(maisRecente.status),
-    referenciaExterna:
-      typeof maisRecente.external_reference === "string" ? maisRecente.external_reference : null,
-  };
+  token: string, referenciaExterna: string
+): Promise<PagamentoConsultado | null> {
+  const encontrados = new Map<string, PagamentoConsultado>();
+  for (let offset = 0; offset < 1000; offset += 100) {
+    const r = await mpFetch(token,
+      `/v1/payments/search?external_reference=${encodeURIComponent(referenciaExterna)}&limit=100&offset=${offset}`
+    ) as { results?: unknown; paging?: { total?: number } };
+    if (!Array.isArray(r.results)) throw new Error("Mercado Pago: busca incompleta");
+    for (const raw of r.results) {
+      const p = lerPagamento(raw as Record<string, unknown>);
+      if (p.referenciaExterna !== referenciaExterna) throw new Error("Mercado Pago: referência divergente na busca");
+      encontrados.set(p.id, p);
+    }
+    if (r.results.length < 100 && (r.paging?.total ?? 0) <= offset + r.results.length) break;
+    if (offset === 900) throw new Error("Mercado Pago: busca truncada; revisão necessária");
+  }
+  const lista = [...encontrados.values()];
+  const aprovados = lista.filter(p => p.status === "approved");
+  if (aprovados.length > 1) throw new PagamentosAmbiguosError(aprovados.map(p => p.id));
+  if (aprovados.length === 1) return aprovados[0];
+  // Uma tentativa ainda ativa impede que uma recusa de outra tentativa cancele o pedido.
+  return lista.find(p => !["rejected", "cancelled", "expired", "refused"].includes(p.status)) ?? lista[0] ?? null;
 }
 
-/**
- * Valida a identidade do pagamento comparando os dados do webhook com o pedido.
- * recoveryContext:
- * - "webhook": validação rigorosa (paymentId deve corresponder)
- * - "reconciliacao": lost-response recovery (aceita external_reference como confirmação)
- */
+/** Todos os caminhos exigem referência exata, BRL e total em centavos. */
 export function validarIdentidadePagamento(
   pagamento: { id: string; status: string; referenciaExterna: string | null; currencyId?: string | null; transactionAmount?: number | null },
   pedido: { id: string; total: number | string; paymentId: string | null },
   recoveryContext: "webhook" | "reconciliacao" = "webhook"
 ): { ok: boolean; tipo?: "associacao" | "moeda" | "valor"; detalhe?: string } {
-  // Caso 1: paymentId ausente (resposta perdida)
-  if (!pedido.paymentId) {
-    if (recoveryContext === "reconciliacao") {
-      if (pagamento.referenciaExterna !== pedido.id) {
-        return {
-          ok: false,
-          tipo: "associacao",
-          detalhe: `external_reference ${pagamento.referenciaExterna} não corresponde ao pedido ${pedido.id} (recuperação por referência perdida)`,
-        };
-      }
-    } else {
-      console.error(
-        `[webhook:divergencia-associacao]`,
-        `paymentId ausente no pedido ${pedido.id} — webhook ignorado`
-      );
-      return {
-        ok: false,
-        tipo: "associacao",
-        detalhe: `paymentId ausente no pedido ${pedido.id}; webhook ignorado por segurança`,
-      };
-    }
+  if (!pagamento.id || pagamento.referenciaExterna !== pedido.id ||
+      (recoveryContext === "webhook" && pedido.paymentId != null && pedido.paymentId !== pagamento.id)) {
+    return { ok: false, tipo: "associacao", detalhe: "Referência ou pagamento incompatível com o pedido" };
   }
-
-  // Caso 2: Verificação de associação (paymentId)
-  if (pedido.paymentId) {
-    if (pedido.paymentId !== pagamento.id) {
-      if (recoveryContext === "webhook") {
-        return {
-          ok: false,
-          tipo: "associacao",
-          detalhe: `pedido ${pedido.id} já referencia o pagamento ${pedido.paymentId}; a notificação descreve o pagamento ${pagamento.id}`,
-        };
-      }
-      // Em reconciliacao: se external_reference confirmar, permite prosseguir
-      const externalConfirmada = !!pagamento.referenciaExterna && pagamento.referenciaExterna === pedido.id;
-      if (!externalConfirmada) {
-        console.warn(
-          `[reconciliar:divergencia-associacao]`,
-          `paymentId mismatch: pedido ${pedido.id} tem ${pedido.paymentId}, pagamento notify tem ${pagamento.id}`
-        );
-      }
-    }
+  if (pagamento.currencyId !== "BRL") return { ok: false, tipo: "moeda", detalhe: "Moeda ausente ou diferente de BRL" };
+  const total = Number(pedido.total);
+  if (typeof pagamento.transactionAmount !== "number" || !Number.isFinite(pagamento.transactionAmount) ||
+      !Number.isFinite(total) || total < 0 ||
+      Math.round(pagamento.transactionAmount * 100) !== Math.round(total * 100)) {
+    return { ok: false, tipo: "valor", detalhe: "Valor ausente ou diferente do total em centavos" };
   }
-
-  // Validação de moeda
-  if (pagamento.currencyId != null && pagamento.currencyId !== "BRL") {
-    return {
-      ok: false,
-      tipo: "moeda",
-      detalhe: `moeda ${pagamento.currencyId} (esperado BRL) no pagamento ${pagamento.id}`,
-    };
-  }
-
-  // Validação de valor ( tolerância de 1 centavo)
-  if (pagamento.transactionAmount != null) {
-    const totalPedido = Math.round(Number(pedido.total) * 100) / 100;
-    const valor = Math.round(pagamento.transactionAmount * 100) / 100;
-    if (Math.abs(valor - totalPedido) >= 0.01) {
-      return {
-        ok: false,
-        tipo: "valor",
-        detalhe: `valor ${valor.toFixed(2)} ≠ total do pedido ${totalPedido.toFixed(2)} (pagamento ${pagamento.id}, pedido ${pedido.id})`,
-      };
-    }
-  }
-
   return { ok: true };
 }
