@@ -15,6 +15,29 @@ export type QrPix = {
   ticketUrl: string | null;
 };
 
+export type PagamentoConsultado = {
+  id: string; status: string; referenciaExterna: string | null;
+  currencyId: string | null; transactionAmount: number | null;
+};
+
+function lerPagamento(r: Record<string, unknown>): PagamentoConsultado {
+  if (r.id == null || !String(r.id).trim() || typeof r.status !== "string" || !r.status) {
+    throw new Error("Mercado Pago: resposta incompleta; estado financeiro desconhecido");
+  }
+  return {
+    id: String(r.id), status: r.status,
+    referenciaExterna: typeof r.external_reference === "string" ? r.external_reference : null,
+    currencyId: typeof r.currency_id === "string" ? r.currency_id : null,
+    transactionAmount: typeof r.transaction_amount === "number" && Number.isFinite(r.transaction_amount) ? r.transaction_amount : null,
+  };
+}
+
+export class PagamentosAmbiguosError extends Error {
+  constructor(public readonly paymentIds: string[]) {
+    super("Mais de um pagamento aprovado para o pedido; revisão financeira necessária");
+  }
+}
+
 export type PagamentoMp = {
   id: string;
   status: "approved" | "pending" | "rejected" | "cancelled" | string;
@@ -25,7 +48,8 @@ export type PagamentoMp = {
 async function mpFetch(
   token: string,
   caminho: string,
-  init?: RequestInit
+  init?: RequestInit,
+  idempotencyKey?: string
 ): Promise<unknown> {
   const ehPost = String(init?.method || "GET").toUpperCase() === "POST";
   const r = await fetch(`${MP_API}${caminho}`, {
@@ -33,9 +57,11 @@ async function mpFetch(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      // POST exige chave de idempotência: repetir a mesma chave em retry
-      // não duplica pagamento (UUID novo a cada requisição).
-      ...(ehPost ? { "X-Idempotency-Key": randomUUID() } : {}),
+      // POST exige chave de idempotência: repetir a MESMA chave em retry não
+      // duplica pagamento. A chave vem do chamador (geralmente derivada da
+      // chave de idempotência do checkout) — um UUID novo a cada requisição,
+      // como antes, anulava a proteção no retry do cliente.
+      ...(ehPost ? { "X-Idempotency-Key": idempotencyKey || randomUUID() } : {}),
       ...(init?.headers || {}),
     },
     signal: AbortSignal.timeout(15000),
@@ -49,11 +75,11 @@ async function mpFetch(
   return corpo;
 }
 
-/** approved → PAID; pending/in_process → PENDENTE; resto → FALHOU. */
+/** Só recusa/expiração explícita falha; estado desconhecido permanece pendente. */
 export function mapearStatusMp(status: string): "PAID" | "PENDING" | "FAILED" {
   if (status === "approved") return "PAID";
-  if (status === "pending" || status === "in_process") return "PENDING";
-  return "FAILED";
+  if (["rejected", "cancelled", "expired", "refused"].includes(status)) return "FAILED";
+  return "PENDING";
 }
 
 /**
@@ -129,15 +155,16 @@ function lerQr(resposta: Record<string, unknown>): QrPix | undefined {
 
 export async function criarPagamentoPix(
   token: string,
-  input: Parameters<typeof montarPix>[0]
+  input: Parameters<typeof montarPix>[0],
+  idempotencyKey?: string
 ): Promise<PagamentoMp> {
   const r = (await mpFetch(token, "/v1/payments", {
     method: "POST",
     body: JSON.stringify(montarPix(input)),
-  })) as Record<string, unknown>;
+  }, idempotencyKey)) as Record<string, unknown>;
   return {
-    id: String(r.id),
-    status: String(r.status),
+    id: lerPagamento(r).id,
+    status: lerPagamento(r).status,
     statusDetail: typeof r.status_detail === "string" ? r.status_detail : undefined,
     qr: lerQr(r),
   };
@@ -145,15 +172,16 @@ export async function criarPagamentoPix(
 
 export async function criarPagamentoCartao(
   token: string,
-  input: Parameters<typeof montarCartao>[0]
+  input: Parameters<typeof montarCartao>[0],
+  idempotencyKey?: string
 ): Promise<PagamentoMp> {
   const r = (await mpFetch(token, "/v1/payments", {
     method: "POST",
     body: JSON.stringify(montarCartao(input)),
-  })) as Record<string, unknown>;
+  }, idempotencyKey)) as Record<string, unknown>;
   return {
-    id: String(r.id),
-    status: String(r.status),
+    id: lerPagamento(r).id,
+    status: lerPagamento(r).status,
     statusDetail: typeof r.status_detail === "string" ? r.status_detail : undefined,
   };
 }
@@ -161,17 +189,9 @@ export async function criarPagamentoCartao(
 export async function buscarPagamento(
   token: string,
   pagamentoId: string
-): Promise<{ id: string; status: string; referenciaExterna: string | null }> {
-  const r = (await mpFetch(
-    token,
-    `/v1/payments/${encodeURIComponent(pagamentoId)}`
-  )) as Record<string, unknown>;
-  return {
-    id: String(r.id),
-    status: String(r.status),
-    referenciaExterna:
-      typeof r.external_reference === "string" ? r.external_reference : null,
-  };
+): Promise<PagamentoConsultado> {
+  const r = await mpFetch(token, `/v1/payments/${encodeURIComponent(pagamentoId)}`) as Record<string, unknown>;
+  return lerPagamento(r);
 }
 
 /**
@@ -318,4 +338,50 @@ export async function listarEstornosMp(
   } catch (err) {
     return { ok: false, motivo: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Examina todas as páginas limitadas; nunca trata uma lista truncada como ausência. */
+export async function buscarPagamentoPorReferencia(
+  token: string, referenciaExterna: string
+): Promise<PagamentoConsultado | null> {
+  const encontrados = new Map<string, PagamentoConsultado>();
+  for (let offset = 0; offset < 1000; offset += 100) {
+    const r = await mpFetch(token,
+      `/v1/payments/search?external_reference=${encodeURIComponent(referenciaExterna)}&limit=100&offset=${offset}`
+    ) as { results?: unknown; paging?: { total?: number } };
+    if (!Array.isArray(r.results)) throw new Error("Mercado Pago: busca incompleta");
+    for (const raw of r.results) {
+      const p = lerPagamento(raw as Record<string, unknown>);
+      if (p.referenciaExterna !== referenciaExterna) throw new Error("Mercado Pago: referência divergente na busca");
+      encontrados.set(p.id, p);
+    }
+    if (r.results.length < 100 && (r.paging?.total ?? 0) <= offset + r.results.length) break;
+    if (offset === 900) throw new Error("Mercado Pago: busca truncada; revisão necessária");
+  }
+  const lista = [...encontrados.values()];
+  const aprovados = lista.filter(p => p.status === "approved");
+  if (aprovados.length > 1) throw new PagamentosAmbiguosError(aprovados.map(p => p.id));
+  if (aprovados.length === 1) return aprovados[0];
+  // Uma tentativa ainda ativa impede que uma recusa de outra tentativa cancele o pedido.
+  return lista.find(p => !["rejected", "cancelled", "expired", "refused"].includes(p.status)) ?? lista[0] ?? null;
+}
+
+/** Todos os caminhos exigem referência exata, BRL e total em centavos. */
+export function validarIdentidadePagamento(
+  pagamento: { id: string; status: string; referenciaExterna: string | null; currencyId?: string | null; transactionAmount?: number | null },
+  pedido: { id: string; total: number | string; paymentId: string | null },
+  recoveryContext: "webhook" | "reconciliacao" = "webhook"
+): { ok: boolean; tipo?: "associacao" | "moeda" | "valor"; detalhe?: string } {
+  if (!pagamento.id || pagamento.referenciaExterna !== pedido.id ||
+      (recoveryContext === "webhook" && pedido.paymentId != null && pedido.paymentId !== pagamento.id)) {
+    return { ok: false, tipo: "associacao", detalhe: "Referência ou pagamento incompatível com o pedido" };
+  }
+  if (pagamento.currencyId !== "BRL") return { ok: false, tipo: "moeda", detalhe: "Moeda ausente ou diferente de BRL" };
+  const total = Number(pedido.total);
+  if (typeof pagamento.transactionAmount !== "number" || !Number.isFinite(pagamento.transactionAmount) ||
+      !Number.isFinite(total) || total < 0 ||
+      Math.round(pagamento.transactionAmount * 100) !== Math.round(total * 100)) {
+    return { ok: false, tipo: "valor", detalhe: "Valor ausente ou diferente do total em centavos" };
+  }
+  return { ok: true };
 }

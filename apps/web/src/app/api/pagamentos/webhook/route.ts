@@ -1,3 +1,4 @@
+import { registrarDivergenciaPagamento } from "@/lib/pedidos/divergencia-pagamento";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { comErro } from "@/lib/erros";
@@ -6,6 +7,7 @@ import {
   buscarPagamento,
   extrairAssinatura,
   mapearStatusMp,
+  validarIdentidadePagamento,
   verificarAssinaturaWebhook,
 } from "@/lib/mercadopago";
 import { confirmarEstornoNotificado } from "@/lib/estorno";
@@ -77,12 +79,47 @@ export const POST = comErro(async (req: NextRequest) => {
 
   const order = await prisma.order.findUnique({
     where: { id: pagamento.referenciaExterna },
-    select: { id: true, paymentStatus: true },
+    select: {
+      id: true,
+      status: true,
+      paymentStatus: true,
+      total: true,
+      paymentId: true,
+    },
   });
-  if (!order || order.paymentStatus !== "PENDING") {
+  if (!order) {
     return NextResponse.json({ received: true });
   }
 
-  await finalizarPedidoPago(order.id, pagamento.id);
-  return NextResponse.json({ ok: true });
+  // IDENTIDADE DO PAGAMENTO (revisão PR #16): antes de transicionar o pedido,
+  // confirma-se que a notificação descreve ESTE pedido — mesmo pagamento
+  // (associação), mesma moeda e mesmo valor. Sem isso, um pagamento de outro
+  // pedido/valor com a mesma external_reference, ou uma notificação antiga
+  // pós-recriação, confirmava o pedido errado. Divergência NÃO confirma e NÃO
+  // cancela: registra o diagnóstico e responde 200 (o provedor para de
+  // reenviar; a decisão fica com o admin, que tem o log).
+  const divergencia = validarIdentidadePagamento(pagamento, {
+    id: order.id,
+    total: Number(order.total),
+    paymentId: order.paymentId,
+  });
+  if (!divergencia.ok) {
+    console.error(`[webhook:divergencia-${divergencia.tipo}]`, divergencia.detalhe);
+    await registrarDivergenciaPagamento(order.id, `IDENTIDADE_${divergencia.tipo}`, [pagamento.id]);
+    return NextResponse.json({ received: true, divergencia: divergencia.tipo });
+  }
+
+  // Fora de PENDING: nada a fazer (idempotente). Um pedido em RETENÇÃO
+  // (paymentStatus=PAID + hold por falta de estoque) também cai aqui — a
+  // aprovação já está registrada e a resolução é do admin.
+  if (order.status !== "PENDING") {
+    if (order.status === "CANCELLED") await registrarDivergenciaPagamento(order.id, "APROVACAO_TARDIA", [pagamento.id], true);
+    return NextResponse.json({ received: true });
+  }
+
+  const r = await finalizarPedidoPago(order.id, pagamento.id);
+  return NextResponse.json({
+    ok: true,
+    ...(r.emEspera ? { emEspera: true, hold: r.hold ?? null } : {}),
+  });
 }, { rota: "pagamentos-webhook" });

@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -19,11 +20,20 @@ import {
   processarEmailOutbox,
 } from "@/lib/email-outbox";
 import { obterCupom } from "@/lib/cupom-cache";
+import { liberarCupomReservado, reservarCupom } from "@/lib/pedidos/cupom-reserva";
 import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { cookies } from "next/headers";
+
+/** Cupom sem vaga restante: 400 claro, antes de qualquer cobrança. */
+class CupomEsgotadoError extends Error {
+  constructor() {
+    super("Cupom esgotado ou inativo");
+    this.name = "CupomEsgotadoError";
+  }
+}
 
 const checkoutSchema = z.object({
   address: enderecoSchema.extend({ label: z.string().optional() }),
@@ -67,7 +77,159 @@ const checkoutSchema = z.object({
       campaign: z.string().nullish(),
     })
     .optional(),
+  // Chave de idempotência do checkout: o front gera UMA por tentativa de
+  // compra e a repete em todo retry. Aceita também no header `Idempotency-Key`
+  // (padrão de APIs) — o header tem prioridade sobre o corpo.
+  idempotencyKey: z.string().min(8).max(128).nullish(),
 });
+
+/**
+ * Detecta P2002 do Prisma causado pelo índice único de idempotência do
+ * checkout. O `meta.target` do erro lista a(s) coluna(s) violada(s); aceitamos
+ * tanto o formato de array quanto o string simples que o Prisma emite conforme
+ * a versão.
+ */
+function ehColisaoIdempotencia(err: unknown): boolean {
+  const e = err as { code?: string; meta?: { target?: unknown } } | null;
+  if (e?.code !== "P2002") return false;
+  const alvo = e.meta?.target;
+  const campos = Array.isArray(alvo) ? alvo.map(String) : alvo ? [String(alvo)] : [];
+  return campos.some((c) => c.includes("idempotencyKey"));
+}
+
+type PedidoReplay = {
+  id: string;
+  number: string;
+  status: string;
+  paymentStatus: string;
+  paymentId: string | null;
+  idempotencyKey: string | null;
+  paymentRequestHash?: string | null;
+  holdCode?: string | null;
+  couponCode: string | null;
+  couponReserved: boolean;
+  total: unknown;
+  userId: string | null;
+  guestEmail: string | null;
+  paymentMethod: string;
+};
+
+/**
+ * RETOMADA de pagamento num replay do checkout (revisão PR #16).
+ *
+ * Antes o replay devolvia o pedido já criado e seguia — se a tentativa
+ * anterior tivesse sido interrompida ANTES (ou DURANTE) a chamada ao Mercado
+ * Pago, o pedido ficava PENDING para sempre sem `paymentId`: sem QR para o
+ * cliente, sem `paymentId` para o webhook (ele busca por id) e sem `paymentId`
+ * para a reconciliação (filtro `paymentId != null`). Ninguém jamais o
+ * recuperava.
+ *
+ * Agora o replay RETOMA a cobrança com a MESMA chave de idempotência do MP
+ * (derivada do pedido persistido — nunca um UUID novo por chamada): se o
+ * pagamento já existir no provedor, a API o devolve de volta em vez de criar
+ * outro; se nunca chegou a ser criado, cria-se agora (o cliente ainda não
+ * pagou). A gravação do `paymentId` é CONDICIONADA a `status=PENDING`, para
+ * não sobrescrever uma finalização que já tenha acontecido pelo webhook.
+ */
+async function retomarPagamentoPendente(args: {
+  pedido: PedidoReplay;
+  pagamento: {
+    method: string;
+    card?: { number?: string; name?: string };
+    cardToken?: string | null;
+    installments?: number | null;
+    paymentMethodId?: string | null;
+  };
+  payerEmail?: string;
+}): Promise<NextResponse> {
+  const { pedido, pagamento } = args;
+
+  if (pedido.holdCode) {
+    return NextResponse.json({ error: "Pedido em revisão. Acompanhe o pedido ou entre em contato com a loja.", orderId: pedido.id, recupera: true }, { status: 409 });
+  }
+
+  // Nada a retomar: pagamento já registrado, ou pedido fora de PENDING.
+  if (pedido.paymentId || pedido.status !== "PENDING" || pedido.paymentStatus !== "PENDING") {
+    return NextResponse.json(
+      { order: pedido, ok: true, replayed: true, pendente: pedido.paymentStatus === "PENDING" },
+      { status: 200 }
+    );
+  }
+
+  // Sem metadados antigos não é possível provar que o payload do retry é o original.
+  // Reconciliação consulta o provedor; nunca inventa uma nova cobrança legada.
+  if (!pedido.paymentRequestHash) {
+    return NextResponse.json({ error: "Tentativa legada aguardando reconciliação do pagamento.", orderId: pedido.id, recupera: true }, { status: 409 });
+  }
+
+  let result;
+  try {
+    result = await processPayment({
+      orderId: pedido.id,
+      amount: Number(pedido.total),
+      method: pedido.paymentMethod.toLowerCase(),
+      card: pagamento.card,
+      cardToken: pagamento.cardToken ?? undefined,
+      installments: pagamento.installments ?? undefined,
+      paymentMethodId: pagamento.paymentMethodId ?? undefined,
+      payerEmail: args.payerEmail,
+      // Chave derivada do PEDIDO persistido: o retry reenvia a mesma chave ao
+      // MP e recebe o MESMO pagamento de volta (nunca uma segunda cobrança).
+      idempotencyKey: pedido.idempotencyKey ?? undefined,
+    });
+  } catch (err) {
+    // Falha de comunicação: o estado no provedor é DESCONHECIDO. Não se
+    // cancela o pedido — pode ter sido cobrado. Deixa PENDING: a
+    // reconciliação (por `external_reference`) recupera depois.
+    const mensagem = err instanceof Error ? err.message : "Falha na comunicação com o gateway";
+    console.error("[pedidos:replay-retomada]", pedido.id, mensagem);
+    return NextResponse.json(
+      {
+        order: pedido,
+        ok: false,
+        replayed: true,
+        pendente: true,
+        error: mensagem,
+        recupera: true,
+      },
+      { status: 502 }
+    );
+  }
+
+  if (result.status === "PENDING") {
+    await prisma.order.updateMany({
+      where: { id: pedido.id, status: "PENDING", paymentStatus: "PENDING", paymentId: null },
+      data: { paymentId: result.paymentId },
+    });
+  } else if (result.success) {
+    await finalizarPedidoPago(pedido.id, result.paymentId);
+  } else {
+    // Recusa definitiva: cancela (condicionado a PENDING) e devolve a vaga
+    // do cupom reservada na criação.
+    await prisma.$transaction(async (tx) => {
+      const { count } = await tx.order.updateMany({
+        where: { id: pedido.id, status: "PENDING", paymentStatus: "PENDING" },
+        data: { status: "CANCELLED", paymentStatus: "FAILED", paymentId: result.paymentId },
+      });
+      if (count === 1 && pedido.couponReserved && pedido.couponCode) {
+        await liberarCupomReservado(tx, pedido.id);
+      }
+    });
+  }
+
+  const finalOrder = await prisma.order.findUnique({ where: { id: pedido.id } });
+  return NextResponse.json(
+    {
+      order: finalOrder ?? pedido,
+      payment: result,
+      ok: finalOrder?.paymentStatus === "PAID" || result.success,
+      replayed: true,
+      pendente: (finalOrder?.paymentStatus ?? result.status) === "PENDING",
+      ...(result.success ? {} : { error: result.message }),
+    },
+    { status: finalOrder?.paymentStatus === "PAID" || result.success ? 200 : 402 }
+  );
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -111,6 +273,46 @@ export const POST = comErro(async (req: NextRequest) => {
     const guestEmail = session ? null : parsed.data.guest!.email;
     const guestName = session ? session.name : parsed.data.guest!.name || null;
 
+    // Idempotência do checkout: header `Idempotency-Key` tem prioridade (padrão
+    // de APIs) sobre o campo no corpo. Ausente nos dois = fluxo antigo (cada
+    // requisição é um pedido novo); presente = retry devolve o MESMO pedido.
+    const idempotencyKey =
+      (req.headers.get("idempotency-key") || "").trim() ||
+      parsed.data.idempotencyKey?.trim() ||
+      null;
+    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
+      return NextResponse.json(
+        { error: "Idempotency-Key muito curta (mínimo 8 caracteres)" },
+        { status: 400 }
+      );
+    }
+
+    if (process.env.PAYMENT_DRIVER === "mercadopago" && !idempotencyKey) {
+      return NextResponse.json({ error: "Atualize o checkout para gerar uma chave de tentativa." }, { status: 400 });
+    }
+
+    const paymentRequestHash = createHash("sha256").update(JSON.stringify({
+      method: parsed.data.payment.method,
+      payerEmail: session?.email || guestEmail,
+      installments: parsed.data.payment.installments ?? 1,
+      paymentMethodId: parsed.data.payment.paymentMethodId || (parsed.data.payment.method === "card" ? "visa" : null),
+    })).digest("hex");
+    const replayExistente = async () => {
+      if (!idempotencyKey) return null;
+      const existente = await prisma.order.findUnique({ where: { idempotencyKey } });
+      if (!existente) return null;
+      const dono = session ? existente.userId === session.sub :
+        existente.userId === null && existente.guestEmail === guestEmail;
+      if (!dono) return NextResponse.json({ error: "Chave de checkout indisponível" }, { status: 409 });
+      if ((existente.paymentRequestHash && existente.paymentRequestHash !== paymentRequestHash) || existente.paymentMethod.toLowerCase() !== parsed.data.payment.method) {
+        return NextResponse.json({ error: "Esta tentativa pertence a outra forma de pagamento" }, { status: 409 });
+      }
+      return retomarPagamentoPendente({ pedido: existente, pagamento: parsed.data.payment,
+        payerEmail: session?.email || existente.guestEmail || undefined });
+    };
+    const replay = await replayExistente();
+    if (replay) return replay;
+
     const guestId = req.cookies.get("dc_guest")?.value;
     const cartWhere: Array<{ userId?: string; guestId?: string }> = [];
     if (session) cartWhere.push({ userId: session.sub });
@@ -133,6 +335,9 @@ export const POST = comErro(async (req: NextRequest) => {
                       price: true,
                       stock: true,
                       isActive: true,
+                      // soft-delete: produto removido continua "isActive" no
+                      // banco — sem este filtro entrava no pedido
+                      deletedAt: true,
                       images: true,
                     },
                   },
@@ -152,7 +357,9 @@ export const POST = comErro(async (req: NextRequest) => {
     // o cliente resolve no checkout (aceitar novo preço ou remover o item).
     const bloqueios: Array<{ itemId: string; name: string; motivo: string }> = [];
     for (const item of cart.items) {
-      if (!item.product.isActive) {
+      // soft-delete: produto removido pelo admin não pode ser comprado (o
+      // filtro de listagem some com ele, mas um link antigo ainda chegava aqui)
+      if (!item.product.isActive || item.product.deletedAt) {
         bloqueios.push({ itemId: item.id, name: item.product.name, motivo: "indisponivel" });
         continue;
       }
@@ -167,30 +374,62 @@ export const POST = comErro(async (req: NextRequest) => {
       );
     }
 
+    // Estoque conferido contra a demanda AGREGADA por produto e por variação.
+    // O carrinho permite duas linhas do mesmo produto em tamanhos diferentes
+    // (chave única cartId+productId+size+color), então somar as linhas é
+    // obrigatório: antes cada linha era conferida sozinha contra o saldo total
+    // e um pedido 3+4 com saldo 5 passava na validação e estourava o estoque.
+    const demandaProduto = new Map<string, { qtd: number; nome: string }>();
     for (const item of cart.items) {
-      if (item.product.stock < item.quantity) {
+      const atual = demandaProduto.get(item.product.id);
+      if (atual) atual.qtd += item.quantity;
+      else demandaProduto.set(item.product.id, { qtd: item.quantity, nome: item.product.name });
+    }
+    for (const [produtoId, { qtd, nome }] of demandaProduto) {
+      const produto = cart.items.find((i) => i.product.id === produtoId)!.product;
+      if (produto.stock < qtd) {
         return NextResponse.json(
-          { error: `Estoque insuficiente para ${item.product.name}` },
+          { error: `Estoque insuficiente para ${nome}` },
           { status: 409 }
         );
       }
-      // valida estoque por variação (tamanho/cor) — seção 4.3
+    }
+
+    // Variação (tamanho/cor): mesma agregação — duas linhas do mesmo tamanho
+    // somam contra o saldo DAQUELA variação.
+    const demandaVariacao = new Map<string, { qtd: number; nome: string; variacaoId: string }>();
+    for (const item of cart.items) {
       const vars = await prisma.productVariation.findMany({
         where: { productId: item.product.id },
       });
-      if (vars.length > 0) {
-        const bySize = vars.filter((v) => v.size === item.size);
-        const exact = bySize.find((v) => (v.color ?? null) === (item.color ?? null));
-        const match = exact ?? (!item.color && bySize.length === 1 ? bySize[0] : undefined);
-        if (!match) {
+      if (vars.length === 0) continue;
+      const bySize = vars.filter((v) => v.size === item.size);
+      const exact = bySize.find((v) => (v.color ?? null) === (item.color ?? null));
+      const match = exact ?? (!item.color && bySize.length === 1 ? bySize[0] : undefined);
+      if (!match) {
+        return NextResponse.json(
+          { error: `Combinação indisponível para ${item.product.name}` },
+          { status: 409 }
+        );
+      }
+      const atual = demandaVariacao.get(match.id);
+      if (atual) atual.qtd += item.quantity;
+      else
+        demandaVariacao.set(match.id, {
+          qtd: item.quantity,
+          nome: item.product.name,
+          variacaoId: match.id,
+        });
+    }
+    if (demandaVariacao.size > 0) {
+      const variacoes = await prisma.productVariation.findMany({
+        where: { id: { in: [...demandaVariacao.keys()] } },
+      });
+      const porIdVar = new Map(variacoes.map((v) => [v.id, v]));
+      for (const { qtd, nome, variacaoId } of demandaVariacao.values()) {
+        if ((porIdVar.get(variacaoId)?.stock ?? 0) < qtd) {
           return NextResponse.json(
-            { error: `Combinação indisponível para ${item.product.name}` },
-            { status: 409 }
-          );
-        }
-        if (match.stock < item.quantity) {
-          return NextResponse.json(
-            { error: `Estoque insuficiente para ${item.product.name}` },
+            { error: `Estoque insuficiente para ${nome}` },
             { status: 409 }
           );
         }
@@ -254,7 +493,9 @@ export const POST = comErro(async (req: NextRequest) => {
 
     // Criação atômica: endereço + pedido + itens nascem juntos ou nada nasce.
     let eventoCriadoId: string | null = null;
-    const { order } = await prisma.$transaction(async (tx) => {
+    let order;
+    try {
+      ({ order } = await prisma.$transaction(async (tx) => {
       // addressId: reutiliza endereço salvo da própria conta (sem duplicar).
       // ID de outra conta ou sem sessão → EnderecoInvalidoError (400 fora).
       const address = await resolverEnderecoPedido(tx, {
@@ -262,6 +503,16 @@ export const POST = comErro(async (req: NextRequest) => {
         addressId: parsed.data.addressId ?? null,
         dados: addr,
       });
+
+      // RESERVA ATÔMICA DO CUPOM (revisão PR #16): consome a vaga ANTES de
+      // criar o pedido e de qualquer cobrança, por UPDATE condicional no
+      // banco. Sem vaga → aborta a transação inteira (o pedido não nasce) e a
+      // rota responde 400; nada foi cobrado. `couponReserved` marca que o
+      // contador já foi consumido por ESTE pedido (a finalização não repete).
+      if (appliedCouponCode) {
+        const reservado = await reservarCupom(tx, appliedCouponCode);
+        if (!reservado) throw new CupomEsgotadoError();
+      }
 
       const order = await tx.order.create({
         data: {
@@ -273,7 +524,13 @@ export const POST = comErro(async (req: NextRequest) => {
         status: "PENDING",
         paymentStatus: "PENDING",
         paymentMethod,
+        // Mesma chave = mesmo pedido (índice único). O retry do cliente devolve
+        // o pedido já existente em vez de criar outro — e, com ele, outra
+        // cobrança. null = requisições sem o recurso de idempotência.
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        paymentRequestHash,
         couponCode: appliedCouponCode,
+        couponReserved: Boolean(appliedCouponCode),
         subtotal: centavosParaReais(subtotalCentavos),
         shipping,
         discount,
@@ -322,7 +579,18 @@ export const POST = comErro(async (req: NextRequest) => {
       );
 
       return { order };
-    });
+      }));
+    } catch (err) {
+      // Retry do MESMO checkout: a chave de idempotência colidiu com o pedido
+      // já criado por uma requisição anterior ou concorrente. Devolve o
+      // pedido existente e NÃO cobra de novo — é exatamente o que a chave
+      // de idempotência garante (índice único Order.idempotencyKey).
+      if (idempotencyKey && (ehColisaoIdempotencia(err) || err instanceof CupomEsgotadoError)) {
+        const replay = await replayExistente();
+        if (replay) return replay;
+      }
+      throw err;
+    }
 
     // ERP: entrega pós-commit, fire-and-forget (fila cuida das retentativas;
     // sem config fica PENDING até o dreno).
@@ -343,38 +611,40 @@ export const POST = comErro(async (req: NextRequest) => {
         installments: payment.installments ?? undefined,
         paymentMethodId: payment.paymentMethodId ?? undefined,
         payerEmail: session?.email || guestEmail || undefined,
+        // Retry da MESMA tentativa reusa a chave no MP: o header
+        // X-Idempotency-Key impede uma segunda cobrança pelo mesmo checkout.
+        idempotencyKey: idempotencyKey ?? undefined,
       });
     } catch (err) {
-      // Gateway estourou sem resposta: não deixa PENDING órfão — cancela
-      // e devolve a mensagem real (o carrinho fica intacto p/ retry).
-      // Evento de cancelamento na MESMA tx da transição.
-      const eventoCancelId = await prisma.$transaction(async (tx) => {
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: "CANCELLED", paymentStatus: "FAILED" },
-        });
-        return enfileirarEvento(
-          "pedido_cancelado",
-          { numero: order.number, motivo: "Falha na comunicação com o gateway" },
-          { db: tx, businessKey: `pedido_cancelado:${order.id}` }
-        );
-      });
-      if (eventoCancelId) {
-        void entregarEvento(eventoCancelId).catch((err) =>
-          console.error("[pedidos:erp]", err)
-        );
-      }
+      // Estado DESCONHECIDO no provedor (timeout, rede, 5xx): o pagamento
+      // PODE ter sido criado. Cancelar o pedido aqui transformaria um possível
+      // pagamento aprovado em pedido morto — o webhook e a reconciliação só
+      // enxergam pedidos PENDING, então o dinheiro ficaria tomado sem pedido.
+      // O pedido permanece PENDING: a reconciliação o recupera pela
+      // `external_reference` (o próprio orderId) no `/v1/payments/search`.
+      // O carrinho NÃO é esvaziado (o cliente pode tentar de novo; o replay
+      // retoma com a mesma chave de idempotência do MP).
+      console.error(
+        "[pedidos:gateway-incerto]",
+        order.id,
+        err instanceof Error ? err.message : String(err)
+      );
       if (err instanceof PaymentError) {
-        return NextResponse.json({ error: err.message }, { status: 502 });
+        return NextResponse.json(
+          { error: err.message, orderId: order.id, recupera: true },
+          { status: 502 }
+        );
       }
       throw err;
     }
 
     if (result.status === "PENDING") {
-      // Pix aguardando: pedido continua PENDING com o id do pagamento; a
-      // confirmação (baixa de estoque, cupom, e-mail) chega no webhook.
-      await prisma.order.update({
-        where: { id: order.id },
+      // Pix/cartão em análise: pedido continua PENDING com o id do pagamento;
+      // a confirmação (baixa de estoque, cupom, e-mail) chega no webhook.
+      // Condicional a `status=PENDING`: se o webhook já tiver finalizado o
+      // pedido (corrida), gravar o paymentId por cima não pode reabrir nada.
+      await prisma.order.updateMany({
+        where: { id: order.id, status: "PENDING", paymentStatus: "PENDING", paymentId: null },
         data: { paymentId: result.paymentId },
       });
     } else if (result.success) {
@@ -382,15 +652,21 @@ export const POST = comErro(async (req: NextRequest) => {
     } else {
       // Cancelamento (pagamento recusado): evento ERP + e-mail na MESMA
       // transação (dedupeKey única); envio pós-commit com retentativa.
+      // A vaga do cupom reservada na criação é DEVOLVIDA aqui — recusa
+      // definitiva não deve consumir limite comercial.
       const { eventoId: eventoCancelId, emailId } = await prisma.$transaction(async (tx) => {
-        await tx.order.update({
-          where: { id: order.id },
+        const { count } = await tx.order.updateMany({
+          where: { id: order.id, status: "PENDING", paymentStatus: "PENDING" },
           data: {
             status: "CANCELLED",
             paymentStatus: "FAILED",
             paymentId: result.paymentId,
           },
         });
+        if (count !== 1) return { eventoId: null, emailId: null };
+        if (appliedCouponCode && order.couponReserved) {
+          await liberarCupomReservado(tx, order.id);
+        }
         const eventoId = await enfileirarEvento(
           "pedido_cancelado",
           { numero: order.number, motivo: result.message },
@@ -424,13 +700,13 @@ export const POST = comErro(async (req: NextRequest) => {
       include: { items: true, address: true },
     });
 
-    if (result.success) {
+    if (result.success || finalOrder?.paymentStatus === "PAID") {
       return NextResponse.json(
         {
           order: finalOrder,
           payment: result,
           ok: true,
-          pendente: result.status === "PENDING",
+          pendente: (finalOrder?.paymentStatus ?? result.status) === "PENDING",
         },
         { status: 201 }
       );
@@ -444,6 +720,11 @@ export const POST = comErro(async (req: NextRequest) => {
     console.error("[pedidos:create]", err);
     // addressId de outra conta / sem sessão: 400 claro (não vaza existência).
     if (err instanceof EnderecoInvalidoError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    // Cupom sem vaga na RESERVA (tx abortada antes de criar o pedido):
+    // 400 claro, nada foi cobrado.
+    if (err instanceof CupomEsgotadoError) {
       return NextResponse.json({ error: err.message }, { status: 400 });
     }
     // Perdeu a corrida pelo último item: 409 claro em vez de 500 genérico.

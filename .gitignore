@@ -33,3 +33,6 @@ prisma/*.db-journal
 .tmp-upgrade-a/
 .tmp-upgrade-b/
 .tmp-upgrade-legacy/
+
+# Banco descartável desta revisão (sem binários/dados no Git)
+.pg-local/

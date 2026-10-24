@@ -109,7 +109,7 @@ describe("integração PostgreSQL real — caminho refund/token (defeito 17/10)"
   it("SEM a fix: refund.create e orderTrackToken.create violam NOT NULL (reproduz o500)", async () => {
     await expect(
       prisma!.refund.create({
-        data: { orderId, paymentId: "184666023462", amount: 32.99, idempotencyKey: "it-1" },
+        data: { orderId, paymentId: "p2", amount: 32.99, idempotencyKey: "it-1" },
       })
     ).rejects.toMatchObject({ code: "P2011" });
     // o erro de constraint derruba a sessão socket do PGlite (P1017) — nova
@@ -134,7 +134,7 @@ describe("integração PostgreSQL real — caminho refund/token (defeito 17/10)"
 
   it("COM a fix: refund.create sem id grava id uuid gerado pelo banco", async () => {
     const r = await prisma!.refund.create({
-      data: { orderId, paymentId: "184666023462", amount: 32.99, idempotencyKey: "it-2" },
+      data: { orderId, paymentId: "p2", amount: 32.99, idempotencyKey: "it-2" },
       select: { id: true, status: true },
     });
     expect(r.id).toMatch(UUID_RE);
