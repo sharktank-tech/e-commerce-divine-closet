@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
-import { PaymentError, processPayment } from "@/lib/pagamento";
+import { PaymentError, processPayment, verificarGatewayPagamento } from "@/lib/pagamento";
 import { finalizarPedidoPago } from "@/lib/pedidos/finalizar";
 import { orderNumber, formatBRL } from "@/lib/utils";
 import { reaisParaCentavos } from "@/lib/carrinho-revalidacao";
@@ -25,6 +25,7 @@ import { escolherCarrinho } from "@/lib/pedidos/selecionar-carrinho";
 import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/endereco-pedido";
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
+import { pagamentoCheckoutSchema } from "@/lib/checkout/pagamento-schema";
 import { cookies } from "next/headers";
 
 /** Cupom sem vaga restante: 400 claro, antes de qualquer cobrança. */
@@ -40,21 +41,7 @@ const checkoutSchema = z.object({
   // Endereço já salvo na conta (checkout autenticado): o pedido reutiliza o
   // registro — sem criar cópia duplicada a cada compra. Dono verificado no servidor.
   addressId: z.string().nullish(),
-  payment: z.object({
-    method: z.enum(["card", "pix", "boleto"]).default("card"),
-    card: z
-      .object({
-        number: z.string().optional(),
-        name: z.string().optional(),
-        expiry: z.string().optional(),
-        cvv: z.string().optional(),
-      })
-      .optional(),
-    // Checkout Transparente MP: token gerado no front (public key).
-    cardToken: z.string().nullish(),
-    installments: z.number().int().min(1).nullish(),
-    paymentMethodId: z.string().nullish(),
-  }),
+  payment: pagamentoCheckoutSchema,
   couponCode: z.string().nullish(),
   notes: z.string().nullish(),
   guest: z
@@ -168,7 +155,6 @@ async function retomarPagamentoPendente(args: {
       orderId: pedido.id,
       amount: Number(pedido.total),
       method: pedido.paymentMethod.toLowerCase(),
-      card: pagamento.card,
       cardToken: pagamento.cardToken ?? undefined,
       installments: pagamento.installments ?? undefined,
       paymentMethodId: pagamento.paymentMethodId ?? undefined,
@@ -261,6 +247,16 @@ export const POST = comErro(async (req: NextRequest) => {
         { error: parsed.error.issues[0]?.message || "Dados inválidos" },
         { status: 400 }
       );
+    }
+
+    // Antes de criar pedido ou reservar cupom: nunca aprovar mock em produção.
+    try {
+      verificarGatewayPagamento();
+    } catch {
+      return NextResponse.json({ error: "Pagamento temporariamente indisponível. Tente novamente mais tarde." }, { status: 503 });
+    }
+    if (process.env.NODE_ENV === "production" && parsed.data.payment.method === "card" && !parsed.data.payment.cardToken) {
+      return NextResponse.json({ error: "Não foi possível validar o cartão. Atualize a página e tente novamente." }, { status: 400 });
     }
 
     if (!session && !parsed.data.guest?.email) {
@@ -606,7 +602,6 @@ export const POST = comErro(async (req: NextRequest) => {
         orderId: order.id,
         amount: total,
         method: payment.method || "card",
-        card: payment.card,
         cardToken: payment.cardToken ?? undefined,
         installments: payment.installments ?? undefined,
         paymentMethodId: payment.paymentMethodId ?? undefined,
