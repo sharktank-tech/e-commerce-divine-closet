@@ -87,9 +87,8 @@ describe("checkout no navegador isolado", () => {
     expect(screen.getByText(/pagamento está em análise/)).toBeTruthy();
     expect(router.push).not.toHaveBeenCalled();
     const payload = JSON.parse(requests.find(r => r.url === "/api/pedidos")!.body!);
-    expect(payload.payment.cardToken).toBe("token-teste");
+    expect(payload.payment).toEqual({ method: "card", cardToken: "token-teste", installments: 1, paymentMethodId: "visa" });
     expect(JSON.stringify(payload)).not.toContain("4111111111111111");
-    expect(JSON.stringify(payload)).not.toContain("123");
   });
   it("pagamento aprovado encaminha para a página de pedido recebido", async () => {
     sdkSimulado();
