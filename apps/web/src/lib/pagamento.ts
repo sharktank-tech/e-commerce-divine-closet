@@ -44,6 +44,13 @@ export class PaymentError extends Error {
   }
 }
 
+/** Em produção só o provedor real pode processar pagamentos. */
+export function verificarGatewayPagamento(): void {
+  if (process.env.NODE_ENV === "production" && process.env.PAYMENT_DRIVER !== "mercadopago") {
+    throw new PaymentError("Pagamento temporariamente indisponível. Tente novamente mais tarde.");
+  }
+}
+
 function urlNotificacao(): string {
   const base =
     process.env.MP_NOTIFICATION_URL ||
@@ -144,6 +151,7 @@ async function processarMp(params: PaymentParams): Promise<PaymentResult> {
  * TODO-CLIENTE: gateway de pagamento real (Stripe, Mercado Pago, etc.) + credenciais.
  */
 export async function processPayment(params: PaymentParams): Promise<PaymentResult> {
+  verificarGatewayPagamento();
   const driver = process.env.PAYMENT_DRIVER || "mock";
 
   if (driver === "mercadopago") return processarMp(params);
