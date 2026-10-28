@@ -4,6 +4,7 @@ import { buildMenu } from "@/lib/categorias";
 import { payment } from "@/config/defaults";
 import { getEmpresa } from "@/lib/config-loja";
 import { linkRedeSocial } from "@/lib/redes-sociais";
+import { EmailIcon, FacebookIcon, InstagramIcon, WhatsAppIcon } from "@/components/ui/SocialIcons";
 
 async function getMenuLinks() {
   try {
@@ -74,12 +75,12 @@ export async function Footer() {
           </p>
           {temContato && (
             <ul className="mt-4 space-y-1 text-sm text-primary-200">
-              {empresa.email && <li><a href={`mailto:${empresa.email}`} className="hover:text-white">{empresa.email}</a></li>}
+              {empresa.email && <li><a href={`mailto:${empresa.email}`} className="inline-flex items-center gap-2 hover:text-white"><EmailIcon />{empresa.email}</a></li>}
               {empresa.phone && <li>{empresa.phone}</li>}
               {empresa.address && <li>{empresa.address}</li>}
-              {whatsapp && <li><a href={`https://wa.me/${whatsapp.startsWith("55") && whatsapp.length > 11 ? whatsapp : `55${whatsapp}`}?text=${encodeURIComponent(empresa.whatsappMensagem || "")}`} target="_blank" rel="noopener noreferrer" className="hover:text-white">WhatsApp</a></li>}
-              {instagram && <li><a href={instagram} target="_blank" rel="noopener noreferrer" className="hover:text-white">Instagram</a></li>}
-              {facebook && <li><a href={facebook} target="_blank" rel="noopener noreferrer" className="hover:text-white">Facebook</a></li>}
+              {whatsapp && <li><a href={`https://wa.me/${whatsapp.startsWith("55") && whatsapp.length > 11 ? whatsapp : `55${whatsapp}`}?text=${encodeURIComponent(empresa.whatsappMensagem || "")}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white"><WhatsAppIcon />WhatsApp</a></li>}
+              {instagram && <li><a href={instagram} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white"><InstagramIcon />Instagram</a></li>}
+              {facebook && <li><a href={facebook} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white"><FacebookIcon />Facebook</a></li>}
             </ul>
           )}
         </div>
