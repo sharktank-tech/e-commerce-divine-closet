@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { linkRedeSocial, type RedeSocial } from "@/lib/redes-sociais";
 
 // Configurações gerais editáveis pelo painel (seção 4.8).
 // Valores armazenados como JSON string na tabela Setting.
@@ -14,6 +16,8 @@ const DEFAULTS: Record<string, unknown> = {
     phone: "(11) 3000-0000",
     whatsapp: "",
     whatsappMensagem: "Olá! Vim pelo site da Divine Closet.",
+    instagram: "",
+    facebook: "",
     address: "",
     logoUrl: "",
   },
@@ -39,7 +43,7 @@ export async function GET() {
       })
     );
 
-    return NextResponse.json({ settings: { ...DEFAULTS, ...stored } });
+    return NextResponse.json({ settings: { ...DEFAULTS, ...stored, empresa: { ...(DEFAULTS.empresa as object), ...(stored.empresa && typeof stored.empresa === "object" ? stored.empresa : {}) } } });
   } catch (err) {
     console.error("[admin:config:get]", err);
     return NextResponse.json({ error: "Erro ao carregar configurações" }, { status: 500 });
@@ -52,6 +56,17 @@ export async function PUT(req: NextRequest) {
     if (!session) return forbidden();
 
     const body = await req.json();
+    if (body?.empresa && typeof body.empresa === "object" && !Array.isArray(body.empresa)) {
+      for (const rede of ["instagram", "facebook"] as RedeSocial[]) {
+        const valor = body.empresa[rede];
+        if (valor === undefined) continue;
+        const link = linkRedeSocial(valor, rede);
+        if (typeof valor !== "string" || (valor.trim() && !link)) {
+          return NextResponse.json({ error: `Informe um link HTTPS válido do ${rede === "instagram" ? "Instagram" : "Facebook"}, ou deixe o campo vazio.` }, { status: 400 });
+        }
+        body.empresa[rede] = link || "";
+      }
+    }
     const entries = Object.entries(body || {}).filter(([k]) => k in DEFAULTS);
     if (entries.length === 0) {
       return NextResponse.json({ error: "Nada para salvar" }, { status: 400 });
@@ -67,6 +82,7 @@ export async function PUT(req: NextRequest) {
       )
     );
 
+    revalidatePath("/", "layout");
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[admin:config:put]", err);
