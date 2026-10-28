@@ -11,6 +11,8 @@ export type EmpresaConfig = {
   phone: string;
   whatsapp: string;
   whatsappMensagem: string;
+  instagram: string;
+  facebook: string;
   address: string;
   logoUrl: string;
 };
@@ -34,6 +36,8 @@ const EMPRESA_PADRAO: EmpresaConfig = {
   phone: "(11) 3000-0000",
   whatsapp: "",
   whatsappMensagem: "Olá! Vim pelo site da Divine Closet.",
+  instagram: "",
+  facebook: "",
   address: "",
   logoUrl: "",
 };

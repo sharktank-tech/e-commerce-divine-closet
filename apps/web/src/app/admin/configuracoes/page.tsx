@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 
 type Settings = {
-  empresa: { name: string; cnpj: string; email: string; phone: string; whatsapp: string; whatsappMensagem: string; address: string; logoUrl: string };
+  empresa: { name: string; cnpj: string; email: string; phone: string; whatsapp: string; whatsappMensagem: string; instagram: string; facebook: string; address: string; logoUrl: string };
   pixels: { metaPixelId: string; googleAdsId: string; ga4Id: string };
   frete: { fixed: number; freeFrom: number; prazoDias: string };
   pagamento: { card: boolean; pix: boolean; boleto: boolean };
@@ -55,7 +55,8 @@ export default function AdminConfiguracoesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
-      setMsg(res.ok ? "Configurações salvas." : "Erro ao salvar.");
+      const data = await res.json();
+      setMsg(res.ok ? "Configurações salvas." : data.error || "Erro ao salvar.");
     } finally {
       setSaving(false);
     }
@@ -99,6 +100,8 @@ export default function AdminConfiguracoesPage() {
           <Input label="Telefone" value={settings.empresa.phone} onChange={(v) => set("empresa", { phone: v })} />
           <Input label="WhatsApp" value={settings.empresa.whatsapp || ""} onChange={(v) => set("empresa", { whatsapp: v })} placeholder="(11) 99999-0000" />
           <Input label="Mensagem do WhatsApp" textarea value={settings.empresa.whatsappMensagem || ""} onChange={(v) => set("empresa", { whatsappMensagem: v })} placeholder="Olá! Vim pelo site da Divine Closet." />
+          <Input label="Instagram" type="url" value={settings.empresa.instagram || ""} onChange={(v) => set("empresa", { instagram: v })} placeholder="https://www.instagram.com/sualoja/" hint="Opcional. Cole o link completo do perfil." />
+          <Input label="Facebook" type="url" value={settings.empresa.facebook || ""} onChange={(v) => set("empresa", { facebook: v })} placeholder="https://www.facebook.com/sualoja/" hint="Opcional. Cole o link completo da página." />
           <div className="sm:col-span-2">
             <Input label="Endereço" value={settings.empresa.address} onChange={(v) => set("empresa", { address: v })} />
           </div>
