@@ -1,6 +1,7 @@
 import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { ProductViewTracker } from "@/components/loja/ProductViewTracker";
 import { AddToCart } from "@/components/loja/AddToCart";
 import { ProductCard } from "@/components/loja/ProductCard";
 import { ProductSlideshow } from "@/components/loja/ProductSlideshow";
@@ -351,6 +352,7 @@ export default async function ProdutoDetalhePage({
             </details>
           </div>
 
+          <ProductViewTracker id={product.id} name={product.name} price={Number(product.price)}/>
           <AddToCart
             productId={product.id}
             productName={product.name}

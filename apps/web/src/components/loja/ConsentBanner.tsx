@@ -16,12 +16,12 @@ export function ConsentBanner() {
     }
   }, []);
 
-  if (!visivel) return null;
+  if (!visivel) return <button className="fixed bottom-2 left-2 z-40 rounded bg-white px-3 py-2 text-xs shadow" onClick={()=>setVisivel(true)}>Preferências de cookies</button>;
 
   function escolher(aceito: boolean) {
     setConsent(aceito);
     setVisivel(false);
-    if (aceito) window.location.reload();
+    window.location.reload();
   }
 
   return (

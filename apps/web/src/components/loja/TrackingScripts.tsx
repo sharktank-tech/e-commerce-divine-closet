@@ -1,70 +1,102 @@
 "use client";
-
-import { useEffect, useState } from "react";
-import Script from "next/script";
-import { hasConsent } from "@/lib/analytics";
-
-type Props = { meta: string; gtag: string[] };
-
-// Só injeta rastreamento com consentimento explícito (LGPD).
-// Sem IDs configurados, nada é renderizado. Em /acompanhar/* (token privado
-// na URL) o rastreamento é suprimido — o token não pode vazar para o
-// provedor de analytics.
-export function TrackingScripts({ meta, gtag }: Props) {
-  const [ok, setOk] = useState(false);
-
+import { useEffect } from "react";
+import { usePathname } from "next/navigation";
+import {
+  CONSENT_EVENT,
+  captureUtm,
+  hasConsent,
+  privateAnalyticsPath,
+} from "@/lib/analytics";
+export function TrackingScripts({
+  meta,
+  gtag,
+}: {
+  meta: string;
+  gtag: string[];
+}) {
+  const path = usePathname();
   useEffect(() => {
-    // Rotas com segredo no path (link privado de acompanhamento guest):
-    // NUNCA dispara PageView — a URL contém o token e iria para o provedor
-    // de rastreamento junto com o page_view.
-    if (window.location.pathname.startsWith("/acompanhar")) return;
-    setOk(hasConsent());
-  }, []);
-
-  if (!ok) return null;
-  if (!meta && gtag.length === 0) return null;
-
-  return (
-    <>
-      {meta && (
-        <>
-          <Script
-            id="meta-pixel"
-            strategy="afterInteractive"
-            dangerouslySetInnerHTML={{
-              __html: `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${meta}');fbq('track','PageView');`,
-            }}
-          />
-          <noscript>
-            <img
-              height="1"
-              width="1"
-              style={{ display: "none" }}
-              src={`https://www.facebook.com/tr?id=${meta}&ev=PageView&noscript=1`}
-              alt=""
-              loading="lazy"
-            />
-          </noscript>
-        </>
-      )}
-      {gtag.length > 0 && (
-        <>
-          <Script
-            id="gtag-src"
-            strategy="afterInteractive"
-            src={`https://www.googletagmanager.com/gtag/js?id=${gtag[0]}`}
-          />
-          <Script
-            id="gtag-cfg"
-            strategy="afterInteractive"
-            dangerouslySetInnerHTML={{
-              __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());${gtag
-                .map((id) => `gtag('config','${id}');`)
-                .join("")}`,
-            }}
-          />
-        </>
-      )}
-    </>
-  );
+    const run = () => {
+      window.dcTracking = undefined;
+      // Tokens e informações pessoais nunca são enviados em PageView.
+      if (
+        !hasConsent() ||
+        /^\/(acompanhar|newsletter|admin|conta)(\/|$)/.test(path)
+      )
+        return;
+      const ga4 = gtag.filter((id) => /^G-[A-Z0-9]+$/.test(id)),
+        ads = gtag.filter((id) => /^AW-[0-9]+$/.test(id)),
+        pixel = /^[0-9]+$/.test(meta) ? meta : "";
+      window.dcTracking = { ga4, ads, meta: pixel };
+      captureUtm();
+      const inject = (id: string, src: string) => {
+        if (document.getElementById(id)) return;
+        const s = document.createElement("script");
+        s.id = id;
+        s.async = true;
+        s.src = src;
+        document.head.appendChild(s);
+      };
+      window.dataLayer = window.dataLayer || [];
+      if (ga4.length || ads.length) {
+        window.gtag =
+          window.gtag ||
+          function () {
+            window.dataLayer?.push(arguments);
+          };
+        window.gtag("js", new Date());
+        for (const id of [...ga4, ...ads])
+          window.gtag("config", id, {
+            send_page_view: false,
+            page_location: location.origin + path,
+            page_referrer: "",
+          });
+        if (!privateAnalyticsPath(path))
+          window.gtag("event", "page_view", {
+            send_to: ga4,
+            page_location: location.origin + path,
+            page_referrer: "",
+          });
+        inject(
+          "dc-gtag",
+          `https://www.googletagmanager.com/gtag/js?id=${[...ga4, ...ads][0]}`,
+        );
+      }
+      if (pixel) {
+        if (!window.fbq) {
+          const f = Object.assign(
+            function (...args: unknown[]) {
+              if (f.callMethod) f.callMethod(...args);
+              else f.queue.push(args);
+            },
+            {
+              queue: [] as unknown[][],
+              callMethod: undefined as
+                | undefined
+                | ((...args: unknown[]) => void),
+              push: undefined as unknown,
+              loaded: true,
+              version: "2.0",
+            },
+          );
+          f.push = f;
+          window.fbq = f;
+          (window as unknown as { _fbq: typeof f })._fbq = f;
+          window.fbq("init", pixel);
+          window.fbq("set", "autoConfig", false, pixel);
+          inject("dc-meta", "https://connect.facebook.net/en_US/fbevents.js");
+        }
+        window.fbq("consent", "grant");
+        if (!privateAnalyticsPath(path)) window.fbq("track", "PageView");
+      }
+      window.dispatchEvent(new Event("dc-tracking-ready"));
+    };
+    run();
+    window.addEventListener(CONSENT_EVENT, run);
+    return () => {
+      window.removeEventListener(CONSENT_EVENT, run);
+      window.dcTracking = undefined;
+    };
+  }, [meta, gtag, path]);
+  return null;
 }

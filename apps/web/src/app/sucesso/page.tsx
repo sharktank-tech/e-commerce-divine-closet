@@ -4,7 +4,7 @@ import { PurchaseTracker } from "@/components/loja/PurchaseTracker";
 import { payment } from "@/config/defaults";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Pedido confirmado" };
+export const metadata: Metadata = { title: "Pedido recebido" };
 
 export default async function SucessoPage({
   searchParams,
@@ -20,10 +20,10 @@ export default async function SucessoPage({
         ✓
       </div>
       <h1 className="mt-6 font-display text-3xl font-bold text-ink">
-        Pedido confirmado!
+        Pedido recebido
       </h1>
       <p className="mt-3 text-ink-mute">
-        Obrigado por comprar na Divine Closet. Você receberá os updates por e-mail.
+        Acompanhe o status do pagamento e do pedido na sua conta ou pelo link privado enviado por e-mail.
       </p>
       {pedido && (
         <p className="mt-6 inline-block rounded-lg bg-white px-5 py-3 text-sm font-semibold text-ink shadow-sm">

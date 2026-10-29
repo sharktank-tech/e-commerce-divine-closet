@@ -43,7 +43,21 @@ try {
   await page.goto(
     `${base}/contato?utm_source=instagram&utm_medium=social&utm_campaign=teste`,
   );
-  await page.getByRole("button", { name: "Recusar", exact: true }).click();
+  ok(
+    !external.some(
+      (h) => h.includes("googletagmanager") || h.includes("facebook"),
+    ),
+    "nenhum rastreador antes do consentimento",
+  );
+  await page.getByRole("button", { name: "Aceitar", exact: true }).click();
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => !!window.dcTracking?.ga4.length);
+  ok(
+    (await page.evaluate(
+      () => JSON.parse(sessionStorage.getItem("dc-utm")).source,
+    )) === "instagram",
+    "UTM capturada após consentimento",
+  );
   const email = `browser-${Date.now()}@example.invalid`;
   await page.getByLabel("Seu e-mail", { exact: true }).fill(email);
   await page.getByLabel("Quero receber novidades e ofertas").check();
@@ -74,6 +88,10 @@ try {
       .getAttribute("content")
       .then((s) => s.includes("noindex")),
     "página privada noindex",
+  );
+  ok(
+    await page.evaluate(() => !window.dcTracking),
+    "tokens de newsletter sem rastreamento",
   );
   await page
     .getByRole("button", { name: "Confirmar inscrição", exact: true })
@@ -185,9 +203,73 @@ try {
     `${base}/api/admin/marketing/indicadores`,
   );
   ok([401, 403].includes(api.status()), "API de indicadores nega visitante");
-  await page.screenshot({path:"/tmp/dc-marketing-core-browser.png",fullPage:true});
+  await context.clearCookies();
+  await page.goto(`${base}/sucesso?pedido=DC-LOCAL-MARKETING&total=99999`);
+  await page.waitForTimeout(300);
+  ok(
+    !(await page.evaluate(() =>
+      window.dataLayer?.some(
+        (a) => a && a[0] === "event" && a[1] === "purchase",
+      ),
+    )),
+    "URL manipulada não comprova compra",
+  );
+  await page.evaluate(
+    (key) =>
+      sessionStorage.setItem(
+        "dc-conversion-proof:DC-LOCAL-MARKETING",
+        JSON.stringify({ key, expires: Date.now() + 3600000 }),
+      ),
+    process.env.DC_CHECKOUT_KEY,
+  );
+  await page.reload();
+  await page.waitForFunction(() =>
+    window.dataLayer?.some((a) => a && a[1] === "purchase"),
+  );
+  const purchase = await page.evaluate(() =>
+    window.dataLayer.find((a) => a && a[1] === "purchase"),
+  );
+  ok(
+    purchase[2].value === 32.99,
+    "conversão guest usa posse secreta e total confirmado no servidor",
+  );
+  ok(
+    !JSON.stringify(purchase).includes(process.env.DC_CHECKOUT_KEY),
+    "evento não inclui chave de posse",
+  );
+  await page.reload();
+  await page.waitForTimeout(300);
+  ok(
+    !(await page.evaluate(() =>
+      window.dataLayer?.some((a) => a && a[1] === "purchase"),
+    )),
+    "refresh não duplica conversão",
+  );
+  await page
+    .getByRole("button", { name: "Preferências de cookies", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Recusar", exact: true }).click();
+  await page.waitForLoadState("networkidle");
+  ok(
+    (await page.evaluate(() => localStorage.getItem("dc-consent"))) === "0",
+    "revogação persiste",
+  );
+  ok(
+    !(await page.evaluate(() => window.dcTracking)),
+    "revogação desativa rastreamento",
+  );
+  await page.screenshot({
+    path: "/tmp/dc-marketing-browser.png",
+    fullPage: true,
+  });
   await anonymous.close();
-  console.log(JSON.stringify({checks,browser:browser.version(),externalTransport:"interceptado; nenhum envio real"}));
+  console.log(
+    JSON.stringify({
+      checks,
+      browser: browser.version(),
+      externalTransport: "interceptado; nenhum envio real",
+    }),
+  );
 } finally {
   await browser.close();
   await db.$disconnect();

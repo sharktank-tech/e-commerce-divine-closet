@@ -30,6 +30,7 @@ import {
 } from "@/lib/marketing/campaigns";
 import { EmailNaoAceito } from "@/lib/email";
 import { GET as metrics } from "@/app/api/admin/marketing/indicadores/route";
+import { POST as conversion } from "@/app/api/marketing/conversao/route";
 const run = promisify(execFile),
   host = "127.0.0.1",
   port = process.env.PGPORT || "5433",
@@ -349,9 +350,85 @@ it("indicadores incluem estornado no bruto e subtraem Refund aprovado uma vez", 
   expect(d.receitaAposEstornos).toBe(0);
   await prisma.order.delete({ where: { id } });
 });
-it("sem admin nega indicadores", async () => {
- auth.requireAuth.mockResolvedValue(null);
- expect((await metrics(new NextRequest("http://localhost/api/admin/marketing/indicadores"))).status).toBe(403);
+it("sem admin nega indicadores; sem posse nem número nem e-mail autorizam conversão", async () => {
+  auth.requireAuth.mockResolvedValue(null);
+  expect(
+    (
+      await metrics(
+        new NextRequest("http://localhost/api/admin/marketing/indicadores"),
+      )
+    ).status,
+  ).toBe(403);
+  const r = await conversion(
+    new NextRequest("http://localhost/api/marketing/conversao", {
+      method: "POST",
+      body: JSON.stringify({
+        number: "DC-teste",
+        email: "admin@example.invalid",
+      }),
+    }),
+  );
+  expect(r.status).toBe(404);
+});
+
+it("consulta de conversão exige dono ou chave secreta UUIDv4; hold/pendente não convertem", async () => {
+  const id = randomUUID(),
+    key = randomUUID();
+  await prisma.order.create({
+    data: {
+      id,
+      number: `conv-${id}`,
+      guestEmail: "buyer@example.invalid",
+      idempotencyKey: key,
+      status: "PAID",
+      paymentStatus: "PAID",
+      total: "10.00",
+      subtotal: "10.00",
+    },
+  });
+  const req = (extra: object = {}) =>
+    new NextRequest("http://localhost/api/marketing/conversao", {
+      method: "POST",
+      body: JSON.stringify({ number: `conv-${id}`, ...extra }),
+    });
+  expect(
+    (await conversion(req({ email: "buyer@example.invalid" }))).status,
+  ).toBe(404);
+  expect((await conversion(req({ checkoutKey: randomUUID() }))).status).toBe(
+    404,
+  );
+  const d = await (await conversion(req({ checkoutKey: key }))).json();
+  expect(d.paid).toBe(true);
+  expect(d.total).toBe(10);
+  expect(d).not.toHaveProperty("guestEmail");
+  await prisma.order.update({
+    where: { id },
+    data: { holdCode: "ESTOQUE_INSUFICIENTE" },
+  });
+  expect(
+    (await (await conversion(req({ checkoutKey: key }))).json()).paid,
+  ).toBe(false);
+  await prisma.order.update({
+    where: { id },
+    data: { holdCode: null, createdAt: new Date(Date.now() - 7_200_000) },
+  });
+  expect((await conversion(req({ checkoutKey: key }))).status).toBe(404);
+  await prisma.order.update({
+    where: { id },
+    data: { userId: operator, guestEmail: null },
+  });
+  auth.getSession.mockResolvedValue({
+    sub: "00000000-0000-4000-8000-000000000099",
+  });
+  expect((await conversion(req())).status).toBe(404);
+  auth.getSession.mockResolvedValue({ sub: operator });
+  expect((await (await conversion(req())).json()).paid).toBe(true);
+  await prisma.order.update({
+    where: { id },
+    data: { paymentStatus: "PENDING" },
+  });
+  expect((await (await conversion(req())).json()).paid).toBe(false);
+  await prisma.order.delete({ where: { id } });
 });
 it("mudança de público exige nova prévia e falha permanente não retenta", async () => {
   await confirmed();
