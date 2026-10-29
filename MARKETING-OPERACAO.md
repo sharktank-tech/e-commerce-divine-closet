@@ -199,3 +199,25 @@ Aprovar somente após: (a) leitura autorizada dos metadados de ambiente/deploy e
 A consulta Vercel via **nome** do projeto (`e-commerce-divine-closet-web`, sem escopo explícito) permitiu listar **somente metadados** de variáveis, sem descriptografia: `EMAIL_DRIVER`, `EMAIL_FROM`, `RESEND_API_KEY`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET` e `NEXT_PUBLIC_APP_URL` estão cadastradas para production. O fallback `JWT_SECRET` está cadastrado; `NEWSLETTER_SECRET` não apareceu nesta verificação. Isso confirma nomes/escopos, **não** valores corretos, domínio verificado ou entrega real. IDs públicos de GA4/Meta/Ads não apareceram sob nomes contendo GA/GTM/META/PIXEL/GOOGLE/ADS na listagem filtrada; eles podem estar em outra fonte de configuração e exigem confirmação pela interface/configuração ativa.
 
 A leitura de metadados do projeto confirmou o identificador e domínio Vercel; na consulta mais recente o deployment de produção estava `BUILDING` (possível atualização relacionada ao commit de documentação). Não declarar essa nova implantação como `READY` sem consultar novamente. Acesso às listagens de deployments e aos logs continuou negado (403). Portanto: ponto 1 **parcialmente validado**; pontos 2–4 mantêm pendência de prova real; ponto 5 registrado.
+
+
+## Homologação adicional — verificação de produção (29/10/2026)
+
+### Confirmado por ferramentas conectadas
+- Vercel: projeto `e-commerce-divine-closet-web` acessível. Deployment de produção `dpl_BUu5C5YSQbi8pTAQsq7LWnwcrkNS` para o commit `dead7ee12ca465d56a6fccfad53635a9db1c808c` mudou de BUILDING para READY na consulta posterior. Domínios `divinecloset.com.br` e `www.divinecloset.com.br` vinculados ao projeto. O deploy da documentação não altera o fluxo de marketing.
+- Supabase: projeto `Divine Closet` em `ACTIVE_HEALTHY`; as migrations `20261028000000_newsletter_subscribers` e `20261029160000_marketing_seguro` estão registradas como aplicadas.
+- PostgreSQL: RLS `relrowsecurity=true` em `NewsletterSubscriber`, `MarketingCampaign`, `MarketingMessage`; nenhuma linha retornada no agrupamento de status das três tabelas (zero assinantes/campanhas/mensagens).
+- Tabela `Setting`: chaves `emailMarketing` e `pixels` existentes, sem consulta de dados sensíveis. Na configuração `emailMarketing`, `provider` está vazio e `senderEmail` não está preenchido. Campos `ga4Id`, `googleAdsId` e `metaPixelId` em `pixels` estão vazios.
+- Vercel: metadados das variáveis do transporte e autenticação constam em production; não foi feita leitura de valores, portanto `EMAIL_DRIVER` e os segredos não estão validados.
+- Os logs de runtime/error clusters Vercel retornaram 403. Supabase disponibilizou fontes agregadas de logs, mas não são substituto dos logs de função da Vercel.
+- A página pública da loja pôde ser localizada via ferramenta de navegação, mas endpoints `/api/newsletter/confirm` e `/api/newsletter/unsubscribe` não foram acessíveis por essa ferramenta. Uma tentativa de smoke HTTP em ambiente isolado falhou por resolução DNS, e **não** deve ser descrita como falha do site.
+- Nenhuma mutação no Supabase, solicitação real de inscrição, disparo de e-mail ou evento de compra foi realizada.
+
+### Gatilhos restantes de ativação
+1. Configurar `emailMarketing.provider` e `senderEmail` coerentes com o transporte de produção; confirmar valor efetivo de `EMAIL_DRIVER` pela interface segura, autenticação e DNS SPF/DKIM/DMARC. Só então testar envio individual para caixa controlada, aceitação no provedor e efetiva recepção.
+2. Configurar IDs reais, da titularidade da loja, em `pixels.ga4Id`, `pixels.metaPixelId` e, se usado, `pixels.googleAdsId`; configurar action/label específica para conversão Ads. Depois validar consentimento/revogação e eventos de teste nas interfaces oficiais.
+3. Executar inscrição/confirmar/descadastrar com endereço controlado, verificando banco e prova de mensagem, com processamento manual até 10.
+4. Restabelecer acesso a logs de runtime Vercel para examinar erros e requisições reais, registrar evidência de estados e verificar filas antes de qualquer dreno.
+5. Atualizar este runbook com IDs de execução, timestamps e resultados *sem* tokens, emails reais, URLs privadas de confirmação, credenciais ou dados pessoais.
+
+**Estado:** estrutura de marketing publicada e validada em banco; provedores externos não configurados ou não demonstrados nesta auditoria. **Não declarar homologação operacional concluída.**
