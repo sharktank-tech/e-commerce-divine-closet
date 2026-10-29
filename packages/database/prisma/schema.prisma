@@ -627,10 +627,51 @@ model NewsletterSubscriber {
   consentedAt     DateTime?
   confirmedAt     DateTime?
   unsubscribedAt  DateTime?
-  unsubscribeToken String?  @unique
+  unsubscribeToken String?  @unique // legado: não usado; sem tokens em claro
+  tokenVersion    String    @default(dbgenerated("(gen_random_uuid())::text"))
+  confirmNonce    String?
+  confirmExpiresAt DateTime?
+  lastConfirmationAt DateTime?
+  messages        MarketingMessage[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   @@index([status])
   @@index([createdAt])
+}
+
+
+model MarketingCampaign {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subject String
+  body String
+  status String @default("DRAFT")
+  source String?
+  createdBy String @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages MarketingMessage[]
+}
+
+model MarketingMessage {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscriberId String @db.Uuid
+  subscriber NewsletterSubscriber @relation(fields: [subscriberId], references: [id])
+  campaignId String? @db.Uuid
+  campaign MarketingCampaign? @relation(fields: [campaignId], references: [id])
+  kind String
+  dedupeKey String @unique
+  subject String
+  text String
+  status String @default("PENDING")
+  attempt Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  firstAttemptAt DateTime?
+  acceptedAt DateTime?
+  providerId String?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, nextAttemptAt])
+  @@index([campaignId, status])
 }

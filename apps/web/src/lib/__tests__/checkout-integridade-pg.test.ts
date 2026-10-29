@@ -687,3 +687,10 @@ describe("reserva de cupom — posse por pedido em PG real", () => {
     expect((await prismaA.product.findUniqueOrThrow({ where: { id: produto.id } })).stock).toBe(4);
   });
 });
+
+// O número aleatório de 4 dígitos não é o objeto destes testes; evitar colisões entre fixtures.
+vi.mock("@/lib/utils", async importOriginal => {
+ const original = await importOriginal<typeof import("@/lib/utils")>();
+ let sequence = 0;
+ return { ...original, orderNumber: () => `DC-TEST-${++sequence}` };
+});

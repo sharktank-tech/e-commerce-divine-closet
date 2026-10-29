@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
 import { sendEmail, emailDriverAtual, EmailNaoAceito } from "@/lib/email";
-import { verificarLimite } from "@/lib/rate-limit";
+import { consumirRateLimit } from "@/lib/rate-limit";
 
 // Disparo de e-mail marketing de teste.
 // O driver efetivo é determinado por EMAIL_DRIVER (mock | smtp | resend).
@@ -12,8 +12,14 @@ import { verificarLimite } from "@/lib/rate-limit";
 
 const schema = z.object({
   to: z.string().email("Informe um e-mail de destino válido"),
-  subject: z.string().min(2, "Assunto deve ter pelo menos 2 caracteres").max(200),
-  body: z.string().min(2, "Conteúdo deve ter pelo menos 2 caracteres").max(10000),
+  subject: z
+    .string()
+    .min(2, "Assunto deve ter pelo menos 2 caracteres")
+    .max(200),
+  body: z
+    .string()
+    .min(2, "Conteúdo deve ter pelo menos 2 caracteres")
+    .max(10000),
 });
 
 export async function POST(req: NextRequest) {
@@ -22,20 +28,23 @@ export async function POST(req: NextRequest) {
     if (!session) return forbidden();
 
     // Rate limit: 5 requisições por minuto por admin (padrão do projeto)
-    const rl = verificarLimite(`marketing-email:${session.sub}`, { janelaMs: 60_000, maximo: 5 });
+    const rl = await consumirRateLimit(`marketing-email:${session.sub}`, {
+      janelaMin: 1,
+      limite: 5,
+    });
     if (!rl.permitido) {
       return NextResponse.json(
         { error: "Muitas requisições. Aguarde antes de enviar novamente." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.resetEmMs / 1000)) } }
+        { status: 429, headers: { "Retry-After": "60" } },
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: parsed.error.issues[0]?.message || "Dados inválidos" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -53,7 +62,8 @@ export async function POST(req: NextRequest) {
 
       if (driver === "mock") {
         statusEnvio = "mock";
-        mensagem = "E-mail registrado no log (driver mock) — nenhum envio real.";
+        mensagem =
+          "E-mail registrado no log (driver mock) — nenhum envio real.";
       } else {
         statusEnvio = "accepted";
         mensagem = `E-mail aceito pelo provedor (${driver}). O destinatário pode receber em instantes — aceitação não garante entrega.`;
@@ -61,9 +71,11 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       statusEnvio = "failed";
       if (err instanceof EmailNaoAceito) {
-        mensagem = err.message;
+        mensagem =
+          "O provedor não confirmou a aceitação. Confira a configuração e os logs do provedor.";
       } else {
-        mensagem = "Erro ao enviar e-mail. Verifique a configuração do provedor.";
+        mensagem =
+          "Erro ao enviar e-mail. Verifique a configuração do provedor.";
       }
       // Audit failure
       await prisma.auditLog.create({
@@ -84,7 +96,7 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(
         { ok: false, driver, status: "failed", message: mensagem },
-        { status: 502 }
+        { status: 502 },
       );
     }
 
@@ -115,6 +127,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[admin:marketing:email]", err);
-    return NextResponse.json({ error: "Erro ao disparar e-mail" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Erro ao disparar e-mail" },
+      { status: 500 },
+    );
   }
 }

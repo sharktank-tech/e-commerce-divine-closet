@@ -1,8 +1,11 @@
+import { NewsletterForm } from "@/components/loja/NewsletterForm";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { buildMenu } from "@/lib/categorias";
 import { payment } from "@/config/defaults";
 import { getEmpresa } from "@/lib/config-loja";
+import { linkRedeSocial } from "@/lib/redes-sociais";
+import { EmailIcon, FacebookIcon, InstagramIcon, WhatsAppIcon } from "@/components/ui/SocialIcons";
 
 async function getMenuLinks() {
   try {
@@ -42,7 +45,10 @@ async function getMenuLinks() {
 export async function Footer() {
   const [catLinks, empresa] = await Promise.all([getMenuLinks(), getEmpresa()]);
   const partes = empresa.name.split(" ");
-  const temContato = empresa.email || empresa.phone || empresa.address;
+  const instagram = linkRedeSocial(empresa.instagram, "instagram");
+  const facebook = linkRedeSocial(empresa.facebook, "facebook");
+  const whatsapp = empresa.whatsapp?.replace(/\D/g, "");
+  const temContato = empresa.email || empresa.phone || empresa.address || whatsapp || instagram || facebook;
   return (
     <footer className="bg-primary-950 text-white">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-4">
@@ -68,11 +74,15 @@ export async function Footer() {
             Moda que eleva o seu dia a dia. Peças selecionadas com cuidado,
             entrega para todo o Brasil e troca fácil em 30 dias.
           </p>
+          <NewsletterForm />
           {temContato && (
             <ul className="mt-4 space-y-1 text-sm text-primary-200">
-              {empresa.email && <li>{empresa.email}</li>}
+              {empresa.email && <li><a href={`mailto:${empresa.email}`} className="inline-flex items-center gap-2 hover:text-white"><EmailIcon />{empresa.email}</a></li>}
               {empresa.phone && <li>{empresa.phone}</li>}
               {empresa.address && <li>{empresa.address}</li>}
+              {whatsapp && <li><a href={`https://wa.me/${whatsapp.startsWith("55") && whatsapp.length > 11 ? whatsapp : `55${whatsapp}`}?text=${encodeURIComponent(empresa.whatsappMensagem || "")}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white"><WhatsAppIcon />WhatsApp</a></li>}
+              {instagram && <li><a href={instagram} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white"><InstagramIcon />Instagram</a></li>}
+              {facebook && <li><a href={facebook} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white"><FacebookIcon />Facebook</a></li>}
             </ul>
           )}
         </div>

@@ -1,26 +1,29 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
+import { PurchaseTracker } from "@/components/loja/PurchaseTracker";
+import { payment } from "@/config/defaults";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Pedido recebido" };
+export const metadata: Metadata = { title: "Pedido confirmado" };
 
 export default async function SucessoPage({
   searchParams,
 }: {
   searchParams: Promise<{ pedido?: string; total?: string }>;
 }) {
-  const { pedido } = await searchParams;
+  const { pedido, total } = await searchParams;
 
   return (
     <div className="mx-auto max-w-xl px-4 py-20 text-center">
+      <PurchaseTracker pedido={pedido} total={total} />
       <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl">
         ✓
       </div>
       <h1 className="mt-6 font-display text-3xl font-bold text-ink">
-        Pedido recebido
+        Pedido confirmado!
       </h1>
       <p className="mt-3 text-ink-mute">
-        Acompanhe a situação do pagamento e do pedido pelos canais de acompanhamento.
+        Obrigado por comprar na Divine Closet. Você receberá os updates por e-mail.
       </p>
       {pedido && (
         <p className="mt-6 inline-block rounded-lg bg-white px-5 py-3 text-sm font-semibold text-ink shadow-sm">
@@ -35,6 +38,11 @@ export default async function SucessoPage({
           Continuar comprando
         </Button>
       </div>
+      {payment.driver === "mock" && (
+        <p className="mt-10 text-xs text-ink-mute">
+          Pagamento processado em modo sandbox (mock).
+        </p>
+      )}
     </div>
   );
 }

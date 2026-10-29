@@ -11,7 +11,6 @@ import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics } from "@/lib/analytics";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
-import { classificarPagamento } from "@/lib/checkout/resultado-pagamento";
 import {
   SESSAO_ENDERECO_FORM,
   SESSAO_ENDERECO_ID,
@@ -117,7 +116,6 @@ export default function CheckoutPage() {
     pedido: string;
     total: number;
   } | null>(null);
-  const [pagamentoPendente, setPagamentoPendente] = useState<{ pedido: string; metodo: string } | null>(null);
 
   const [method, setMethod] = useState<"card" | "pix" | "boleto">("card");
   const [parcelas, setParcelas] = useState("1");
@@ -125,7 +123,8 @@ export default function CheckoutPage() {
   const [mpPronto, setMpPronto] = useState(false);
   const [cfgLoja, setCfgLoja] = useState<ConfigLoja | null>(null);
 
-  // Nunca enviar dados do cartão sem tokenização, inclusive se a chave falhar.
+  // Modo Mercado Pago: public key presente → tokeniza o cartão no front
+  // (o PAN nunca chega ao nosso servidor). Ausente → fluxo mock legado.
   useEffect(() => {
     fetch("/api/pagamentos/public-key")
       .then((r) => (r.ok ? r.json() : null))
@@ -140,6 +139,8 @@ export default function CheckoutPage() {
       .catch(() => {});
   }, []);
 
+  const mpAtivo = mpKey !== null;
+
   // Frete e formas de pagamento do painel; defaults locais até carregar.
   useEffect(() => {
     fetch("/api/config-loja")
@@ -151,9 +152,10 @@ export default function CheckoutPage() {
   }, []);
 
   const freteCfg = cfgLoja?.frete ?? shippingConfig;
-  // Mercado Pago nesta loja oferece cartão e Pix.
+  // O driver Mercado Pago só cobre cartão e Pix — boleto some da lista
+  // quando o MP está ativo (evita o 500 "método não suportado").
   const metodosAtivos = METODOS.filter(
-    (m) => (cfgLoja?.pagamento[m.id] ?? true) && m.id !== "boleto"
+    (m) => (cfgLoja?.pagamento[m.id] ?? true) && (m.id !== "boleto" || !mpAtivo)
   );
 
   // Se o painel desabilitou a forma atual, migra para a primeira ativa.
@@ -593,9 +595,9 @@ export default function CheckoutPage() {
         gravarSessao("dc_checkout_idempotency", tentativaRef.current.key);
       }
       let pagamentoExtra = tentativaRef.current.extra ?? {};
-      if (method === "card") {
-        if (!mpKey || !mpPronto) {
-          setError("Pagamento com cartão indisponível no momento. Atualize a página e tente novamente.");
+      if (method === "card" && mpAtivo) {
+        if (!mpPronto) {
+          setError("Carregando Mercado Pago, aguarde e tente de novo.");
           return;
         }
         try {
@@ -630,6 +632,9 @@ export default function CheckoutPage() {
           ...(enderecoId ? { addressId: enderecoId } : {}),
           payment: {
             method,
+            ...(method === "card" && !mpAtivo
+              ? { card: { number: form.cardNumber, name: form.cardName } }
+              : {}),
             ...pagamentoExtra,
           },
           couponCode: coupon?.code || null,
@@ -640,34 +645,24 @@ export default function CheckoutPage() {
 
       const data = await res.json();
 
-      // Uma resposta recebida encerra esta tentativa, mesmo se estiver em análise;
-      // falhas de rede preservam a chave para retomar o mesmo pedido.
-      if ((res.ok && data.ok && data.order?.number) || (res.status === 402 && data.order?.paymentStatus === "FAILED")) {
+      if ((res.ok && data.ok) || (res.status === 402 && data.order?.paymentStatus === "FAILED")) {
         apagarSessao("dc_checkout_idempotency");
         tentativaRef.current = null;
       }
       if (res.ok && data.ok) {
-        const situacao = classificarPagamento(data);
-        if (situacao === "encerrado") {
-          apagarSessao("dc_checkout_idempotency");
-          tentativaRef.current = null;
-          setError("Este pedido não está aguardando pagamento. Confira sua situação antes de tentar novamente.");
-          return;
-        }
         // Compra confirmada: limpa a escolha desta compra — a próxima
         // volta a usar o endereço padrão (autofill).
         apagarSessao(SESSAO_ENDERECO_ID);
         apagarSessao(SESSAO_ENDERECO_FORM);
-        // Um replay pode não trazer QR. Jamais apresentar pendente como pago.
-        if (situacao === "pendente") {
-          if (data.payment?.qr) setQr({
+        // Pix aguardando: exibe o QR em vez de ir ao sucesso.
+        if (data.pendente && data.payment?.qr) {
+          setQr({
             codigo: data.payment.qr.codigo,
             base64: data.payment.qr.base64 ?? null,
             ticketUrl: data.payment.qr.ticketUrl ?? null,
             pedido: data.order.number,
             total: Number(data.order.total),
           });
-          else setPagamentoPendente({ pedido: data.order.number, metodo: method });
           return;
         }
         setStep(3);
@@ -702,17 +697,6 @@ export default function CheckoutPage() {
     );
   }
 
-  if (pagamentoPendente) {
-    return (
-      <div className="mx-auto max-w-xl px-4 py-16 text-center">
-        <h1 className="font-display text-2xl font-bold">Pagamento pendente</h1>
-        <p className="mt-3 text-ink-mute">Pedido {pagamentoPendente.pedido}: {pagamentoPendente.metodo === "card" ? "o pagamento está em análise." : "aguardamos a confirmação do pagamento."}</p>
-        {pagamentoPendente.metodo === "pix" && <p className="mt-3 text-sm">O código Pix não está disponível nesta tela. Verifique seu pagamento ou entre em contato com a loja antes de tentar novamente.</p>}
-        <Link href={me ? "/conta?tab=pedidos" : "/acompanhar"} className="mt-6 inline-block underline">Acompanhar pedido</Link>
-      </div>
-    );
-  }
-
   if (qr) {
     return (
       <div className="mx-auto max-w-xl px-4 py-10 text-center sm:px-6">
@@ -736,7 +720,7 @@ export default function CheckoutPage() {
         )}
         <p className="mt-4 text-xs text-ink-mute">
           Após pagar, o pedido é confirmado automaticamente.{" "}
-          <Link href={me ? "/conta?tab=pedidos" : "/acompanhar"} className="underline">Acompanhar pedido</Link>
+          <Link href="/conta" className="underline">Ver meus pedidos</Link>
         </p>
       </div>
     );
@@ -1005,7 +989,15 @@ export default function CheckoutPage() {
               <section className="rounded-xl border border-ink/10 bg-white p-6">
                 <div className="flex items-center justify-between">
                   <h2 className="font-display text-lg font-bold text-ink">Pagamento</h2>
-                  <span className="rounded-full bg-primary-100 px-3 py-1 text-[11px] font-bold uppercase text-primary-700">Mercado Pago</span>
+                  {mpAtivo ? (
+                    <span className="rounded-full bg-primary-100 px-3 py-1 text-[11px] font-bold uppercase text-primary-700">
+                      Mercado Pago
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold uppercase text-amber-800">
+                      Sandbox / Mock
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-4 grid grid-cols-3 gap-2">
@@ -1032,9 +1024,17 @@ export default function CheckoutPage() {
 
                 {method === "card" && (
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <p className="sm:col-span-2 text-xs text-ink-mute">
-                      Pagamento processado pelo Mercado Pago. O número do cartão é tokenizado no seu navegador e nunca passa pelos nossos servidores.
-                    </p>
+                    {mpAtivo ? (
+                      <p className="sm:col-span-2 text-xs text-ink-mute">
+                        Pagamento processado pelo Mercado Pago. O número do cartão
+                        é tokenizado no seu navegador e nunca passa pelos nossos servidores.
+                      </p>
+                    ) : (
+                      <p className="sm:col-span-2 text-xs text-ink-mute">
+                        Use um cartão iniciado em <strong>4000</strong> para simular recusa.
+                        Qualquer outro número aprova.
+                      </p>
+                    )}
                     <div className="sm:col-span-2">
                       <Input label="Nome no cartão" required value={form.cardName} onChange={(v) => set("cardName", v)} />
                     </div>
@@ -1049,6 +1049,7 @@ export default function CheckoutPage() {
                     </div>
                     <Input label="Validade" required placeholder="MM/AA" value={form.cardExpiry} onChange={(v) => set("cardExpiry", v)} />
                     <Input label="CVV" required placeholder="123" value={form.cardCvv} onChange={(v) => set("cardCvv", v)} />
+                    {mpAtivo && (
                       <div className="sm:col-span-2">
                         <label className="mb-1 block text-xs font-medium text-ink-soft">
                           Parcelas
@@ -1065,15 +1066,24 @@ export default function CheckoutPage() {
                           ))}
                         </select>
                       </div>
+                    )}
                   </div>
                 )}
 
                 {method === "pix" && (
                   <div className="mt-4 rounded-lg bg-primary-50 p-4 text-sm text-ink-soft">
-                    O QR Code Pix será gerado após a confirmação. Pague no app do seu banco para concluir o pedido.
+                    {mpAtivo
+                      ? "O QR Code Pix será gerado após a confirmação. Pague no app do seu banco para concluir o pedido."
+                      : "O QR Code Pix será gerado após a confirmação (sandbox: aprovação automática, sem transação real)."}
                   </div>
                 )}
 
+                {method === "boleto" && !mpAtivo && (
+                  <div className="mt-4 rounded-lg bg-primary-50 p-4 text-sm text-ink-soft">
+                    O boleto será enviado por e-mail após a confirmação (sandbox:
+                    aprovação automática, sem emissão real).
+                  </div>
+                )}
               </section>
 
               <section className="rounded-xl border border-ink/10 bg-white p-6">

@@ -1,75 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, forbidden } from "@/lib/auth";
-
+import { summarizeSales } from "@/lib/marketing/metrics";
 export async function GET(req: NextRequest) {
-  const session = await requireAuth("ADMIN");
-  if (!session) return forbidden();
-
-  // Pedidos pagos (status PAID)
-  const pedidosPagos = await prisma.order.findMany({
-    where: { paymentStatus: "PAID" },
-    select: { total: true, couponCode: true, utmSource: true, utmMedium: true, utmCampaign: true },
+  if (!(await requireAuth("ADMIN"))) return forbidden();
+  const start = req.nextUrl.searchParams.get("inicio"),
+    end = req.nextUrl.searchParams.get("fim");
+  const valid = (s: string | null) =>
+    !s ||
+    (/^\d{4}-\d{2}-\d{2}$/.test(s) &&
+      !isNaN(Date.parse(s)) &&
+      new Date(s).toISOString().slice(0, 10) === s);
+  if (!valid(start) || !valid(end) || (start && end && start > end))
+    return NextResponse.json({ error: "Período inválido." }, { status: 400 });
+  const excluded = (req.nextUrl.searchParams.get("excluir") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (excluded.length > 100)
+    return NextResponse.json(
+      { error: "Máximo de 100 pedidos excluídos." },
+      { status: 400 },
+    );
+  const from = start ? new Date(`${start}T00:00:00-03:00`) : undefined;
+  const to = end
+    ? new Date(new Date(`${end}T00:00:00-03:00`).getTime() + 86_400_000)
+    : undefined;
+  const orders = await prisma.order.findMany({
+    where: {
+      paymentStatus: { in: ["PAID", "REFUNDED"] },
+      number: { notIn: excluded },
+      ...(from || to ? { createdAt: { gte: from, lt: to } } : {}),
+    },
+    select: {
+      total: true,
+      utmSource: true,
+      utmMedium: true,
+      utmCampaign: true,
+      refund: { select: { status: true, amount: true } },
+    },
   });
-
-  // Receita bruta (soma dos totais de pedidos pagos)
-  const receitaBruta = pedidosPagos.reduce((s, p) => s + Number(p.total), 0);
-
-  // Valores estornados (pedidos com status refunded)
-  const estornados = await prisma.order.findMany({
-    where: { status: "REFUNDED" },
-    select: { total: true },
-  });
-  const valoresEstornados = estornados.reduce((s, p) => s + Number(p.total), 0);
-
-  // Receita após estornos
-  const receitaAposEstornos = receitaBruta - valoresEstornados;
-
-  // Ticket médio
-  const ticketMedio = pedidosPagos.length > 0 ? receitaBruta / pedidosPagos.length : 0;
-
-  // Vendas por origem (UTM)
-  const porOrigem = new Map<string, { pedidos: number; receita: number }>();
-  for (const p of pedidosPagos) {
-    const origem = p.utmSource || "origem desconhecida";
-    const atual = porOrigem.get(origem) || { pedidos: 0, receita: 0 };
-    atual.pedidos++;
-    atual.receita += Number(p.total);
-    porOrigem.set(origem, atual);
-  }
-  const vendasPorOrigem = Array.from(porOrigem.entries()).map(([origem, d]) => ({
-    origem,
-    pedidos: d.pedidos,
-    receita: Math.round(d.receita * 100) / 100,
-  }));
-
-  // Assinantes
-  const assinantes = await prisma.newsletterSubscriber.groupBy({
+  const subscribers = await prisma.newsletterSubscriber.groupBy({
     by: ["status"],
-    _count: { status: true },
+    _count: true,
   });
-  const assinantesMap = new Map(assinantes.map((a) => [a.status, a._count.status]));
-  const assinantesConfirmados = assinantesMap.get("confirmed") || 0;
-  const assinantesCancelados = assinantesMap.get("unsubscribed") || 0;
-  const assinantesPendentes = assinantesMap.get("pending") || 0;
-
-  return NextResponse.json({
-    pedidosPagos: pedidosPagos.length,
-    receitaBruta: Math.round(receitaBruta * 100) / 100,
-    valoresEstornados: Math.round(valoresEstornados * 100) / 100,
-    receitaAposEstornos: Math.round(receitaAposEstornos * 100) / 100,
-    ticketMedio: Math.round(ticketMedio * 100) / 100,
-    vendasPorOrigem,
-    assinantes: {
-      confirmados: assinantesConfirmados,
-      cancelados: assinantesCancelados,
-      pendentes: assinantesPendentes,
-    },
-    campanhas: {
-      rascunho: 0,
-      enfileiradas: 0,
-      processadas: 0,
-      falhas: 0,
-    },
+  const count = (s: string) =>
+    subscribers.find((x) => x.status === s)?._count || 0;
+  const campaigns = await prisma.marketingCampaign.groupBy({
+    by: ["status"],
+    _count: true,
   });
+  const messages = await prisma.marketingMessage.groupBy({
+    by: ["status"],
+    where: { kind: "CAMPAIGN" },
+    _count: true,
+  });
+  return NextResponse.json(
+    {
+      ...summarizeSales(orders),
+      assinantes: {
+        confirmados: count("confirmed"),
+        cancelados: count("unsubscribed"),
+        pendentes: count("pending"),
+      },
+      campanhas: {
+        rascunho: campaigns.find((x) => x.status === "DRAFT")?._count || 0,
+        enfileiradas: campaigns.find((x) => x.status === "QUEUED")?._count || 0,
+        processadas: messages.find((x) => x.status === "ACCEPTED")?._count || 0,
+        falhas: messages.find((x) => x.status === "FAILED")?._count || 0,
+      },
+      periodo: {
+        inicio: start,
+        fim: end,
+        data: "Order.createdAt",
+        fuso: "America/Sao_Paulo",
+        excluidos: excluded,
+      },
+      nota: "Coorte por criação do pedido; inclui pagos e estornados. Estornos APPROVED desta coorte, mesmo posteriores ao período. Não é fluxo de caixa nem lucro. Assinantes e campanhas são totais atuais.",
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

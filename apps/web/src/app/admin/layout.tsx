@@ -18,6 +18,8 @@ const links = [
   { href: "/admin/cupons", label: "Cupons", icon: "%" },
   { href: "/admin/banners", label: "Banners", icon: "▣" },
   { href: "/admin/relatorios", label: "Relatórios", icon: "▤" },
+  { href: "/admin/marketing", label: "Marketing", icon: "◈" },
+  { href: "/admin/marketing/campanhas", label: "Campanhas", icon: "✉" },
   { href: "/admin/erp", label: "ERP", icon: "⇄" },
   { href: "/admin/configuracoes", label: "Configurações", icon: "⚙" },
 ];
