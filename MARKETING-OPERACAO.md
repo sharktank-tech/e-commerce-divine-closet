@@ -93,7 +93,7 @@ de liquidação: o modelo atual não tem paidAt confiável.
 
 ## Analytics (entrega separada)
 
-Implementação separada da base de newsletter/campanhas: consentimento e revogação,
+PR dependente da base de newsletter/campanhas: consentimento e revogação,
 UTM e view_item/add_to_cart/begin_checkout/purchase. Eventos GA4 usam gtag e Meta usa
 fbq, não apenas objetos soltos em dataLayer. Eventos não contêm dados de cliente.
 URLs de acompanhamento, newsletter e admin não carregam tracking. Querystring não
@@ -102,7 +102,8 @@ validada nesta rodada.
 
 Conversão exige POST autorizado ao servidor: sessão do dono, token privado guest
 válido ou posse da chave UUIDv4 secreta do checkout, junto ao número. E-mail e número
-sozinhos não autorizam. A prova guest é guardada em sessionStorage por uma hora;
+sozinhos não autorizam. A prova guest só é guardada com consentimento, em sessionStorage, por uma hora;
+o servidor também limita seu uso à primeira hora do pedido;
 ninguém envia essa chave ao analytics. Pedidos pendentes, cancelados, estornados ou
 em hold não convertem. Total/itens vêm do banco; URL não comprova pagamento.
 Deduplicação local por pedido só depois de consentimento e emissão; GA4 recebe
@@ -148,6 +149,18 @@ número em produção continua igual; melhoria de resistência a colisões fica 
 separadamente, sem alterar pagamento no escopo de marketing.
 
 
+## Evidências desta rodada
+
+- Base do PR #21: main b7b23d2; head remoto após revisão: ff2f18d.
+- Núcleo de newsletter/campanhas: 579 testes/57 arquivos e 12 asserts Chromium.
+- Composição com analytics e hardening transacional: 587 testes/59 arquivos, sem
+  skips ou falhas; 21 asserts Chromium 153, com chamadas externas interceptadas.
+- Typecheck e lint sem erros, build Next de produção local aprovado.
+- Cadeia de 34 migrações aplicada em bancos descartáveis; upgrade desde main
+  preservou pedido, contador de cupom e assinante. RLS/42 negações verificadas.
+- São verificações locais; não há alegação de CI verde nem recepção real no provedor.
+
+
 ## Revisão antes da publicação
 
 A confirmação de enfileiramento inclui hash da versão exata de assunto/conteúdo/
@@ -157,3 +170,7 @@ confirmados com consentimento registrado na versão vigente são incluídos. Des
 suprime mensagens antigas pendentes ou já reivindicadas, sob a mesma trava do
 assinante; reativar depois não ressuscita campanhas anteriores. Mock do teste
 individual não chama transporte nem imprime o corpo em log.
+
+SDKs já carregados recebem consentimento negado ao revogar ou entrar em rota
+privada. A revogação remove também provas temporárias de conversão. Google signals
+e personalização de anúncios permanecem desabilitados nesta implementação.

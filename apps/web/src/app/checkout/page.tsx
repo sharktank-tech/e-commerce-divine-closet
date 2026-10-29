@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { formatBRL } from "@/lib/utils";
 import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
-import { analytics } from "@/lib/analytics";
+import { analytics, checkoutUtm, hasConsent } from "@/lib/analytics";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
 import {
   SESSAO_ENDERECO_FORM,
@@ -637,6 +637,7 @@ export default function CheckoutPage() {
               : {}),
             ...pagamentoExtra,
           },
+          utm: checkoutUtm(),
           couponCode: coupon?.code || null,
           notes: form.notes || null,
           ...(me ? {} : { guest: { email: guest.email, name: guest.name || undefined } }),
@@ -646,6 +647,9 @@ export default function CheckoutPage() {
       const data = await res.json();
 
       if ((res.ok && data.ok) || (res.status === 402 && data.order?.paymentStatus === "FAILED")) {
+        if (!me && hasConsent() && data.order?.number && tentativaRef.current?.key) {
+          gravarSessao(`dc-conversion-proof:${data.order.number}`, JSON.stringify({ key: tentativaRef.current.key, expires: Date.now() + 3_600_000 }));
+        }
         apagarSessao("dc_checkout_idempotency");
         tentativaRef.current = null;
       }

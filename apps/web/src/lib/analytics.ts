@@ -1,59 +1,162 @@
 "use client";
-
-// Analytics com consentimento (LGPD).
-// Nenhum evento é disparado sem aceite explícito (localStorage `dc-consent=1`)
-// e sem IDs configurados. Sem IDs, tudo vira no-op silencioso.
-
 export const CONSENT_KEY = "dc-consent";
-
-export function hasConsent(): boolean {
+export const CONSENT_EVENT = "dc-consent-change";
+export function hasConsent() {
   try {
     return localStorage.getItem(CONSENT_KEY) === "1";
   } catch {
     return false;
   }
 }
-
-export function setConsent(aceito: boolean) {
+export function privateAnalyticsPath(path: string) {
+  return /^\/(acompanhar|newsletter|admin|conta|checkout|sucesso)(\/|$)/.test(
+    path,
+  );
+}
+// Uma biblioteca já carregada também precisa receber a revogação/pausa.
+export function pauseTracking() {
+  window.dcTracking = undefined;
+  window.gtag?.("consent", "update", {
+    analytics_storage: "denied",
+    ad_storage: "denied",
+    ad_user_data: "denied",
+    ad_personalization: "denied",
+  });
+  window.fbq?.("consent", "revoke");
+}
+export function setConsent(accepted: boolean) {
   try {
-    localStorage.setItem(CONSENT_KEY, aceito ? "1" : "0");
+    localStorage.setItem(CONSENT_KEY, accepted ? "1" : "0");
+    if (!accepted) {
+      pauseTracking();
+      sessionStorage.removeItem("dc-utm");
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const key = sessionStorage.key(i);
+        if (key?.startsWith("dc-conversion-proof:"))
+          sessionStorage.removeItem(key);
+      }
+    }
+    window.dispatchEvent(new Event(CONSENT_EVENT));
   } catch {
-    // storage indisponível: segue sem analytics
+    /* indisponível: não rastrear */
   }
 }
-
+type Item = { id: string; name: string; price: number; quantity: number };
 declare global {
   interface Window {
-    dataLayer?: Array<Record<string, unknown>>;
+    dataLayer?: unknown[];
+    gtag?: (...args: unknown[]) => void;
+    fbq?: (...args: unknown[]) => void;
+    dcTracking?: { ga4: string[]; ads: string[]; meta: string };
   }
 }
-
-function push(event: Record<string, unknown>) {
-  if (!hasConsent()) return;
-  try {
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push(event);
-  } catch {
-    // silencioso
+function emit(event: string, value: number, items: Item[], orderId?: string) {
+  if (
+    !hasConsent() ||
+    !window.dcTracking ||
+    /^\/(acompanhar|newsletter|admin)(\/|$)/.test(location.pathname)
+  )
+    return false;
+  const config = window.dcTracking;
+  let emitted = false;
+  const ecommerce = {
+    currency: "BRL",
+    value,
+    items: items.map((i) => ({
+      item_id: i.id,
+      item_name: i.name,
+      price: i.price,
+      quantity: i.quantity,
+    })),
+    ...(orderId ? { transaction_id: orderId } : {}),
+  };
+  if (config.ga4.length && window.gtag) {
+    window.gtag("event", event, {
+      ...ecommerce,
+      send_to: config.ga4,
+      page_location: location.origin + location.pathname,
+      page_referrer: "",
+    });
+    emitted = true;
   }
-}
-
-export const analytics = {
-  addToCart(items: Array<{ id: string; name: string; price: number; quantity: number }>) {
-    push({ event: "add_to_cart", ecommerce: { items } });
-  },
-  beginCheckout(value: number, items: Array<{ id: string; name: string; price: number; quantity: number }>) {
-    push({ event: "begin_checkout", ecommerce: { value, currency: "BRL", items } });
-  },
-  purchase(orderId: string, value: number, items: Array<{ id: string; name: string; price: number; quantity: number }>) {
-    // Deduplicação: recarregar a confirmação não dispara de novo.
-    try {
-      const key = `dc-purchase-${orderId}`;
-      if (sessionStorage.getItem(key)) return;
-      sessionStorage.setItem(key, "1");
-    } catch {
-      // segue mesmo assim
+  if (config.meta && window.fbq) {
+    const name = (
+      {
+        view_item: "ViewContent",
+        add_to_cart: "AddToCart",
+        begin_checkout: "InitiateCheckout",
+        purchase: "Purchase",
+      } as Record<string, string>
+    )[event];
+    if (name) {
+      window.fbq(
+        "track",
+        name,
+        {
+          currency: "BRL",
+          value,
+          content_ids: items.map((i) => i.id),
+          content_type: "product",
+        },
+        orderId ? { eventID: orderId } : undefined,
+      );
+      emitted = true;
     }
-    push({ event: "purchase", ecommerce: { transaction_id: orderId, value, currency: "BRL", items } });
+  }
+  return emitted;
+}
+export function captureUtm() {
+  if (!hasConsent() || privateAnalyticsPath(location.pathname)) return;
+  try {
+    const params = new URLSearchParams(location.search);
+    if (!params.get("utm_source")) return;
+    const clean = (s: string | null) =>
+      (s || "").replace(/[^a-zA-Z0-9_ .-]/g, "").slice(0, 100);
+    sessionStorage.setItem(
+      "dc-utm",
+      JSON.stringify({
+        source: clean(params.get("utm_source")),
+        medium: clean(params.get("utm_medium")),
+        campaign: clean(params.get("utm_campaign")),
+      }),
+    );
+  } catch {
+    /* storage indisponível */
+  }
+}
+export function checkoutUtm() {
+  if (!hasConsent()) return undefined;
+  try {
+    return JSON.parse(sessionStorage.getItem("dc-utm") || "null") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+export const analytics = {
+  viewItem: (item: Item) => emit("view_item", item.price, [item]),
+  addToCart: (items: Item[]) =>
+    emit(
+      "add_to_cart",
+      items.reduce((s, i) => s + i.price * i.quantity, 0),
+      items,
+    ),
+  beginCheckout: (value: number, items: Item[]) =>
+    emit("begin_checkout", value, items),
+  // Chamado somente com dados da consulta autorizada ao servidor.
+  purchase: (id: string, value: number, items: Item[]) => {
+    if (!hasConsent()) return;
+    const key = `dc-purchase-${id}`;
+    try {
+      if (localStorage.getItem(key)) return;
+    } catch {
+      /* segue */
+    }
+    if (emit("purchase", value, items, id)) {
+      try {
+        localStorage.setItem(key, "1");
+      } catch {
+        /* deduplicação no provedor por transaction_id/eventID */
+      }
+    }
   },
 };
