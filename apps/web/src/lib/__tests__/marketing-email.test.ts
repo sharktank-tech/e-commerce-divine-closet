@@ -42,6 +42,7 @@ beforeEach(() => {
 it("mock diferencia simulação sem alegar entrega", async () => {
   const r = await POST(request());
   expect((await r.json()).status).toBe("mock");
+  expect(m.send).not.toHaveBeenCalled();
   expect(m.audit.mock.calls[0][0].data.meta).not.toHaveProperty("body");
 });
 it("aceitação do provedor não é entrega", async () => {

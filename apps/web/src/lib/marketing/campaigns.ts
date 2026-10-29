@@ -1,3 +1,6 @@
+import { createHash } from "crypto";
+import { Prisma } from "@prisma/client";
+import { CONSENT_VERSION } from "./consent";
 import { prisma } from "@/lib/prisma";
 import { marketingBaseUrl, marketingToken } from "./tokens";
 import {
@@ -7,18 +10,46 @@ import {
   type SendEmailInput,
 } from "@/lib/email";
 
+export function campaignRevision(c: {
+  id: string;
+  subject: string;
+  body: string;
+  source: string | null;
+  updatedAt: Date;
+}) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        c.id,
+        c.subject,
+        c.body,
+        c.source,
+        c.updatedAt.toISOString(),
+      ]),
+    )
+    .digest("hex");
+}
+export const eligibleSubscriber = {
+  status: "confirmed",
+  consentedAt: { not: null },
+  consentVersion: CONSENT_VERSION,
+} as const;
 export async function queueCampaign(
   id: string,
   operator: string,
   expected: number,
+  revision: string,
 ) {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "MarketingCampaign" WHERE id=${id}::uuid FOR UPDATE`;
     const c = await tx.marketingCampaign.findUniqueOrThrow({ where: { id } });
-    if (c.status !== "DRAFT") return { queued: 0, alreadyQueued: true };
-    const subscribers = await tx.newsletterSubscriber.findMany({
+    if (c.status === "QUEUED") return { queued: 0, alreadyQueued: true };
+    if (c.status !== "DRAFT") throw new Error("Campanha cancelada.");
+    if (campaignRevision(c) !== revision)
+      throw new Error("A campanha mudou. Atualize a prévia.");
+    let subscribers = await tx.newsletterSubscriber.findMany({
       where: {
-        status: "confirmed",
+        ...eligibleSubscriber,
         ...(c.source ? { consentSource: c.source } : {}),
       },
       orderBy: { id: "asc" },
@@ -26,6 +57,22 @@ export async function queueCampaign(
     });
     if (subscribers.length > 1000)
       throw new Error("Limite desta versão: 1000 destinatários por campanha.");
+    // Trava antes de gravar o público: descadastro concorrente espera o enfileiramento
+    // e suprime as mensagens, ou ganha a trava e é removido na recarga abaixo.
+    if (subscribers.length) {
+      const ids = subscribers.map((x) => x.id);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM "NewsletterSubscriber" WHERE id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR SHARE`,
+      );
+      subscribers = await tx.newsletterSubscriber.findMany({
+        where: {
+          id: { in: ids },
+          ...eligibleSubscriber,
+          ...(c.source ? { consentSource: c.source } : {}),
+        },
+        orderBy: { id: "asc" },
+      });
+    }
     if (subscribers.length !== expected)
       throw new Error("O público mudou. Atualize a prévia antes de confirmar.");
     await tx.marketingMessage.createMany({
@@ -101,8 +148,15 @@ export async function drainMarketing(
     // Claim durável antes do transporte. Queda/timeout incerto fica em REVIEW,
     // nunca volta automaticamente à fila (inclusive SMTP sem idempotência).
     const claim = await prisma.marketingMessage.updateMany({
-      where: { id: candidate.id, status: "PENDING", nextAttemptAt: { lte: new Date() } },
-      data: { status: "REVIEW", firstAttemptAt: candidate.firstAttemptAt || new Date() },
+      where: {
+        id: candidate.id,
+        status: "PENDING",
+        nextAttemptAt: { lte: new Date() },
+      },
+      data: {
+        status: "REVIEW",
+        firstAttemptAt: candidate.firstAttemptAt || new Date(),
+      },
     });
     if (!claim.count) continue;
     const changed = await prisma.$transaction(
@@ -135,7 +189,10 @@ export async function drainMarketing(
         if (
           staleConfirm ||
           (m.kind === "CAMPAIGN" &&
-            (s.status !== "confirmed" || campaign?.status !== "QUEUED"))
+            (s.status !== "confirmed" ||
+              !s.consentedAt ||
+              s.consentVersion !== CONSENT_VERSION ||
+              campaign?.status !== "QUEUED"))
         ) {
           await tx.marketingMessage.update({
             where: { id: m.id },

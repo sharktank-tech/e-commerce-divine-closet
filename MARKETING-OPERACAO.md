@@ -146,3 +146,14 @@ O teste de checkout passou a usar números determinísticos apenas nas fixtures:
 colisão aleatória dos 4 dígitos de orderNumber derrubou uma execução. Geração do
 número em produção continua igual; melhoria de resistência a colisões fica pendente
 separadamente, sem alterar pagamento no escopo de marketing.
+
+
+## Revisão antes da publicação
+
+A confirmação de enfileiramento inclui hash da versão exata de assunto/conteúdo/
+segmento e updatedAt. Prévia antiga é rejeitada, mesmo se a contagem for igual.
+Enfileiramento trava os assinantes em ordem e recarrega elegibilidade. Somente
+confirmados com consentimento registrado na versão vigente são incluídos. Descadastro
+suprime mensagens antigas pendentes ou já reivindicadas, sob a mesma trava do
+assinante; reativar depois não ressuscita campanhas anteriores. Mock do teste
+individual não chama transporte nem imprime o corpo em log.

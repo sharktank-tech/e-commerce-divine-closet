@@ -7,6 +7,8 @@ import {
   cancelCampaign,
   queueCampaign,
   drainMarketing,
+  campaignRevision,
+  eligibleSubscriber,
 } from "@/lib/marketing/campaigns";
 const content = z.object({
   subject: z.string().trim().min(2).max(200),
@@ -21,6 +23,7 @@ const operation = z.discriminatedUnion("action", [
     id: z.string().uuid(),
     confirm: z.literal(true),
     expectedRecipients: z.number().int().min(0).max(1000),
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
   }),
   z.object({ action: z.literal("cancel"), id: z.string().uuid() }),
   z.object({ action: z.literal("drain"), confirm: z.literal(true) }),
@@ -34,13 +37,14 @@ export async function GET() {
   });
   const eligible = await prisma.newsletterSubscriber.groupBy({
     by: ["consentSource"],
-    where: { status: "confirmed" },
+    where: eligibleSubscriber,
     _count: true,
   });
   return NextResponse.json(
     {
       campaigns: campaigns.map((c) => ({
         ...c,
+        revision: campaignRevision(c),
         messages: undefined,
         counts: c.messages.reduce<Record<string, number>>((a, m) => {
           a[m.status] = (a[m.status] || 0) + 1;
@@ -100,7 +104,12 @@ export async function POST(req: NextRequest) {
     }
     if (d.action === "queue")
       return NextResponse.json(
-        await queueCampaign(d.id, session.sub, d.expectedRecipients),
+        await queueCampaign(
+          d.id,
+          session.sub,
+          d.expectedRecipients,
+          d.expectedRevision,
+        ),
       );
     if (d.action === "cancel")
       return NextResponse.json(await cancelCampaign(d.id, session.sub));

@@ -7,6 +7,7 @@ type Campaign = {
   source: string | null;
   status: string;
   counts: Record<string, number>;
+  revision: string;
 };
 export default function Campaigns() {
   const [data, setData] = useState<{
@@ -166,6 +167,7 @@ export default function Campaigns() {
                       id: c.id,
                       confirm: true,
                       expectedRecipients: n,
+                      expectedRevision: c.revision,
                     });
                 }}
               >

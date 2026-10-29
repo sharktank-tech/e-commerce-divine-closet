@@ -24,7 +24,8 @@ import {
 } from "@/lib/marketing/newsletter";
 import { marketingToken } from "@/lib/marketing/tokens";
 import {
-  queueCampaign,
+  queueCampaign as queueCampaignImpl,
+  campaignRevision,
   cancelCampaign,
   drainMarketing,
 } from "@/lib/marketing/campaigns";
@@ -110,6 +111,20 @@ async function confirmed(email = "subscriber@example.invalid") {
     ),
   ).toBe(true);
   return prisma.newsletterSubscriber.findUniqueOrThrow({ where: { id: s.id } });
+}
+async function queueCampaign(
+  id: string,
+  operator: string,
+  expected: number,
+  revision?: string,
+) {
+  const c = await prisma.marketingCampaign.findUniqueOrThrow({ where: { id } });
+  return queueCampaignImpl(
+    id,
+    operator,
+    expected,
+    revision || campaignRevision(c),
+  );
 }
 async function campaign() {
   return prisma.marketingCampaign.create({
@@ -350,8 +365,14 @@ it("indicadores incluem estornado no bruto e subtraem Refund aprovado uma vez", 
   await prisma.order.delete({ where: { id } });
 });
 it("sem admin nega indicadores", async () => {
- auth.requireAuth.mockResolvedValue(null);
- expect((await metrics(new NextRequest("http://localhost/api/admin/marketing/indicadores"))).status).toBe(403);
+  auth.requireAuth.mockResolvedValue(null);
+  expect(
+    (
+      await metrics(
+        new NextRequest("http://localhost/api/admin/marketing/indicadores"),
+      )
+    ).status,
+  ).toBe(403);
 });
 it("mudança de público exige nova prévia e falha permanente não retenta", async () => {
   await confirmed();
@@ -370,4 +391,57 @@ it("mudança de público exige nova prévia e falha permanente não retenta", as
   expect((await prisma.marketingMessage.findFirstOrThrow()).status).toBe(
     "FAILED",
   );
+});
+
+it("prévia antiga é rejeitada mesmo com o mesmo total de destinatários", async () => {
+  await confirmed();
+  const c = await campaign();
+  const revision = campaignRevision(c);
+  await prisma.marketingCampaign.update({
+    where: { id: c.id },
+    data: { body: "Outro conteúdo" },
+  });
+  await expect(queueCampaign(c.id, operator, 1, revision)).rejects.toThrow(
+    "campanha mudou",
+  );
+  expect(
+    await prisma.marketingMessage.count({ where: { campaignId: c.id } }),
+  ).toBe(0);
+});
+it("cancelar e reativar não libera campanha antiga nem cadastro sem consentimento", async () => {
+  const s = await confirmed();
+  await prisma.marketingMessage.deleteMany();
+  const c = await campaign();
+  await queueCampaign(c.id, operator, 1);
+  await applyNewsletterToken(
+    marketingToken(s.id, s.tokenVersion, "unsubscribe"),
+    "unsubscribe",
+  );
+  await prisma.newsletterSubscriber.update({
+    where: { id: s.id },
+    data: { lastConfirmationAt: new Date(0) },
+  });
+  await requestSubscription(s.email, "footer", true);
+  const pending = await prisma.newsletterSubscriber.findUniqueOrThrow({
+    where: { id: s.id },
+  });
+  await applyNewsletterToken(
+    marketingToken(s.id, pending.confirmNonce!, "confirm"),
+    "confirm",
+  );
+  const send = vi.fn(async () => ({ id: "fake" }));
+  await drainMarketing(10, { driver: "resend", send });
+  expect(send).not.toHaveBeenCalled(); // confirmações consumidas também são suprimidas
+  expect(
+    (
+      await prisma.marketingMessage.findFirstOrThrow({
+        where: { campaignId: c.id },
+      })
+    ).status,
+  ).toBe("SUPPRESSED");
+  await prisma.newsletterSubscriber.create({
+    data: { email: "unproven@example.invalid", status: "confirmed" },
+  });
+  const c2 = await campaign();
+  expect(await queueCampaign(c2.id, operator, 1)).toMatchObject({ queued: 1 });
 });
