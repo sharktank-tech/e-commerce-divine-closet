@@ -1,3 +1,4 @@
+BEGIN;
 -- Aditiva. Newsletter original ainda não publicada; preservar o histórico anterior.
 ALTER TABLE "NewsletterSubscriber"
  ADD COLUMN "tokenVersion" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
@@ -39,3 +40,5 @@ DO $$ DECLARE t text; role_name text; BEGIN
   END IF;
  END LOOP;
 END $$;
+
+COMMIT;

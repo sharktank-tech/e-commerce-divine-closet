@@ -112,6 +112,10 @@ Google Ads tem configuração base, mas **conversão Ads não é implementada** 
 
 ## Migração e futura publicação
 
+Criação e proteção das novas tabelas ocorrem na mesma transação: não há janela
+de acesso público entre CREATE TABLE e REVOKE/RLS. A migração original de newsletter
+ainda não publicada foi endurecida; nenhuma migração aplicada em produção foi editada.
+
 Duas migrações novas em relação ao main: newsletter_subscribers (original) e
 marketing_seguro (hardening, fila e campanhas). Não reescrever migrações aplicadas.
 Validar em banco vazio e upgrade com dados sintéticos; conferir 34 migrações no

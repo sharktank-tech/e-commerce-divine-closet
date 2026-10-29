@@ -1,3 +1,4 @@
+BEGIN;
 -- Migration: newsletter_subscribers (aditiva, não destrutiva)
 -- Base para cadastro de interessados e descadastro.
 
@@ -21,3 +22,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS "NewsletterSubscriber_email_key" ON "Newslette
 CREATE UNIQUE INDEX IF NOT EXISTS "NewsletterSubscriber_unsubscribeToken_key" ON "NewsletterSubscriber"("unsubscribeToken");
 CREATE INDEX IF NOT EXISTS "NewsletterSubscriber_status_idx" ON "NewsletterSubscriber"("status");
 CREATE INDEX IF NOT EXISTS "NewsletterSubscriber_createdAt_idx" ON "NewsletterSubscriber"("createdAt");
+
+-- A tabela nunca fica exposta entre a criação e a migração seguinte.
+ALTER TABLE "NewsletterSubscriber" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE "NewsletterSubscriber" FROM PUBLIC;
+DO $$ DECLARE role_name text; BEGIN
+ FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+   EXECUTE format('REVOKE ALL ON TABLE public."NewsletterSubscriber" FROM %I',role_name);
+  END IF;
+ END LOOP;
+END $$;
+COMMIT;
