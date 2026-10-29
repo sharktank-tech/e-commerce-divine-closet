@@ -617,3 +617,20 @@ model EmailOutbox {
 
   @@index([status, nextAttemptAt])
 }
+
+model NewsletterSubscriber {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String    @unique
+  status          String    @default("pending") // pending | confirmed | unsubscribed
+  consentVersion  String?
+  consentSource   String?
+  consentedAt     DateTime?
+  confirmedAt     DateTime?
+  unsubscribedAt  DateTime?
+  unsubscribeToken String?  @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
