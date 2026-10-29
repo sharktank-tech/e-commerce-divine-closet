@@ -1,3 +1,4 @@
+import { NewsletterForm } from "@/components/loja/NewsletterForm";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { buildMenu } from "@/lib/categorias";
@@ -73,6 +74,7 @@ export async function Footer() {
             Moda que eleva o seu dia a dia. Peças selecionadas com cuidado,
             entrega para todo o Brasil e troca fácil em 30 dias.
           </p>
+          <NewsletterForm />
           {temContato && (
             <ul className="mt-4 space-y-1 text-sm text-primary-200">
               {empresa.email && <li><a href={`mailto:${empresa.email}`} className="inline-flex items-center gap-2 hover:text-white"><EmailIcon />{empresa.email}</a></li>}

@@ -30,6 +30,7 @@ export default function AdminConfiguracoesPage() {
 
   const [mail, setMail] = useState({ to: "", subject: "", body: "" });
   const [mailMsg, setMailMsg] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -65,14 +66,21 @@ export default function AdminConfiguracoesPage() {
   async function sendTest(e: React.FormEvent) {
     e.preventDefault();
     setMailMsg("");
-    const res = await fetch("/api/admin/marketing/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(mail),
-    });
-    const data = await res.json();
-    setMailMsg(data.message || data.error || "Erro ao enviar");
-    if (res.ok) setMail({ to: "", subject: "", body: "" });
+    setSending(true);
+    try {
+      const res = await fetch("/api/admin/marketing/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mail),
+      });
+      const data = await res.json();
+      setMailMsg(data.message || data.error || "Erro ao enviar");
+      if (res.ok) setMail({ to: "", subject: "", body: "" });
+    } catch {
+      setMailMsg("Não foi possível confirmar o envio. Confira o provedor antes de tentar novamente.");
+    } finally {
+      setSending(false);
+    }
   }
 
   if (!settings) return <p className="text-ink-mute">Carregando configurações...</p>;
@@ -167,14 +175,20 @@ export default function AdminConfiguracoesPage() {
         </div>
 
         <form onSubmit={sendTest} className="mt-4 space-y-3 border-t border-ink/10 pt-4">
-          <p className="text-sm font-semibold text-ink">Disparo de teste (mock)</p>
+          <p className="text-sm font-semibold text-ink">Disparo de teste</p>
+          <p className="text-xs text-ink-mute">
+            O botão pode enviar um e-mail real quando houver transporte ativo (Resend/SMTP).
+            O resultado indica se foi apenas simulado, aceito pelo provedor ou falhou.
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Input label="Para" type="email" required value={mail.to} onChange={(v) => setMail((m) => ({ ...m, to: v }))} />
             <Input label="Assunto" required value={mail.subject} onChange={(v) => setMail((m) => ({ ...m, subject: v }))} />
           </div>
           <Input label="Corpo" textarea required value={mail.body} onChange={(v) => setMail((m) => ({ ...m, body: v }))} />
           <div className="flex items-center gap-3">
-            <Button type="submit" size="sm">Enviar teste</Button>
+            <Button type="submit" size="sm" disabled={sending}>
+              {sending ? "Enviando..." : "Enviar teste"}
+            </Button>
             {mailMsg && <span className="text-xs text-ink-soft">{mailMsg}</span>}
           </div>
         </form>
