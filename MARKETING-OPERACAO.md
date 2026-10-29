@@ -174,3 +174,23 @@ individual não chama transporte nem imprime o corpo em log.
 SDKs já carregados recebem consentimento negado ao revogar ou entrar em rota
 privada. A revogação remove também provas temporárias de conversão. Google signals
 e personalização de anúncios permanecem desabilitados nesta implementação.
+
+
+## Auditoria operacional complementar — 29/10/2026
+
+### Escopo e evidência verificada
+- PR #21 integrado em main: merge `465d0d1f819368ee615982553cdb8c34ae096482`.
+- PR #22 integrado em main: merge `e763ed12df749f3cbaad70772da1ed07b606061b`.
+- Descrições dos PRs registram deploy Vercel bem-sucedido, migrações aplicadas e smoke público sem escritas. Não representam nova execução nesta auditoria.
+- Revisão de código em main: `api/newsletter/subscribe` exige consentimento e versão válidos; confirmação e descadastro só alteram estado via POST; `api/admin/marketing/email` exige ADMIN, rate-limit e diferencia mock/accepted/failed; `drainMarketing` é manual, máximo 10 por chamada, com claim REVIEW, supressão e tratamento conservador de falha incerta.
+- Nenhum envio de campanha, criação de inscrição, compra ou mudança de variável foi realizado nesta auditoria.
+
+### Checklist dos cinco pontos
+1. **Variáveis e ambiente — PARCIAL/BLOQUEADO:** projeto `e-commerce-divine-closet-web` localizado na listagem de projetos Vercel; leitura de metadados das variáveis retornou 404 e listagem de deployments 403. Não se comprovou neste acesso quais integrações estão configuradas. Repetir auditoria de nomes/escopos, sem revelar valores: `EMAIL_DRIVER`, `EMAIL_FROM`, `RESEND_API_KEY` ou `SMTP_*`, `NEWSLETTER_SECRET` (ou `JWT_SECRET`), `NEXT_PUBLIC_APP_URL`, IDs públicos de GA4/Meta. Verificar domínio de envio, SPF/DKIM/DMARC no provedor.
+2. **Newsletter — CÓDIGO VERIFICADO; E2E REAL PENDENTE:** testar com caixa de e-mail própria e consentimento explícito, processando uma confirmação manualmente; verificar token expirar/ser de uso único, descadastro, reativação somente após nova confirmação e ausência de inclusão indevida em campanhas. Não usar e-mails de terceiros.
+3. **Analytics — CÓDIGO/TESTES ANTERIORES VERIFICADOS; RECEPÇÃO REAL PENDENTE:** validar GA4 DebugView e Meta Test Events, sem PII, em navegação consentida e depois revogada; checar eventos `view_item`, `add_to_cart`, `begin_checkout`; `purchase` somente com pedido pago real/autorizado. Ads conversion label não definida, portanto não declarar Google Ads finalizado.
+4. **Fila/logs — CÓDIGO/TESTES ANTERIORES VERIFICADOS; RUNTIME PENDENTE:** consulta de runtime logs Vercel falhou com 403; nenhuma fila foi drenada. Auditar contagem por status `PENDING`, `REVIEW`, `ACCEPTED`, `FAILED`, `SUPPRESSED`, `CANCELLED` por canal e janela, sem dados pessoais; investigar REVIEW junto ao provedor antes de retentar. Não habilitar cron nem processamento automático sem decisão explícita.
+5. **Evidências/runbook — DOCUMENTADO:** esta seção guarda as verificações, limites e ações necessárias, sem chamar pendências externas de sucesso.
+
+### Critério para encerrar a infraestrutura operacional
+Aprovar somente após: (a) leitura autorizada dos metadados de ambiente/deploy e logs sem exposição de segredos; (b) confirmação/descadastro real com e-mail controlado; (c) eventos consentidos visíveis nos provedores e revogação respeitada; (d) inspeção de fila e registro de eventuais REVIEW; (e) checklist e evidências datadas. Nenhuma dessas operações exige disparo em massa. O PR #18 e o ERP continuam fora do escopo.
