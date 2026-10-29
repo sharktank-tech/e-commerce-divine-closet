@@ -29,7 +29,9 @@ it("antes do consentimento e depois da revogação não emite nem captura UTM", 
   expect(checkoutUtm().source).toBe("instagram");
   setConsent(false);
   analytics.beginCheckout(10, []);
-  expect(window.gtag).not.toHaveBeenCalled();
+  expect(
+    vi.mocked(window.gtag!).mock.calls.filter((c) => c[0] === "event"),
+  ).toHaveLength(0);
   expect(sessionStorage.getItem("dc-utm")).toBeNull();
 });
 it("eventos são enviados a GA4 e Meta, sem querystring; compra deduplicada", () => {
@@ -66,4 +68,21 @@ it("rotas com token nunca emitem eventos", () => {
   analytics.purchase("o", 10, []);
   expect(window.gtag).not.toHaveBeenCalled();
   expect(privateAnalyticsPath("/acompanhar/private")).toBe(true);
+});
+
+it("revogar informa os SDKs existentes e apaga a prova temporária de conversão", () => {
+  setConsent(true);
+  sessionStorage.setItem("dc-conversion-proof:test", "secret");
+  setConsent(false);
+  expect(window.gtag).toHaveBeenCalledWith(
+    "consent",
+    "update",
+    expect.objectContaining({
+      analytics_storage: "denied",
+      ad_storage: "denied",
+    }),
+  );
+  expect(window.fbq).toHaveBeenCalledWith("consent", "revoke");
+  expect(window.dcTracking).toBeUndefined();
+  expect(sessionStorage.getItem("dc-conversion-proof:test")).toBeNull();
 });

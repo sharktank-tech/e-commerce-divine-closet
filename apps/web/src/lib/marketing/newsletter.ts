@@ -127,6 +127,15 @@ export async function applyNewsletterToken(
           confirmExpiresAt: null,
         },
       });
+      // Reativação posterior não ressuscita campanhas aceitas antes do cancelamento.
+      await tx.marketingMessage.updateMany({
+        where: {
+          subscriberId: id,
+          kind: "CAMPAIGN",
+          status: { in: ["PENDING", "REVIEW"] },
+        },
+        data: { status: "SUPPRESSED" },
+      });
     }
     return true;
   });

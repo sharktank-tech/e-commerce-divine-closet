@@ -54,11 +54,12 @@ export async function POST(req: NextRequest) {
     let mensagem: string;
 
     try {
-      resultado = await sendEmail({
-        to: parsed.data.to,
-        subject: parsed.data.subject,
-        text: parsed.data.body,
-      });
+      if (driver !== "mock")
+        resultado = await sendEmail({
+          to: parsed.data.to,
+          subject: parsed.data.subject,
+          text: parsed.data.body,
+        });
 
       if (driver === "mock") {
         statusEnvio = "mock";

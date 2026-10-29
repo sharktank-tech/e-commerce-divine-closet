@@ -13,10 +13,29 @@ export function privateAnalyticsPath(path: string) {
     path,
   );
 }
+// Uma biblioteca já carregada também precisa receber a revogação/pausa.
+export function pauseTracking() {
+  window.dcTracking = undefined;
+  window.gtag?.("consent", "update", {
+    analytics_storage: "denied",
+    ad_storage: "denied",
+    ad_user_data: "denied",
+    ad_personalization: "denied",
+  });
+  window.fbq?.("consent", "revoke");
+}
 export function setConsent(accepted: boolean) {
   try {
     localStorage.setItem(CONSENT_KEY, accepted ? "1" : "0");
-    if (!accepted) sessionStorage.removeItem("dc-utm");
+    if (!accepted) {
+      pauseTracking();
+      sessionStorage.removeItem("dc-utm");
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const key = sessionStorage.key(i);
+        if (key?.startsWith("dc-conversion-proof:"))
+          sessionStorage.removeItem(key);
+      }
+    }
     window.dispatchEvent(new Event(CONSENT_EVENT));
   } catch {
     /* indisponível: não rastrear */

@@ -6,6 +6,7 @@ import {
   captureUtm,
   hasConsent,
   privateAnalyticsPath,
+  pauseTracking,
 } from "@/lib/analytics";
 export function TrackingScripts({
   meta,
@@ -22,8 +23,10 @@ export function TrackingScripts({
       if (
         !hasConsent() ||
         /^\/(acompanhar|newsletter|admin|conta)(\/|$)/.test(path)
-      )
+      ) {
+        pauseTracking();
         return;
+      }
       const ga4 = gtag.filter((id) => /^G-[A-Z0-9]+$/.test(id)),
         ads = gtag.filter((id) => /^AW-[0-9]+$/.test(id)),
         pixel = /^[0-9]+$/.test(meta) ? meta : "";
@@ -44,10 +47,18 @@ export function TrackingScripts({
           function () {
             window.dataLayer?.push(arguments);
           };
+        window.gtag("consent", "update", {
+          analytics_storage: "granted",
+          ad_storage: "denied",
+          ad_user_data: "denied",
+          ad_personalization: "denied",
+        });
         window.gtag("js", new Date());
         for (const id of [...ga4, ...ads])
           window.gtag("config", id, {
             send_page_view: false,
+            allow_google_signals: false,
+            allow_ad_personalization_signals: false,
             page_location: location.origin + path,
             page_referrer: "",
           });
@@ -82,8 +93,8 @@ export function TrackingScripts({
           f.push = f;
           window.fbq = f;
           (window as unknown as { _fbq: typeof f })._fbq = f;
-          window.fbq("init", pixel);
           window.fbq("set", "autoConfig", false, pixel);
+          window.fbq("init", pixel);
           inject("dc-meta", "https://connect.facebook.net/en_US/fbevents.js");
         }
         window.fbq("consent", "grant");

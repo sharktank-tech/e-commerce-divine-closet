@@ -151,11 +151,26 @@ separadamente, sem alterar pagamento no escopo de marketing.
 
 ## Evidências desta rodada
 
-- Base do PR #21: main b7b23d2; head remoto após hardening: 57c4e22.
-- Núcleo de newsletter/campanhas: 577 testes/57 arquivos e 12 asserts Chromium.
-- Composição com analytics e hardening transacional: 582 testes/58 arquivos, sem
+- Base do PR #21: main b7b23d2; head remoto após revisão: ff2f18d.
+- Núcleo de newsletter/campanhas: 579 testes/57 arquivos e 12 asserts Chromium.
+- Composição com analytics e hardening transacional: 587 testes/59 arquivos, sem
   skips ou falhas; 21 asserts Chromium 153, com chamadas externas interceptadas.
 - Typecheck e lint sem erros, build Next de produção local aprovado.
 - Cadeia de 34 migrações aplicada em bancos descartáveis; upgrade desde main
   preservou pedido, contador de cupom e assinante. RLS/42 negações verificadas.
 - São verificações locais; não há alegação de CI verde nem recepção real no provedor.
+
+
+## Revisão antes da publicação
+
+A confirmação de enfileiramento inclui hash da versão exata de assunto/conteúdo/
+segmento e updatedAt. Prévia antiga é rejeitada, mesmo se a contagem for igual.
+Enfileiramento trava os assinantes em ordem e recarrega elegibilidade. Somente
+confirmados com consentimento registrado na versão vigente são incluídos. Descadastro
+suprime mensagens antigas pendentes ou já reivindicadas, sob a mesma trava do
+assinante; reativar depois não ressuscita campanhas anteriores. Mock do teste
+individual não chama transporte nem imprime o corpo em log.
+
+SDKs já carregados recebem consentimento negado ao revogar ou entrar em rota
+privada. A revogação remove também provas temporárias de conversão. Google signals
+e personalização de anúncios permanecem desabilitados nesta implementação.
