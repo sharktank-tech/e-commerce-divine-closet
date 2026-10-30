@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { ProductViewTracker } from "@/components/loja/ProductViewTracker";
 import { AddToCart } from "@/components/loja/AddToCart";
+import { ProvadorVirtual } from "@/components/loja/ProvadorVirtual";
 import { ProductCard } from "@/components/loja/ProductCard";
 import { ProductSlideshow } from "@/components/loja/ProductSlideshow";
 import { FreteEstimator } from "@/components/loja/FreteEstimator";
@@ -367,6 +368,10 @@ export default async function ProdutoDetalhePage({
               product.category?.sizeTable ?? null
             )}
           />
+
+          {product.images.length > 0 && (
+            <ProvadorVirtual productId={product.id} productName={product.name} productImage={product.images[0]} productSlug={product.slug} />
+          )}
 
           <div className="mt-6">
             <FreteEstimator subtotal={Number(product.price)} />
