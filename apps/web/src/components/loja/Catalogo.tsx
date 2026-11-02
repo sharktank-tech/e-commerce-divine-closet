@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { ProductCard } from "@/components/loja/ProductCard";
 import { publicProductCardSelect, toPublicCardProduct } from "@/lib/produto-publico";
 import Link from "next/link";
+import { CatalogoFiltros } from "@/components/loja/CatalogoFiltros";
 
 export type CatalogFilters = {
   q: string;
@@ -105,6 +106,9 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title, empt
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
   const heading = title || "Coleção completa";
 
+  // Contagem de filtros ativos (para badge no botão mobile)
+  const filtrosAtivos = [q, categoria, precoMin > 0, precoMax > 0, soEstoque, soOferta, sort !== "recent"].filter(Boolean).length;
+
   function hrefWith(params: Record<string, string | null>) {
     const usp = new URLSearchParams();
     if (q) usp.set("q", q);
@@ -132,52 +136,18 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title, empt
           </p>
         </div>
 
-        <form action={basePath} className="flex flex-wrap items-center gap-2">
-          <input
-            name="q"
-            defaultValue={q}
-            placeholder="Buscar por nome ou SKU..."
-            className="rounded-full border border-ink/15 bg-white px-4 py-2 text-sm outline-none focus:border-ink/40"
-          />
-          {categoria && !lockedCategoria && (
-            <input type="hidden" name="categoria" value={categoria} />
-          )}
-          <input
-            name="preco_min"
-            defaultValue={precoMin > 0 ? String(precoMin) : ""}
-            placeholder="Mín. R$"
-            inputMode="numeric"
-            className="w-24 rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
-          />
-          <input
-            name="preco_max"
-            defaultValue={precoMax > 0 ? String(precoMax) : ""}
-            placeholder="Máx. R$"
-            inputMode="numeric"
-            className="w-24 rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
-          />
-          <select
-            name="sort"
-            defaultValue={sort}
-            className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
-          >
-            <option value="recent">Lançamentos</option>
-            <option value="desconto">Maior desconto</option>
-            <option value="sales">Mais vendidos</option>
-            <option value="price_asc">Menor preço</option>
-            <option value="price_desc">Maior preço</option>
-          </select>
-          <label className="flex items-center gap-1.5 text-xs text-ink-soft">
-            <input type="checkbox" name="estoque" value="1" defaultChecked={soEstoque} />
-            Em estoque
-          </label>
-          <button
-            type="submit"
-            className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50"
-          >
-            Filtrar
-          </button>
-        </form>
+        {/* Busca e filtros - mobile-first com drawer client-side */}
+        <CatalogoFiltros
+          basePath={basePath}
+          q={q}
+          categoria={categoria}
+          lockedCategoria={lockedCategoria}
+          sort={sort}
+          precoMin={precoMin}
+          precoMax={precoMax}
+          soEstoque={soEstoque}
+          filtrosAtivos={filtrosAtivos}
+        />
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
