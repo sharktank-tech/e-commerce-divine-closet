@@ -5,7 +5,7 @@ import {
   newsletterLimit,
   GENERIC_NEWSLETTER,
 } from "@/lib/marketing/newsletter";
-import { CONSENT_VERSION } from "@/lib/marketing/tokens";
+import { CONSENT_VERSION } from "@/lib/marketing/consent";
 const schema = z
   .object({
     email: z.string().trim().toLowerCase().email().max(254),

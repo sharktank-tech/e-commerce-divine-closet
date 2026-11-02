@@ -105,6 +105,9 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title, empt
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
   const heading = title || "Coleção completa";
 
+  // Contagem de filtros ativos (para badge no botão mobile)
+  const filtrosAtivos = [q, categoria, precoMin > 0, precoMax > 0, soEstoque, soOferta, sort !== "recent"].filter(Boolean).length;
+
   function hrefWith(params: Record<string, string | null>) {
     const usp = new URLSearchParams();
     if (q) usp.set("q", q);
@@ -132,51 +135,98 @@ export async function Catalogo({ initial, basePath, lockedCategoria, title, empt
           </p>
         </div>
 
-        <form action={basePath} className="flex flex-wrap items-center gap-2">
-          <input
-            name="q"
-            defaultValue={q}
-            placeholder="Buscar por nome ou SKU..."
-            className="rounded-full border border-ink/15 bg-white px-4 py-2 text-sm outline-none focus:border-ink/40"
-          />
+        {/* Busca principal - mobile-first */}
+        <form action={basePath} className="w-full sm:w-auto">
+          <div className="relative">
+            <svg className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-mute" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="Buscar por nome ou SKU..."
+              className="w-full rounded-full border border-ink/15 bg-white pl-11 pr-4 py-3 text-base outline-none focus:border-ink/40 min-h-[44px] sm:text-sm sm:py-2 sm:pl-10"
+              style={{ fontSize: "16px" }}
+            />
+          </div>
           {categoria && !lockedCategoria && (
             <input type="hidden" name="categoria" value={categoria} />
           )}
-          <input
-            name="preco_min"
-            defaultValue={precoMin > 0 ? String(precoMin) : ""}
-            placeholder="Mín. R$"
-            inputMode="numeric"
-            className="w-24 rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
-          />
-          <input
-            name="preco_max"
-            defaultValue={precoMax > 0 ? String(precoMax) : ""}
-            placeholder="Máx. R$"
-            inputMode="numeric"
-            className="w-24 rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
-          />
-          <select
-            name="sort"
-            defaultValue={sort}
-            className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
-          >
-            <option value="recent">Lançamentos</option>
-            <option value="desconto">Maior desconto</option>
-            <option value="sales">Mais vendidos</option>
-            <option value="price_asc">Menor preço</option>
-            <option value="price_desc">Maior preço</option>
-          </select>
-          <label className="flex items-center gap-1.5 text-xs text-ink-soft">
-            <input type="checkbox" name="estoque" value="1" defaultChecked={soEstoque} />
-            Em estoque
-          </label>
-          <button
-            type="submit"
-            className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50"
-          >
-            Filtrar
-          </button>
+          {/* Filtros avançados - desktop: inline; mobile: drawer via details */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {/* Ordenação - sempre visível */}
+            <select
+              name="sort"
+              defaultValue={sort}
+              className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none min-h-[40px]"
+            >
+              <option value="recent">Lançamentos</option>
+              <option value="desconto">Maior desconto</option>
+              <option value="sales">Mais vendidos</option>
+              <option value="price_asc">Menor preço</option>
+              <option value="price_desc">Maior preço</option>
+            </select>
+
+            {/* Botão Filtros - mobile: abre details; desktop: mostra inline */}
+            <details className="group">
+              <summary className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-medium cursor-pointer list-none min-h-[40px] select-none">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                Filtros
+                {filtrosAtivos > 0 && (
+                  <span className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-ink text-[10px] font-bold text-primary-50">
+                    {filtrosAtivos}
+                  </span>
+                )}
+              </summary>
+              {/* Painel de filtros - mobile: drawer; desktop: inline */}
+              <div className="absolute left-0 right-0 z-50 mt-2 rounded-2xl border border-ink/10 bg-white p-4 shadow-lg sm:relative sm:mt-0 sm:shadow-none sm:border-0 sm:p-0 sm:bg-transparent">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <input
+                    name="preco_min"
+                    defaultValue={precoMin > 0 ? String(precoMin) : ""}
+                    placeholder="Mín. R$"
+                    inputMode="numeric"
+                    className="w-full sm:w-24 rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
+                  />
+                  <input
+                    name="preco_max"
+                    defaultValue={precoMax > 0 ? String(precoMax) : ""}
+                    placeholder="Máx. R$"
+                    inputMode="numeric"
+                    className="w-full sm:w-24 rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+                    <input type="checkbox" name="estoque" value="1" defaultChecked={soEstoque} />
+                    Em estoque
+                  </label>
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50 min-h-[40px]"
+                  >
+                    Aplicar filtros
+                  </button>
+                  {/* Limpar filtros */}
+                  {(q || precoMin > 0 || precoMax > 0 || soEstoque || soOferta || sort !== "recent") && (
+                    <Link
+                      href={basePath}
+                      className="text-xs text-ink-soft underline"
+                    >
+                      Limpar filtros
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </details>
+
+            <button
+              type="submit"
+              className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50 min-h-[40px]"
+            >
+              Buscar
+            </button>
+          </div>
         </form>
       </div>
 

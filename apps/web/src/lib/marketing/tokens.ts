@@ -1,51 +1,29 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac } from "crypto";
 
-export { CONSENT_VERSION } from "./consent";
-function secret() {
-  const s = process.env.NEWSLETTER_SECRET || process.env.JWT_SECRET;
-  if (!s || s.length < 32)
-    throw new Error("Segredo de newsletter não configurado");
-  return s;
+function getSecret(): string {
+  return process.env.MARKETING_TOKEN_SECRET || process.env.JWT_SECRET || "dev-secret";
 }
-export function marketingToken(
-  id: string,
-  version: string,
-  purpose: "confirm" | "unsubscribe",
-) {
-  const mac = createHmac("sha256", secret())
-    .update(`newsletter:${purpose}:${id}:${version}`)
-    .digest("hex");
-  return `${id}.${mac}`;
+
+export function marketingToken(id: string, version: string | number, action: "confirm" | "unsubscribe"): string {
+  const payload = `${id}:${version}:${action}`;
+  const sig = createHmac("sha256", getSecret()).update(payload).digest("hex").slice(0, 16);
+  return `${id}:${version}:${action}:${sig}`;
 }
-export function tokenId(token: unknown): string | null {
-  return typeof token === "string" &&
-    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.[a-f0-9]{64}$/.test(
-      token,
-    )
-    ? token.slice(0, 36)
-    : null;
+
+export function tokenMatches(token: string, id: string, version: string | number, action: "confirm" | "unsubscribe"): boolean {
+  const parts = token.split(":");
+  if (parts.length !== 4) return false;
+  const [tid, tver, taction, tsig] = parts;
+  if (tid !== id || tver !== String(version) || taction !== action) return false;
+  const expected = createHmac("sha256", getSecret()).update(`${id}:${version}:${action}`).digest("hex").slice(0, 16);
+  return tsig === expected;
 }
-export function tokenMatches(
-  token: string,
-  id: string,
-  version: string,
-  purpose: "confirm" | "unsubscribe",
-) {
-  const expected = marketingToken(id, version, purpose);
-  return (
-    token.length === expected.length &&
-    timingSafeEqual(Buffer.from(token), Buffer.from(expected))
-  );
-}
-export function marketingBaseUrl() {
-  const url = new URL(
-    process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-  );
-  if (
-    process.env.NODE_ENV === "production" &&
-    url.protocol !== "https:" &&
-    !["localhost", "127.0.0.1"].includes(url.hostname)
-  )
-    throw new Error("URL pública inválida");
-  return url.origin;
+
+export function verifyMarketingToken(token: string): { id: string; version: string; action: string } | null {
+  const parts = token.split(":");
+  if (parts.length !== 4) return null;
+  const [id, version, action, sig] = parts;
+  const expected = createHmac("sha256", getSecret()).update(`${id}:${version}:${action}`).digest("hex").slice(0, 16);
+  if (sig !== expected) return null;
+  return { id, version, action };
 }

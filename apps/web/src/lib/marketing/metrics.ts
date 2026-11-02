@@ -1,55 +1,52 @@
-import { Prisma } from "@prisma/client";
-type Sale = {
-  total: Prisma.Decimal | string;
+export type SaleInput = {
+  total: unknown;
   utmSource: string | null;
   utmMedium: string | null;
   utmCampaign: string | null;
-  refund: { status: string; amount: Prisma.Decimal | string } | null;
+  refund?: { status: string; amount: unknown } | null;
 };
-export function summarizeSales(orders: Sale[]) {
-  const D = Prisma.Decimal;
-  let gross = new D(0),
-    refunds = new D(0);
-  const origins = new Map<
-    string,
-    {
-      origem: string;
-      medium: string;
-      campanha: string;
-      pedidos: number;
-      receita: Prisma.Decimal;
+
+export type MetricasVendas = {
+  receitaBruta: number;
+  valoresEstornados: number;
+  receitaAposEstornos: number;
+  ticketMedio: number;
+  vendasPorOrigem: Array<{ origem: string; pedidos: number; receita: number }>;
+};
+
+export function summarizeSales(sales: SaleInput[]): MetricasVendas {
+  // Use integer cents to avoid floating point
+  let receitaBrutaCents = 0;
+  let valoresEstornadosCents = 0;
+
+  const porOrigem = new Map<string, { pedidos: number; receitaCents: number }>();
+
+  for (const sale of sales) {
+    const totalCents = Math.round(Number(sale.total) * 100);
+    receitaBrutaCents += totalCents;
+
+    if (sale.refund && sale.refund.status === "APPROVED") {
+      valoresEstornadosCents += Math.round(Number(sale.refund.amount) * 100);
     }
-  >();
-  for (const o of orders) {
-    const total = new D(o.total);
-    gross = gross.plus(total);
-    if (o.refund?.status === "APPROVED")
-      refunds = refunds.plus(o.refund.amount);
-    const origem = o.utmSource || "origem desconhecida",
-      medium = o.utmMedium || "desconhecido",
-      campanha = o.utmCampaign || "desconhecida";
-    const key = JSON.stringify([origem, medium, campanha]);
-    const row = origins.get(key) || {
-      origem,
-      medium,
-      campanha,
-      pedidos: 0,
-      receita: new D(0),
-    };
-    row.pedidos++;
-    row.receita = row.receita.plus(total);
-    origins.set(key, row);
+
+    const origem = sale.utmSource || "origem desconhecida";
+    const atual = porOrigem.get(origem) || { pedidos: 0, receitaCents: 0 };
+    atual.pedidos++;
+    atual.receitaCents += totalCents;
+    porOrigem.set(origem, atual);
   }
-  const money = (v: Prisma.Decimal) => v.toDecimalPlaces(2).toNumber();
+
+  const vendasPorOrigem = Array.from(porOrigem.entries()).map(([origem, d]) => ({
+    origem,
+    pedidos: d.pedidos,
+    receita: d.receitaCents / 100,
+  }));
+
   return {
-    pedidosPagos: orders.length,
-    receitaBruta: money(gross),
-    valoresEstornados: money(refunds),
-    receitaAposEstornos: money(gross.minus(refunds)),
-    ticketMedio: orders.length ? money(gross.div(orders.length)) : 0,
-    vendasPorOrigem: [...origins.values()].map((o) => ({
-      ...o,
-      receita: money(o.receita),
-    })),
+    receitaBruta: receitaBrutaCents / 100,
+    valoresEstornados: valoresEstornadosCents / 100,
+    receitaAposEstornos: (receitaBrutaCents - valoresEstornadosCents) / 100,
+    ticketMedio: sales.length > 0 ? receitaBrutaCents / 100 / sales.length : 0,
+    vendasPorOrigem,
   };
 }
