@@ -92,9 +92,9 @@ export default async function RootLayout({
           rel="stylesheet"
         />
         {injectOrgSchema()}
-        <TrackingScripts meta={pixels.meta} gtag={pixels.gtag} />
       </head>
       <body className="flex min-h-screen flex-col font-sans">
+        <TrackingScripts meta={pixels.meta} gtag={pixels.gtag} />
         <CartProvider>
           <Header />
           <main className="flex-1">{children}</main>
