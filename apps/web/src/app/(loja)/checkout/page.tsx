@@ -10,6 +10,7 @@ import { formatBRL } from "@/lib/utils";
 import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics, checkoutUtm, hasConsent } from "@/lib/analytics";
+import { PurchaseTracker } from "@/components/loja/PurchaseTracker";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
 import {
   SESSAO_ENDERECO_FORM,
@@ -199,6 +200,20 @@ export default function CheckoutPage() {
   const [salvandoEndereco, setSalvandoEndereco] = useState(false);
   const [erroEndereco, setErroEndereco] = useState("");
   const checkoutTracked = useRef(false);
+  // Restaura a tela Pix após atualização, mesmo que o carrinho já esteja vazio.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("dc-pending-pix") || "null");
+      if (saved?.expires > Date.now() && typeof saved.qr?.pedido === "string") {
+        setQr(saved.qr);
+      } else {
+        sessionStorage.removeItem("dc-pending-pix");
+      }
+    } catch {
+      // Um registro de sessão inválido não bloqueia o checkout.
+    }
+  }, []);
+
 
   async function carregarCarrinho() {
     const r = await fetch("/api/carrinho");
@@ -208,28 +223,51 @@ export default function CheckoutPage() {
   }
 
   useEffect(() => {
+    let active = true;
+    let checkoutItems: CartData["items"] = [];
+    let checkoutSubtotal = 0;
+    const trackCheckout = () => {
+      if (!active || checkoutTracked.current || !checkoutItems.length) return;
+      // Só marcar como rastreado quando o evento foi realmente emitido.
+      checkoutTracked.current = analytics.beginCheckout(
+        checkoutSubtotal,
+        checkoutItems.map((i) => ({
+          id: i.product.id,
+          name: i.product.name,
+          price: Number(i.product.price),
+          quantity: i.quantity,
+        })),
+      );
+    };
+    // Se o aceite dos cookies ocorrer depois do carregamento do carrinho,
+    // o evento ainda pode ser emitido nessa sessão, sem duplicação.
+    window.addEventListener("dc-tracking-ready", trackCheckout);
     carregarCarrinho()
       .then((d) => {
-        if (!d.items?.length) router.replace("/carrinho");
-        else if (!checkoutTracked.current) {
-          checkoutTracked.current = true;
-          analytics.beginCheckout(
-            d.subtotal || 0,
-            (d.items || []).map((i: { product: { id: string; name: string; price: string | number }; quantity: number }) => ({
-              id: i.product.id,
-              name: i.product.name,
-              price: Number(i.product.price),
-              quantity: i.quantity,
-            }))
-          );
+        if (!active) return;
+        if (!d.items?.length) {
+          // A cesta é limpa ao gerar o Pix; não abandonar a tela de pagamento.
+          try {
+            const saved = JSON.parse(sessionStorage.getItem("dc-pending-pix") || "null");
+            if (!(saved?.expires > Date.now() && saved?.qr?.pedido)) router.replace("/carrinho");
+          } catch { router.replace("/carrinho"); }
+        }
+        else {
+          checkoutItems = d.items;
+          checkoutSubtotal = d.subtotal || 0;
+          trackCheckout();
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (active) setLoading(false); });
 
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : { user: null }))
-      .then((d) => setMe(d.user))
-      .catch(() => setMe(null));
+      .then((d) => { if (active) setMe(d.user); })
+      .catch(() => { if (active) setMe(null); });
+    return () => {
+      active = false;
+      window.removeEventListener("dc-tracking-ready", trackCheckout);
+    };
   }, [router]);
 
   function set(key: keyof typeof form, value: string) {
@@ -647,7 +685,7 @@ export default function CheckoutPage() {
       const data = await res.json();
 
       if ((res.ok && data.ok) || (res.status === 402 && data.order?.paymentStatus === "FAILED")) {
-        if (!me && hasConsent() && data.order?.number && tentativaRef.current?.key) {
+        if (!me && data.order?.number && tentativaRef.current?.key) {
           gravarSessao(`dc-conversion-proof:${data.order.number}`, JSON.stringify({ key: tentativaRef.current.key, expires: Date.now() + 3_600_000 }));
         }
         apagarSessao("dc_checkout_idempotency");
@@ -660,13 +698,15 @@ export default function CheckoutPage() {
         apagarSessao(SESSAO_ENDERECO_FORM);
         // Pix aguardando: exibe o QR em vez de ir ao sucesso.
         if (data.pendente && data.payment?.qr) {
-          setQr({
+          const pendingPix = {
             codigo: data.payment.qr.codigo,
             base64: data.payment.qr.base64 ?? null,
             ticketUrl: data.payment.qr.ticketUrl ?? null,
             pedido: data.order.number,
             total: Number(data.order.total),
-          });
+          };
+          gravarSessao("dc-pending-pix", JSON.stringify({ qr: pendingPix, expires: Date.now() + 3_600_000 }));
+          setQr(pendingPix);
           return;
         }
         setStep(3);
@@ -704,6 +744,10 @@ export default function CheckoutPage() {
   if (qr) {
     return (
       <div className="mx-auto max-w-xl px-4 py-10 text-center sm:px-6">
+        <PurchaseTracker pedido={qr.pedido} onPaid={() => {
+          apagarSessao("dc-pending-pix");
+          router.replace(`/sucesso?pedido=${encodeURIComponent(qr.pedido)}`);
+        }} />
         <h1 className="font-display text-2xl font-bold text-ink">Pague com Pix</h1>
         <p className="mt-2 text-sm text-ink-mute">
           Pedido {qr.pedido} · {formatBRL(qr.total)} · aguardando pagamento.

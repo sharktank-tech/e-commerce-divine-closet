@@ -44,21 +44,30 @@ function injectOrgSchema(): React.ReactNode {
 // Revalida configurações (pixels) periodicamente sem quebrar páginas estáticas.
 export const revalidate = 300;
 
-// Pixels de rastreamento (seção 4.6) — IDs salvos no painel (/admin/configuracoes).
-// Enquanto vazios, nenhum script é injetado. // TODO-CLIENTE: contas Meta/Google.
+// A medição GA4 da loja é conhecida e não depende de leitura dinâmica do banco.
+// TrackingScripts só carrega o Google tag após consentimento; não duplicar scripts.
+const STORE_GA4_ID = "G-BKNS2XTSH2";
+
 async function getPixelIds(): Promise<{ meta: string; gtag: string[] }> {
   try {
     const row = await prisma.setting.findUnique({ where: { key: "pixels" } });
-    if (!row) return { meta: "", gtag: [] };
+    if (!row) return { meta: "", gtag: [STORE_GA4_ID] };
     const p = JSON.parse(row.value) as {
       metaPixelId?: string;
       googleAdsId?: string;
       ga4Id?: string;
     };
-    const gtag = [p.ga4Id, p.googleAdsId].filter((x): x is string => !!x && x.trim() !== "");
+    const gtag = Array.from(
+      new Set(
+        [STORE_GA4_ID, p.googleAdsId]
+          .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+          .map((id) => id.trim()),
+      ),
+    );
     return { meta: (p.metaPixelId || "").trim(), gtag };
   } catch {
-    return { meta: "", gtag: [] };
+    // Uma falha na leitura de configurações não deve desativar o GA4 da loja.
+    return { meta: "", gtag: [STORE_GA4_ID] };
   }
 }
 

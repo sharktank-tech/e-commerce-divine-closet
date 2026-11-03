@@ -45,20 +45,34 @@ export async function POST(req: NextRequest) {
   if (!session && !guestOrder && !checkoutKey) return missing();
   const o = await prisma.order.findFirst({
     where: {
-      number: body.number,
       deletedAt: null,
-      OR: [
-        ...(session ? [{ userId: session.sub }] : []),
-        ...(guestOrder ? [{ id: guestOrder, userId: null }] : []),
-        ...(!session && checkoutKey
-          ? [
-              {
-                idempotencyKey: checkoutKey,
-                userId: null,
-                createdAt: { gte: new Date(Date.now() - 3_600_000) },
-              },
-            ]
-          : []),
+      AND: [
+        // O checkout pode retornar o ID interno; o recibo pode usar o número público.
+        // Nenhum desses identificadores autoriza sozinho o acesso ao pedido.
+        {
+          OR: [
+            { number: body.number },
+            // Evita passar números públicos DC-... para a coluna UUID no Postgres.
+            ...(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.number)
+              ? [{ id: body.number }]
+              : []),
+          ],
+        },
+        {
+          OR: [
+            ...(session ? [{ userId: session.sub }] : []),
+            ...(guestOrder ? [{ id: guestOrder, userId: null }] : []),
+            ...(!session && checkoutKey
+              ? [
+                  {
+                    idempotencyKey: checkoutKey,
+                    userId: null,
+                    createdAt: { gte: new Date(Date.now() - 3_600_000) },
+                  },
+                ]
+              : []),
+          ],
+        },
       ],
     },
     include: { items: true },
