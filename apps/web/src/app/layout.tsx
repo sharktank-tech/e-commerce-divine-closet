@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { CartProvider } from "@/components/loja/CartProvider";
 import { prisma } from "@/lib/prisma";
 import { TrackingScripts } from "@/components/loja/TrackingScripts";
 
@@ -82,9 +81,7 @@ export default async function RootLayout({
         <TrackingScripts meta={pixels.meta} gtag={pixels.gtag} />
       </head>
       <body className="font-sans">
-        <CartProvider>
-          {children}
-        </CartProvider>
+        {children}
       </body>
     </html>
   );
