@@ -208,28 +208,45 @@ export default function CheckoutPage() {
   }
 
   useEffect(() => {
+    let active = true;
+    let checkoutItems: CartData["items"] = [];
+    let checkoutSubtotal = 0;
+    const trackCheckout = () => {
+      if (!active || checkoutTracked.current || !checkoutItems.length) return;
+      // Só marcar como rastreado quando o evento foi realmente emitido.
+      checkoutTracked.current = analytics.beginCheckout(
+        checkoutSubtotal,
+        checkoutItems.map((i) => ({
+          id: i.product.id,
+          name: i.product.name,
+          price: Number(i.product.price),
+          quantity: i.quantity,
+        })),
+      );
+    };
+    // Se o aceite dos cookies ocorrer depois do carregamento do carrinho,
+    // o evento ainda pode ser emitido nessa sessão, sem duplicação.
+    window.addEventListener("dc-tracking-ready", trackCheckout);
     carregarCarrinho()
       .then((d) => {
+        if (!active) return;
         if (!d.items?.length) router.replace("/carrinho");
-        else if (!checkoutTracked.current) {
-          checkoutTracked.current = true;
-          analytics.beginCheckout(
-            d.subtotal || 0,
-            (d.items || []).map((i: { product: { id: string; name: string; price: string | number }; quantity: number }) => ({
-              id: i.product.id,
-              name: i.product.name,
-              price: Number(i.product.price),
-              quantity: i.quantity,
-            }))
-          );
+        else {
+          checkoutItems = d.items;
+          checkoutSubtotal = d.subtotal || 0;
+          trackCheckout();
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (active) setLoading(false); });
 
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : { user: null }))
-      .then((d) => setMe(d.user))
-      .catch(() => setMe(null));
+      .then((d) => { if (active) setMe(d.user); })
+      .catch(() => { if (active) setMe(null); });
+    return () => {
+      active = false;
+      window.removeEventListener("dc-tracking-ready", trackCheckout);
+    };
   }, [router]);
 
   function set(key: keyof typeof form, value: string) {
