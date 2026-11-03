@@ -140,8 +140,11 @@ export function AddToCart({ productId, productName, productPrice, stockEstado, s
     setLoading(true);
     const ok = await addItem(productId, qty, size || undefined, color || undefined);
     setLoading(false);
-    if (ok) router.push("/checkout");
-    else setError("Não foi possível adicionar (estoque da combinação esgotado).");
+    if (ok) {
+      // Comprar agora também insere no carrinho: registrar o mesmo passo do funil.
+      analytics.addToCart([{ id: productId, name: productName, price: productPrice, quantity: qty }]);
+      router.push("/checkout");
+    } else setError("Não foi possível adicionar (estoque da combinação esgotado).");
   }
 
   function pickSize(s: string) {
