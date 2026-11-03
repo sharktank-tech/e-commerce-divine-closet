@@ -8,13 +8,17 @@ const MAX_ATTEMPTS = 12;
 export function PurchaseTracker({
   pedido,
   onPaid,
+  onResult,
 }: {
   pedido?: string;
   total?: string;
   onPaid?: () => void;
+  onResult?: (status: "paid" | "pending" | "unavailable") => void;
 }) {
   const onPaidRef = useRef(onPaid);
   onPaidRef.current = onPaid;
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
   useEffect(() => {
     if (!pedido) return;
 
@@ -73,6 +77,7 @@ export function PurchaseTracker({
         if (stopped) return;
         // Erros de autorização não devem gerar tentativas em loop.
         if (response.status === 404 || response.status === 401 || response.status === 403) {
+          onResultRef.current?.("unavailable");
           stop();
           return;
         }
@@ -80,10 +85,12 @@ export function PurchaseTracker({
           const data = await response.json();
           if (data?.paid) {
             if (hasConsent()) analytics.purchase(data.id, data.total, data.items);
+            onResultRef.current?.("paid");
             stop();
             onPaidRef.current?.();
             return;
           }
+          onResultRef.current?.("pending");
         }
       } catch {
         // Falha transitória: retentar dentro do limite.
