@@ -99,3 +99,24 @@ export function refundDedupeKey(refundId: string): string {
     throw new Error("invalid_refund_id");
   return `ga4:refund:${refundId.toLowerCase()}`;
 }
+
+/**
+ * Elegibilidade fail-closed. O emissor futuro deve conferir novamente a
+ * revogação no servidor imediatamente antes do envio, não apenas no enqueue.
+ * "verified" só pode vir de registro de consentimento associado ao pedido,
+ * nunca de um booleano sem autenticação na requisição do browser.
+ */
+export type Ga4RefundAuthorization = {
+  state: "GRANTED" | "DENIED" | "REVOKED" | "UNKNOWN";
+  clientId: string | null;
+  verified: boolean;
+};
+export function prepareAuthorizedRefund(
+  snapshot: ConfirmedRefundSnapshot,
+  auth: Ga4RefundAuthorization,
+): { client_id: string; event: Ga4RefundEvent } | null {
+  if (auth.state !== "GRANTED" || !auth.verified || !auth.clientId) return null;
+  const clientId = auth.clientId.trim();
+  if (!/^\d+\.\d+$/.test(clientId) || clientId.length > 128) return null;
+  return { client_id: clientId, event: buildGa4RefundEvent(snapshot) };
+}
