@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGa4RefundEvent, refundDedupeKey, type ConfirmedRefundSnapshot } from "../ga4-refund";
+import { buildGa4RefundEvent, prepareAuthorizedRefund, refundDedupeKey, type ConfirmedRefundSnapshot } from "../ga4-refund";
 
 const ID = "6fda65c2-7a90-4f18-88e8-1878f5a4c5de";
 const base: ConfirmedRefundSnapshot = {
@@ -48,5 +48,21 @@ describe("GA4 refund — contrato financeiro sem I/O", () => {
   });
   it("gera chave estável vinculada ao reembolso e não ao navegador", () => {
     expect(refundDedupeKey(ID)).toBe(`ga4:refund:${ID}`);
+  });
+});
+
+describe("GA4 refund — elegibilidade com consentimento", () => {
+  const auth = { state: "GRANTED" as const, clientId: "123456.789012", verified: true };
+  it("prepara apenas para identificação consentida e verificada", () => {
+    expect(prepareAuthorizedRefund(base, auth)?.client_id).toBe("123456.789012");
+  });
+  it("bloqueia revogação e recusa", () => {
+    expect(prepareAuthorizedRefund(base, { ...auth, state: "REVOKED" })).toBeNull();
+    expect(prepareAuthorizedRefund(base, { ...auth, state: "DENIED" })).toBeNull();
+  });
+  it("bloqueia consentimento não verificável ou client id inválido", () => {
+    expect(prepareAuthorizedRefund(base, { ...auth, verified: false })).toBeNull();
+    expect(prepareAuthorizedRefund(base, { ...auth, clientId: null })).toBeNull();
+    expect(prepareAuthorizedRefund(base, { ...auth, clientId: "inventado" })).toBeNull();
   });
 });
