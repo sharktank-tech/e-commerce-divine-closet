@@ -200,6 +200,20 @@ export default function CheckoutPage() {
   const [salvandoEndereco, setSalvandoEndereco] = useState(false);
   const [erroEndereco, setErroEndereco] = useState("");
   const checkoutTracked = useRef(false);
+  // Restaura a tela Pix após atualização, mesmo que o carrinho já esteja vazio.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("dc-pending-pix") || "null");
+      if (saved?.expires > Date.now() && typeof saved.qr?.pedido === "string") {
+        setQr(saved.qr);
+      } else {
+        sessionStorage.removeItem("dc-pending-pix");
+      }
+    } catch {
+      // Um registro de sessão inválido não bloqueia o checkout.
+    }
+  }, []);
+
 
   async function carregarCarrinho() {
     const r = await fetch("/api/carrinho");
@@ -231,7 +245,13 @@ export default function CheckoutPage() {
     carregarCarrinho()
       .then((d) => {
         if (!active) return;
-        if (!d.items?.length) router.replace("/carrinho");
+        if (!d.items?.length) {
+          // A cesta é limpa ao gerar o Pix; não abandonar a tela de pagamento.
+          try {
+            const saved = JSON.parse(sessionStorage.getItem("dc-pending-pix") || "null");
+            if (!(saved?.expires > Date.now() && saved?.qr?.pedido)) router.replace("/carrinho");
+          } catch { router.replace("/carrinho"); }
+        }
         else {
           checkoutItems = d.items;
           checkoutSubtotal = d.subtotal || 0;
@@ -665,7 +685,7 @@ export default function CheckoutPage() {
       const data = await res.json();
 
       if ((res.ok && data.ok) || (res.status === 402 && data.order?.paymentStatus === "FAILED")) {
-        if (!me && hasConsent() && data.order?.number && tentativaRef.current?.key) {
+        if (!me && data.order?.number && tentativaRef.current?.key) {
           gravarSessao(`dc-conversion-proof:${data.order.number}`, JSON.stringify({ key: tentativaRef.current.key, expires: Date.now() + 3_600_000 }));
         }
         apagarSessao("dc_checkout_idempotency");
@@ -678,13 +698,15 @@ export default function CheckoutPage() {
         apagarSessao(SESSAO_ENDERECO_FORM);
         // Pix aguardando: exibe o QR em vez de ir ao sucesso.
         if (data.pendente && data.payment?.qr) {
-          setQr({
+          const pendingPix = {
             codigo: data.payment.qr.codigo,
             base64: data.payment.qr.base64 ?? null,
             ticketUrl: data.payment.qr.ticketUrl ?? null,
             pedido: data.order.number,
             total: Number(data.order.total),
-          });
+          };
+          gravarSessao("dc-pending-pix", JSON.stringify({ qr: pendingPix, expires: Date.now() + 3_600_000 }));
+          setQr(pendingPix);
           return;
         }
         setStep(3);
@@ -722,7 +744,10 @@ export default function CheckoutPage() {
   if (qr) {
     return (
       <div className="mx-auto max-w-xl px-4 py-10 text-center sm:px-6">
-        <PurchaseTracker pedido={qr.pedido} />
+        <PurchaseTracker pedido={qr.pedido} onPaid={() => {
+          apagarSessao("dc-pending-pix");
+          router.replace(`/sucesso?pedido=${encodeURIComponent(qr.pedido)}`);
+        }} />
         <h1 className="font-display text-2xl font-bold text-ink">Pague com Pix</h1>
         <p className="mt-2 text-sm text-ink-mute">
           Pedido {qr.pedido} · {formatBRL(qr.total)} · aguardando pagamento.
