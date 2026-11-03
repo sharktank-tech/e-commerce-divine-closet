@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
 import { CartProvider } from "@/components/loja/CartProvider";
 import { prisma } from "@/lib/prisma";
-import { ConsentBanner } from "@/components/loja/ConsentBanner";
 import { TrackingScripts } from "@/components/loja/TrackingScripts";
-import { WhatsAppButton } from "@/components/loja/WhatsAppButton";
-import { headers } from "next/headers";
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -75,10 +70,6 @@ export default async function RootLayout({
 }) {
   const pixels = await getPixelIds();
 
-  const headersList = await headers();
-  const pathname = headersList.get("x-invoke-path") || headersList.get("x-pathname") || "";
-  const isAdmin = pathname.startsWith("/admin");
-
   return (
     <html lang="pt-BR">
       <head>
@@ -90,13 +81,9 @@ export default async function RootLayout({
         {injectOrgSchema()}
         <TrackingScripts meta={pixels.meta} gtag={pixels.gtag} />
       </head>
-      <body className={isAdmin ? "font-sans" : "flex min-h-screen flex-col font-sans"}>
+      <body className="font-sans">
         <CartProvider>
-          {!isAdmin && <Header />}
-          <main className={isAdmin ? "flex-1" : "flex-1"}>{children}</main>
-          {!isAdmin && <Footer />}
-          {!isAdmin && <ConsentBanner />}
-          {!isAdmin && <WhatsAppButton />}
+          {children}
         </CartProvider>
       </body>
     </html>
