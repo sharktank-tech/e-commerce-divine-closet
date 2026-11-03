@@ -51,7 +51,7 @@ export const revalidate = 300;
 
 // A medição GA4 da loja é conhecida e não depende de leitura dinâmica do banco.
 // TrackingScripts só carrega o Google tag após consentimento; não duplicar scripts.
-const STORE_GA4_ID = "G-6WPDJX4KBB";
+const STORE_GA4_ID = "G-BKNS2XTSH2";
 
 async function getPixelIds(): Promise<{ meta: string; gtag: string[] }> {
   try {
@@ -64,7 +64,7 @@ async function getPixelIds(): Promise<{ meta: string; gtag: string[] }> {
     };
     const gtag = Array.from(
       new Set(
-        [STORE_GA4_ID, p.ga4Id, p.googleAdsId]
+        [STORE_GA4_ID, p.googleAdsId]
           .filter((x): x is string => typeof x === "string" && x.trim() !== "")
           .map((id) => id.trim()),
       ),
