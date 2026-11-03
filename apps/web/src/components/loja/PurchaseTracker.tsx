@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { analytics, CONSENT_EVENT, hasConsent } from "@/lib/analytics";
 
 const RETRY_INTERVAL_MS = 5_000;
@@ -7,10 +7,14 @@ const MAX_ATTEMPTS = 12;
 
 export function PurchaseTracker({
   pedido,
+  onPaid,
 }: {
   pedido?: string;
   total?: string;
+  onPaid?: () => void;
 }) {
+  const onPaidRef = useRef(onPaid);
+  onPaidRef.current = onPaid;
   useEffect(() => {
     if (!pedido) return;
 
@@ -52,17 +56,9 @@ export function PurchaseTracker({
     };
 
     const check = async () => {
-      if (stopped || inFlight || !hasConsent() || document.hidden) return;
-      // O carregador GA4 pode ser inicializado após este componente.
-      if (!window.dcTracking?.ga4.length || !window.gtag) return;
-      try {
-        if (localStorage.getItem(`dc-purchase-${pedido}`)) {
-          stop();
-          return;
-        }
-      } catch {
-        // A API continua sendo a fonte de verdade do pagamento.
-      }
+      if (stopped || inFlight || document.hidden) return;
+      // A consulta do status Pix é parte do checkout e independe de consentimento de analytics.
+      // O evento GA4 continua condicionado ao aceite em analytics.purchase().
 
       inFlight = true;
       attempts++;
@@ -83,8 +79,9 @@ export function PurchaseTracker({
         if (response.ok) {
           const data = await response.json();
           if (data?.paid) {
-            analytics.purchase(data.id, data.total, data.items);
+            if (hasConsent()) analytics.purchase(data.id, data.total, data.items);
             stop();
+            onPaidRef.current?.();
             return;
           }
         }
@@ -97,12 +94,6 @@ export function PurchaseTracker({
     };
 
     function onConsent() {
-      if (!hasConsent()) {
-        if (timer) clearTimeout(timer);
-        timer = undefined;
-        controller?.abort();
-        return;
-      }
       void check();
     }
 
