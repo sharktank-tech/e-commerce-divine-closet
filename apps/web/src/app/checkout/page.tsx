@@ -10,6 +10,7 @@ import { formatBRL } from "@/lib/utils";
 import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics, checkoutUtm, hasConsent } from "@/lib/analytics";
+import { PurchaseTracker } from "@/components/loja/PurchaseTracker";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
 import {
   SESSAO_ENDERECO_FORM,
@@ -721,6 +722,7 @@ export default function CheckoutPage() {
   if (qr) {
     return (
       <div className="mx-auto max-w-xl px-4 py-10 text-center sm:px-6">
+        <PurchaseTracker pedido={qr.pedido} />
         <h1 className="font-display text-2xl font-bold text-ink">Pague com Pix</h1>
         <p className="mt-2 text-sm text-ink-mute">
           Pedido {qr.pedido} · {formatBRL(qr.total)} · aguardando pagamento.
