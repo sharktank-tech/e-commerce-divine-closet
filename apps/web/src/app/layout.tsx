@@ -1,12 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
-import { CartProvider } from "@/components/loja/CartProvider";
 import { prisma } from "@/lib/prisma";
-import { ConsentBanner } from "@/components/loja/ConsentBanner";
 import { TrackingScripts } from "@/components/loja/TrackingScripts";
-import { WhatsAppButton } from "@/components/loja/WhatsAppButton";
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -92,16 +87,10 @@ export default async function RootLayout({
           rel="stylesheet"
         />
         {injectOrgSchema()}
-      </head>
-      <body className="flex min-h-screen flex-col font-sans">
         <TrackingScripts meta={pixels.meta} gtag={pixels.gtag} />
-        <CartProvider>
-          <Header />
-          <main className="flex-1">{children}</main>
-          <Footer />
-          <ConsentBanner />
-          <WhatsAppButton />
-        </CartProvider>
+      </head>
+      <body className="font-sans">
+        {children}
       </body>
     </html>
   );
