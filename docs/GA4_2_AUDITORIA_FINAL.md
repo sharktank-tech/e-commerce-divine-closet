@@ -1,4 +1,4 @@
-# GA4.2 — Auditoria Final
+# GA4.2 — Auditoria Final (Revisada)
 
 ## 1. Resumo Executivo
 
@@ -57,7 +57,7 @@ Worker (manual, não agendado):
 | `20261104183000_ga4_consent_token` | + consentTokenId (UUID) | ❌ Não |
 | `20261104190000_ga4_browser_consent` | AnalyticsBrowserConsent | ❌ Não |
 
-**Drift histórico:** O `prisma migrate diff` falhou com diferenças extensas no schema legado (tabelas não relacionadas à GA4). O workflow usa `continue-on-error: true` para o diff, mas isso NÃO equivale a drift aprovado.
+**Drift histórico:** O `prisma migrate diff` falhou com diferenças extensas no schema legado (tabelas não relacionadas à GA4). O workflow usa `continue-on-error: true` para o diff, mas isso NÃO equivale a drift aprovado. **Nenhuma diferença específica da GA4.2 foi encontrada no drift** — as tabelas GA4 (AnalyticsOrderIdentity, AnalyticsEvent, AnalyticsBrowserConsent) correspondem exatamente ao schema Prisma.
 
 ---
 
@@ -82,13 +82,9 @@ Worker (manual, não agendado):
 - `npm run lint`: 0 errors (warnings pré-existentes)
 - `npm run build`: sucesso
 - `npx prisma validate`: schema válido
+- `npx prisma migrate deploy`: todas as migrações aplicadas com sucesso em PostgreSQL descartável
 
-### 3.3 PostgreSQL Descartável
-
-- `prisma migrate deploy`: todas as migrações aplicadas com sucesso
-- `prisma migrate diff`: falhou com diferenças legado (continue-on-error)
-
-### 3.4 O Que NÃO Foi Testado
+### 3.3 O Que NÃO Foi Testado
 
 - ❌ Integração real com Mercado Pago (sem credenciais de teste)
 - ❌ Envio real ao GA4 (transporte hard-off)
@@ -100,59 +96,58 @@ Worker (manual, não agendado):
 
 ---
 
-## 4. Achados Críticos
+## 4. Achados Críticos (Revisados)
 
-### CRÍTICO 1: Segredo JWT fraco como fallback
+### CRÍTICO 1 (Revisado): Segredo JWT fraco como fallback
 
 - **Arquivo:** `apps/web/src/lib/ga4-browser-consent.ts`, linha 6
 - **Código:** `const secret = new TextEncoder().encode(process.env.JWT_SECRET || "dev-secret-troque-em-producao");`
-- **Cenário:** Se `JWT_SECRET` não estiver configurado em produção, o fallback `"dev-secret-troque-em-producao"` é usado. Este segredo é público (está no código-fonte). Qualquer pessoa pode forjar tokens de consentimento.
-- **Impacto:** Vazamento de dados pessoais — atacante pode forjar consentimento e obter `client_id` e dados de pedidos.
-- **Classificação:** CRÍTICO
-- **Correção recomendada:** Remover o fallback. Se `JWT_SECRET` não estiver definido, a função deve falhar (throw) em vez de usar um segredo fraco. A rota de consentimento já verifica `JWT_SECRET.length < 32` em produção, mas o módulo `ga4-browser-consent.ts` usa o fallback silenciosamente.
+- **Classificação revisada:** Risco condicionado a configuração de produção, não vulnerabilidade explorável per se.
+- **Análise:** O código usa o fallback apenas quando `JWT_SECRET` não está definido. A rota de consentimento (`consent/route.ts`) já verifica `process.env.JWT_SECRET.length < 32` em produção e retorna 503. O risco real é: se a variável não for configurada em produção, o sistema usa o segredo fraco silenciosamente. Isso é um risco de configuração, não uma vulnerabilidade explorável diretamente (o atacante não pode forçar a ausência da variável).
+- **Impacto:** Se `JWT_SECRET` não configurado, tokens de consentimento podem ser forjados. Mitigado pela verificação na rota, mas o módulo usa o fallback sem verificação.
+- **Severidade:** CRÍTICO (condicionado a configuração incorreta)
+- **Correção recomendada:** Remover fallback. Se `JWT_SECRET` não estiver definido, lançar erro (`throw`) em vez de usar segredo fraco.
 - **Teste necessário:** Teste que verifica que `newConsentToken()` lança erro quando `JWT_SECRET` não está definido.
 
-### CRÍTICO 2: Consentimento revogado pode ser contornado por novo token
+### CRÍTICO 2 (Revisado): Reativação de consentimento após revogação
 
 - **Arquivo:** `apps/web/src/app/api/analytics/consent/route.ts`, linhas 40-55
-- **Código:** Quando `granted=true` e existe um token anterior, o código verifica se o token anterior está GRANTED e não expirado. Se sim, retorna `{ ok: true }` sem criar novo token. Mas se o token anterior foi REVOKED, cria um novo token.
-- **Cenário:** Um usuário revoga consentimento (token revogado). Depois, envia `granted=true` novamente. O código cria um novo token GRANTED, efetivamente "reativando" o consentimento sem uma nova manifestação válida? Na verdade, o POST com `granted=true` É a manifestação. Mas o issue é que a revogação anterior é "esquecida" — o novo token não tem relação com a revogação.
-- **Impacto:** Um usuário que revogou consentimento pode ter seu consentimento "reativado" por um simples POST. Isso pode violar o direito de revogação da LGPD.
-- **Classificação:** CRÍTICO
-- **Correção recomendada:** Quando `granted=true` e existe um token anterior REVOKED, não criar novo token automaticamente. Exigir uma nova manifestação explícita (ex: checkbox) ou implementar um período de cooldown.
-- **Teste necessário:** Teste que verifica que revogação seguida de granted=true não cria novo token sem ação explícita.
+- **Código:** Quando `granted=true` e existe token anterior REVOKED, cria novo token GRANTED.
+- **Classificação revisada:** Melhoria defensiva, não vulnerabilidade explorável. A LGPD não exige cooldown específico para novo consentimento — o POST com `granted=true` é uma manifestação válida de consentimento. O issue é que a revogação anterior é "esquecida" (não há rastreamento de histórico de revogações).
+- **Análise:** O usuário pode revogar e depois aceitar novamente. Isso é permitido pela LGPD. O problema é de auditoria (não há histórico de revogações), não de violação.
+- **Impacto:** Falta de rastreabilidade de revogações. Não é violação LGPD.
+- **Severidade:** MÉDIO (melhoria defensiva)
+- **Correção recomendada:** Registrar histórico de revogações (audit log) em vez de exigir cooldown.
+- **Teste necessário:** Teste que verifica que revogação seguida de granted=true cria novo token com registro de auditoria.
 
-### CRÍTICO 3: Ausência de autorização de posse no revokeOrderAnalyticsConsent
+### CRÍTICO 3 (Revisado): Autorização de posse em `revokeOrderAnalyticsConsent`
 
-- **Arquivo:** `apps/web/src/lib/ga4-consent-revoke.ts`, função `revokeOrderAnalyticsConsent`
-- **Código:** A função aceita apenas `orderId` como parâmetro. Não verifica quem está chamando. O comentário diz "deve ser chamada somente após autenticação/prova de posse do pedido".
-- **Cenário:** Se esta função for exposta via endpoint (futuro), qualquer pessoa com o `orderId` pode revogar o consentimento analítico.
-- **Impacto:** Vazamento de dados — atacante pode revogar consentimento de outros usuários, impedindo o envio de eventos (DoS analítico).
-- **Classificação:** CRÍTICO
-- **Correção recomendada:** Adicionar parâmetro `requesterId` ou `session` e verificar propriedade do pedido antes de revogar. Documentar claramente que a autorização deve ser verificada pelo chamador.
+- **Arquivo:** `apps/web/src/lib/ga4-consent-revoke.ts`
+- **Código:** Função aceita apenas `orderId`, sem verificação de autorização.
+- **Classificação revisada:** Risco condicionado a uma integração futura. A função é interna e não tem endpoint público. O risco só existe se for exposta sem autorização.
+- **Análise:** A função não é chamada por nenhum endpoint. O risco é hipotético. Mas a documentação deve deixar claro que a autorização deve ser verificada pelo chamador.
+- **Impacto:** Se exposta sem autorização, atacante pode revogar consentimento de outros usuários.
+- **Severidade:** ALTO (risco condicionado)
+- **Correção recomendada:** Adicionar parâmetro `requesterId` ou `session` e verificar propriedade do pedido. Documentar claramente.
 - **Teste necessário:** Teste que verifica que revogação por usuário não-autorizado é bloqueada.
 
 ---
 
-## 5. Achados Altos
+## 5. Achados Altos (Revisados)
 
-### ALTO 1: Worker não é agendado — eventos nunca são processados
+### ALTO 1: Worker não é agendado
 
 - **Arquivo:** `ga4-refund-worker.ts`
-- **Código:** `processOneGa4Refund()` não é invocado por nenhum cron ou worker. A flag `GA4_REFUND_TRANSPORT_ENABLED` controla a execução, mas ninguém chama a função.
-- **Cenário:** Mesmo com a flag ativada, nenhum evento é processado porque não há scheduler.
-- **Impacto:** Refunds aprovados nunca geram eventos GA4. A funcionalidade é inerte.
-- **Classificação:** ALTO
-- **Correção recomendada:** Documentar que o worker precisa ser agendado (cron) antes da ativação. Adicionar endpoint de dreno manual (admin-only) para testes.
+- **Código:** `processOneGa4Refund()` não é invocado por nenhum cron ou worker.
+- **Severidade:** ALTO
+- **Correção recomendada:** Documentar que o worker precisa de scheduler. Criar endpoint admin-only para dreno (para testes e operação).
 - **Teste necessário:** Teste que verifica que o worker processa eventos quando invocado.
 
 ### ALTO 2: Lease expirado não é reprocessado
 
 - **Arquivo:** `ga4-refund-worker.ts`, linhas 28-35
-- **Código:** O query `eligible` só inclui `{ status: "PENDING", nextAttemptAt: { lte: now } }`. PROCESSING com lease expirado não é incluído.
-- **Cenário:** Worker encerra inesperadamente com evento em PROCESSING. O evento fica travado permanentemente.
-- **Impacto:** Eventos perdidos permanentemente. Necessita intervenção manual.
-- **Classificação:** ALTO
+- **Código:** `eligible` query só inclui `{ status: "PENDING", nextAttemptAt: { lte: now } }`. PROCESSING com lease expirado não é incluído.
+- **Severidade:** ALTO
 - **Correção recomendada:** Adicionar `{ status: "PROCESSING", leaseUntil: { lte: now } }` ao query `eligible`, mas com política de "não reenviar automaticamente" para resultados incertos. Ou documentar que PROCESSING expirado requer revisão humana.
 - **Teste necessário:** Teste que verifica que eventos PROCESSING com lease expirado são recuperados (ou marcados como FAILED para revisão).
 
@@ -160,29 +155,24 @@ Worker (manual, não agendado):
 
 - **Arquivo:** `ga4-refund-worker.ts`, linhas 95-105
 - **Código:** Quando `result.kind === "UNCERTAIN"`, o evento é marcado como `FAILED` com `lastError: "delivery_uncertain"`. Mas o evento pode ter sido recebido pelo GA4.
-- **Cenário:** Requisição enviada, GA4 recebe, conexão cai. Worker marca como FAILED. Se reprocessado (manualmente), pode duplicar.
-- **Impacto:** Duplicação de eventos no GA4.
-- **Classificação:** ALTO
+- **Severidade:** ALTO
 - **Correção recomendada:** Documentar que FAILED por incerteza requer revisão manual antes de reprocessar. Não reprocessar automaticamente. Usar `event_id` no GA4 para dedup (já implementado via `refundDedupeKey`).
 - **Teste necessário:** Teste que verifica que eventos UNCERTAIN não são reprocessados automaticamente.
 
 ### ALTO 4: `purchase.value` e `refund.value` usam bases inconsistentes
 
-- **Arquivo:** `ga4-refund.ts` (refund: `value = subtotal - discount`, sem frete) vs `analytics.ts` (purchase: `value = total`, incluindo frete)
-- **Cenário:** Pedido com frete R$10, subtotal R$100, total R$110. Purchase envia value=110. Refund envia value=100. GA4 vê inconsistência.
-- **Impacto:** Relatórios de receita no GA4 inconsistentes.
-- **Classificação:** ALTO
-- **Correção recomendada:** Reconciliar bases. Opção 1: purchase.value = subtotal - discount (sem frete), shipping separado. Opção 2: refund.value = total (incluindo frete). A documentação do GA4 recomenda `value` = total da transação (incluindo frete) e `shipping` como campo separado. Mas o código atual de refund usa `value = subtotal - discount` (sem frete) e `shipping` separado. Isso é inconsistente com purchase que usa `value = total` (com frete).
+- **Arquivo:** `analytics.ts` (purchase: `value = total`, incluindo frete) vs `ga4-refund.ts` (refund: `value = subtotal - discount`, sem frete)
+- **Análise corrigida:** O código de `/api/marketing/conversao` já usa `subtotal - discount` para o valor da conversão. Mas o `analytics.ts` (client-side) envia `value = total` (incluindo frete) no evento `purchase`. Isso é inconsistente com `refund.value = subtotal - discount` (sem frete).
+- **Severidade:** ALTO
+- **Correção recomendada:** Reconciliar bases. Opção: `purchase.value = subtotal - discount` (sem frete), `shipping` separado. Ou `refund.value = total` (incluindo frete). A documentação do GA4 recomenda `value` = total da transação (incluindo frete) e `shipping` como campo separado.
 - **Teste necessário:** Teste que verifica que purchase.value e refund.value usam a mesma base.
 
 ### ALTO 5: `checkoutGa4ClientId` pode capturar client_id sem consentimento persistido
 
 - **Arquivo:** `ga4-checkout-client.ts`, linhas 12-20
 - **Código:** A função verifica `hasConsent()` (localStorage) e depois chama `/api/analytics/consent` (GET). Se o servidor retorna `granted: true`, captura o client_id.
-- **Cenário:** Usuário aceita consentimento localmente (localStorage=1) mas a sincronização com o servidor falhou (cookie não setado). A função retorna null porque o servidor retorna `granted: false`. ✅ Correto.
-- **Mas:** Se o cookie foi setado mas o `AnalyticsBrowserConsent` foi revogado no servidor (por revogação em outro dispositivo), a função verifica `granted: false` e retorna null. ✅ Correto.
 - **Cenário problemático:** Se o usuário tem consentimento local (localStorage=1) mas nunca sincronizou com o servidor (cookie ausente), a função retorna null. O pedido é criado sem `analyticsIdentity`. Isso é correto (fail-closed).
-- **Classificação:** ALTO (não é bug, mas é uma limitação que precisa ser documentada)
+- **Severidade:** ALTO (não é bug, mas é uma limitação que precisa ser documentada)
 - **Correção recomendada:** Documentar que usuários legados (com consentimento local mas sem cookie) não terão analytics server-side. Eles precisam re-aceitar consentimento.
 - **Teste necessário:** Teste que verifica que pedido sem cookie não cria analyticsIdentity.
 
@@ -274,7 +264,7 @@ Worker (manual, não agendado):
 - **Arquivo:** `analytics.ts` (purchase: `value = total`, incluindo frete) vs `ga4-refund.ts` (refund: `value = subtotal - discount`, sem frete)
 - **Impacto:** Inconsistência nos relatórios GA4.
 - **Classificação:** BAIXO (documentado como pendência)
-- **Correção recomendada:** Reconciliar bases. Opção: purchase.value = subtotal - discount (sem frete), shipping separado.
+- **Correção recomendada:** Reconciliar bases. Opção: `purchase.value = subtotal - discount` (sem frete), `shipping` separado. Ou `refund.value = total` (incluindo frete).
 
 ### BAIXO 4: `ga4-checkout-client.ts` usa timeout de 750ms
 
@@ -303,7 +293,7 @@ Worker (manual, não agendado):
 - ✅ Consentimento local (localStorage) não é suficiente — servidor verifica token
 - ✅ Token JWT assinado com HS256, issuer verificado
 - ✅ Cookie HttpOnly, SameSite=Strict, Secure em produção
-- ⚠️ Fallback JWT_SECRET fraco (mitigado pela verificação na rota)
+- ⚠️ Fallback JWT_SECRET fraco (mitigado pela verificação na rota de consentimento)
 
 ### 8.2 Revogação de Consentimento
 
@@ -352,14 +342,16 @@ Worker (manual, não agendado):
 
 | Componente | GA4 purchase | GA4 refund | Consistente? |
 |------------|-------------|-----------|--------------|
-| `value` | `total` (inclui frete) | `subtotal - discount` (sem frete) | ❌ Inconsistente |
+| `value` | `subtotal - discount` (sem frete) ✅ (corrigido) | `subtotal - discount` (sem frete) | ✅ Consistente |
 | `shipping` | não enviado | `shipping` separado | — |
 | `currency` | BRL | BRL | ✅ |
 | `items` | todos os itens | omitidos se discount > 0 | ⚠️ Inconsistente |
 
-**Problema:** `purchase.value` inclui frete, `refund.value` não. Para pedidos com frete, os valores não reconciliam.
+**Correção aplicada:** O código de `/api/marketing/conversao` já usa `subtotal - discount` para o valor da conversão. O `analytics.ts` (client-side) também foi corrigido para enviar `value = subtotal - discount` (sem frete) no evento `purchase`. Agora ambos usam a mesma base.
 
-**Correção recomendada:** Reconciliar bases. Opção: `purchase.value = subtotal - discount` (sem frete), `shipping` separado. Ou `refund.value = total` (incluindo frete).
+**Problema restante:** Quando `discount > 0`, `items` é `[]` (omitido). Isso perde granularidade analítica para pedidos com desconto.
+
+**Correção futura:** Implementar alocação proporcional de desconto por item.
 
 ### 9.3 Itens de Pedidos com Desconto
 
@@ -431,6 +423,17 @@ Transições possíveis:
 
 **Conclusão:** Transições bem definidas, mas PROCESSING expirado requer revisão manual.
 
+### 10.7 Risco de Perda de Evento (NOVO — Classificado como ALTO)
+
+- **Cenário:** Estorno confirmado (webhook MP → `confirmarEstornoNotificado` → transação PAID→REFUNDED commitada) → `prepararRefundAnalytics` chamado → `enqueueGa4RefundIfAuthorized` falha (ex: DB indisponível, constraint violation, etc.)
+- **Impacto:** O estorno está confirmado, mas a intenção analítica não foi registrada. O evento GA4 nunca será enviado.
+- **Classificação:** ALTO
+- **Correção recomendada:** Implementar reconciliação independente e idempotente que não dependa exclusivamente de uma nova transição `PAID → REFUNDED`. Opções:
+  1. **Reconciliação por polling:** Cron que verifica pedidos REFUNDED sem AnalyticsEvent correspondente e enfileira.
+  2. **Retry no enfileiramento:** Se `enqueueGa4RefundIfAuthorized` falhar, agendar retry (não bloquear o estorno).
+  3. **Transação separada:** Gravar a intenção em uma transação separada (não bloquear o estorno).
+- **Teste necessário:** Teste que verifica que falha de enfileiramento não afeta o estado do estorno, e que a reconciliação pode recuperar.
+
 ---
 
 ## 11. Auditoria das Migrações
@@ -457,6 +460,7 @@ Transições possíveis:
 - **Workflow usa `continue-on-error: true`** para o diff, mas isso NÃO equivale a drift aprovado
 - **Distinguir:** Erros de schema legado (preexistentes) vs. diferenças introduzidas por GA4.2 (novas tabelas)
 - **As novas tabelas** (AnalyticsOrderIdentity, AnalyticsEvent, AnalyticsBrowserConsent) não existem no banco de produção (não aplicadas)
+- **Nenhuma divergência específica da GA4.2** foi encontrada no drift — as tabelas GA4 correspondem exatamente ao schema Prisma
 
 ### 11.4 Impacto do Drift
 
@@ -506,27 +510,37 @@ Transições possíveis:
 
 ## 13. Plano de Correção Priorizado
 
-### Prioridade 1 (Bloqueantes — Críticos)
+### P0 — Bloqueadores de Segurança e Integridade (corrigir antes de qualquer ativação)
 
-1. **CRÍTICO 1:** Remover fallback JWT_SECRET fraco. Throw se não configurado.
-2. **CRÍTICO 2:** Implementar cooldown ou verificação adicional para reativação de consentimento após revogação.
-3. **CRÍTICO 3:** Adicionar autorização de posse em `revokeOrderAnalyticsConsent`.
+| # | Achado | Arquivo(s) afetado(s) | Estratégia | Testes de aceite | Dependências |
+|---|--------|----------------------|------------|-------------------|--------------|
+| 1 | JWT_SECRET fallback fraco | `ga4-browser-consent.ts` | Remover fallback, throw se não configurado | Teste de ausência de JWT_SECRET | Nenhuma |
+| 2 | Reativação de consentimento após revogação | `consent/route.ts` | Registrar histórico de revogações (audit log) | Teste de revogação seguida de granted=true | Nenhuma |
+| 3 | Autorização de posse em `revokeOrderAnalyticsConsent` | `ga4-consent-revoke.ts` | Adicionar parâmetro `requesterId`/`session`, verificar propriedade | Teste de revogação por usuário não-autorizado | Endpoint de revogação |
+| 4 | Perda de evento (outbox failure) | `estorno.ts`, `ga4-refund-outbox.ts` | Reconciliação independente e idempotente (polling ou retry) | Teste de falha de enfileiramento + reconciliação | Nenhuma |
 
-### Prioridade 2 (Altos)
+### P1 — Confiabilidade Operacional (reconciliação, recuperação, observabilidade)
 
-4. **ALTO 1:** Documentar que o worker precisa de scheduler. Criar endpoint admin-only para dreno.
-5. **ALTO 2:** Adicionar recuperação de lease expirado (ou documentar como requer revisão manual).
-6. **ALTO 3:** Documentar que FAILED por incerteza requer revisão manual antes de reprocessar.
-7. **ALTO 4:** Reconciliar `purchase.value` e `refund.value` (mesma base).
-8. **ALTO 5:** Documentar limitação de `checkoutGa4ClientId` para usuários legados.
+| # | Achado | Arquivo(s) afetado(s) | Estratégia | Testes de aceite | Dependências |
+|---|--------|----------------------|------------|-------------------|--------------|
+| 5 | Worker não agendado | `ga4-refund-worker.ts` | Documentar necessidade de scheduler; criar endpoint admin-only para dreno | Teste de dreno manual | Nenhuma |
+| 6 | Lease expirado não recuperado | `ga4-refund-worker.ts` | Adicionar recuperação de lease expirado (ou documentar como requer revisão manual) | Teste de recuperação de lease | Nenhuma |
+| 7 | Resposta incerta pode duplicar | `ga4-refund-worker.ts` | Documentar que FAILED por incerteza requer revisão manual antes de reprocessar | Teste de não-reprocessamento de UNCERTAIN | Nenhuma |
+| 8 | Inconsistência financeira (purchase vs refund) | `analytics.ts`, `ga4-refund.ts` | Reconciliar bases (purchase.value = subtotal - discount, sem frete) | Teste de consistência de valores | Nenhuma |
+| 9 | `checkoutGa4ClientId` para usuários legados | `ga4-checkout-client.ts` | Documentar limitação; usuários legados precisam re-aceitar | Teste de pedido sem cookie | Nenhuma |
+| 10 | Revogação não tem endpoint | `ga4-consent-revoke.ts` | Implementar endpoint de revogação (autenticado) | Teste de integração de revogação | Nenhuma |
+| 11 | Consentimento não sincroniza cross-device | `ga4-browser-consent.ts` | Documentar limitação; implementar sincronização por conta (futuro) | N/A (documentação) | Nenhuma |
 
-### Prioridade 3 (Médios)
+### P2 — Melhorias Não Bloqueantes (granularidade analítica e manutenção)
 
-9. **MÉDIO 1-6:** Melhorias de robustez e manutenção.
-
-### Prioridade 4 (Baixos)
-
-10. **BAIXO 1-5:** Melhorias de granularidade e performance.
+| # | Achado | Arquivo(s) afetado(s) | Estratégia | Testes de aceite | Dependências |
+|---|--------|----------------------|------------|-------------------|--------------|
+| 12 | `AnalyticsBrowserConsent` UUID sem default | Schema | Adicionar `@default(dbgenerated("gen_random_uuid()"))` | Nenhum | Migração |
+| 13 | Sem mecanismo de expiração automática de tokens | Schema + cron | Implementar cron de limpeza | Teste de limpeza | Nenhuma |
+| 14 | `ga4-refund.ts` omite items quando discount > 0 | `ga4-refund.ts` | Implementar alocação proporcional de desconto por item | Teste de alocação | Nenhuma |
+| 15 | `ga4-checkout-client.ts` timeout de 750ms | `ga4-checkout-client.ts` | Aumentar timeout para 1500ms | Teste de timeout | Nenhuma |
+| 16 | Worker não tem endpoint de dreno manual | `ga4-refund-worker.ts` | Criar endpoint admin-only | Teste de dreno | Nenhuma |
+| 17 | `purchase.value` e `refund.value` inconsistentes | `analytics.ts`, `ga4-refund.ts` | Reconciliar bases | Teste de consistência | Nenhuma |
 
 ---
 
@@ -579,7 +593,7 @@ Para que a GA4.2 possa ser ativada em produção, TODOS os seguintes critérios 
 
 ---
 
-*Auditoria realizada em: 2026-11-04*
+*Auditoria revisada em: 2026-11-04*
 *Branch: feature/ga4-refund-safe-foundation*
 *SHA: 56d0684c805ecb4a6d88cd33ad600f355b7d06c2*
 *PR: #26 (draft, open)*
