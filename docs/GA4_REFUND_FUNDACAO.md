@@ -37,3 +37,9 @@ Não abrir o envio real ou declarar GA4.2 concluída até os itens 1–8 estarem
 - `enqueueGa4RefundIfAuthorized` só cria intenção PENDING para REFUNDED com Refund.APPROVED, identificação e prova de consentimento persistidas. Não envia para GA4 nem é chamada pelo fluxo financeiro.
 - Testes com mocks adicionados, ainda não executados.
 - Antes de qualquer ativação: captura consentida no checkout, revogação server-side, proteção de concorrência, worker com lease e política de entrega incerta. `ACCEPTED` não significa confirmação de processamento GA4.
+
+## Incremento GA4.2 — transporte hard-off e revogação interna
+- `ga4-transport.ts`: função de envio deliberadamente hard-off; `interpretGa4HttpResult` diferencia ACCEPTED_UNVERIFIED, REJECTED e UNCERTAIN. O endpoint do Google pode retornar HTTP 2xx mesmo para eventos não processados.
+- `ga4-consent-revoke.ts`: função interna transacional para apagar clientId, registrar estado REVOKED e cancelar intenções PENDING/FAILED. Não existe endpoint público chamador, nem execução automática; **a autorização de posse do pedido deverá ser garantida antes de chamar esta função**.
+- O processamento ainda NÃO está conectado ao estorno nem a cron; nenhum dado é enviado externamente. Os testes novos foram escritos, mas ainda não foram executados em ambiente local.
+- Bloqueios restantes: associação autenticada do consentimento no checkout (inclusive guest), propagação da revogação do navegador ao servidor, captura `gtag get` consentida, concorrência transacional entre revogação e consumidor (incluindo PROCESSING), política de retry incerto, execução de migration PostgreSQL local e testes/build.
