@@ -7,6 +7,19 @@ import {
   sameOriginRequest,
 } from "@/lib/ga4-browser-consent";
 
+/** Consultar consentimento NÃO renova nem recria aceite. */
+export async function GET(req: NextRequest) {
+  const token = await readBrowserConsent(req);
+  if (!token) return NextResponse.json({ granted: false }, { headers: { "Cache-Control": "no-store" } });
+  const existing = await prisma.analyticsBrowserConsent.findUnique({
+    where: { id: token.tokenId },
+    select: { state: true, expiresAt: true, revokedAt: true },
+  });
+  const granted = existing?.state === "GRANTED" &&
+    !existing.revokedAt && existing.expiresAt > new Date();
+  return NextResponse.json({ granted }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function POST(req: NextRequest) {
   if (!sameOriginRequest(req)) return NextResponse.json({ error: "Origem inválida" }, { status: 403 });
   if (process.env.NODE_ENV === "production" && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32))
