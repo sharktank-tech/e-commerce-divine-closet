@@ -325,6 +325,8 @@ model Order {
 
   items             OrderItem[]
   refund            Refund?
+  analyticsIdentity AnalyticsOrderIdentity?
+  analyticsEvents   AnalyticsEvent[]
   trackToken        OrderTrackToken?
   reviews           Review[]
   reviewRequestedAt DateTime?
@@ -674,4 +676,72 @@ model MarketingMessage {
   updatedAt DateTime @updatedAt
   @@index([status, nextAttemptAt])
   @@index([campaignId, status])
+}
+
+// Identidade analítica por pedido — nunca presumir consentimento.
+// Somente um fluxo autorizado, associado à criação do pedido, poderá
+// preencher clientId e consentState. Revogações devem atualizar este estado.
+enum AnalyticsConsentState {
+  UNKNOWN
+  GRANTED
+  DENIED
+  REVOKED
+}
+
+model AnalyticsOrderIdentity {
+  id             String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId        String                @unique @db.Uuid
+  order          Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  clientId       String?               @db.VarChar(128)
+  consentState   AnalyticsConsentState @default(UNKNOWN)
+  consentProofAt DateTime?
+  consentTokenId String? @db.Uuid
+  revokedAt      DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([consentTokenId])
+}
+
+// Registro de intenção analítica. ACCEPTED significa apenas que o endpoint
+// respondeu com sucesso: o GA4 pode não processar o evento.
+// Não existe worker ou envio externo nesta fase.
+enum AnalyticsEventStatus {
+  PENDING
+  PROCESSING
+  ACCEPTED
+  FAILED
+  SKIPPED
+}
+
+model AnalyticsEvent {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId       String               @db.Uuid
+  order         Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dedupeKey     String               @unique
+  eventType     String               @db.VarChar(32)
+  payload       Json
+  status        AnalyticsEventStatus @default(PENDING)
+  attempt       Int                  @default(0)
+  nextAttemptAt DateTime             @default(now())
+  leaseUntil    DateTime?
+  acceptedAt    DateTime?
+  lastError     String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([orderId, eventType])
+}
+
+model AnalyticsBrowserConsent {
+  id        String                @id @db.Uuid
+  state     AnalyticsConsentState @default(UNKNOWN)
+  grantedAt DateTime?
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@index([state, expiresAt])
 }

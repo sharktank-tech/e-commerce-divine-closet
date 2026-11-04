@@ -7,6 +7,8 @@ import { CONSENT_KEY, hasConsent, setConsent } from "@/lib/analytics";
 // script de rastreamento é injetado (ver TrackingScripts).
 export function ConsentBanner() {
   const [visivel, setVisivel] = useState(false);
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
     try {
@@ -18,11 +20,27 @@ export function ConsentBanner() {
 
   if (!visivel) return <button className="fixed bottom-2 left-2 z-40 rounded bg-white px-3 py-2 text-xs shadow" onClick={()=>setVisivel(true)}>Preferências de cookies</button>;
 
-  function escolher(aceito: boolean) {
-    // setConsent emite dc-consent-change; TrackingScripts reage sem reload.
-    // Recarregar a página aqui interrompia a conexão do Tag Assistant.
-    setConsent(aceito);
-    setVisivel(false);
+  async function escolher(aceito: boolean) {
+    if (salvando) return;
+    setSalvando(true);
+    setErro("");
+    if (!aceito) setConsent(false);
+    try {
+      const response = await fetch("/api/analytics/consent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ granted: aceito }),
+      });
+      if (!response.ok) throw new Error("consent_failed");
+      if (aceito) setConsent(true);
+      setVisivel(false);
+    } catch {
+      if (aceito) setConsent(false);
+      setErro("Não foi possível salvar a preferência no servidor. Tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
   }
 
   return (
@@ -32,15 +50,16 @@ export function ConsentBanner() {
           Usamos cookies para melhorar sua experiência e medir visitas. Você pode aceitar ou recusar —{" "}
           <a href="/privacidade" className="underline">saiba mais</a>.
         </p>
+        {erro && <p role="alert" className="text-xs text-red-700">{erro}</p>}
         <div className="flex shrink-0 gap-2">
           <button
-            onClick={() => escolher(false)}
+            disabled={salvando} onClick={() => void escolher(false)}
             className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold text-ink hover:bg-ink/5"
           >
             Recusar
           </button>
           <button
-            onClick={() => escolher(true)}
+            disabled={salvando} onClick={() => void escolher(true)}
             className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-primary-50"
           >
             Aceitar
