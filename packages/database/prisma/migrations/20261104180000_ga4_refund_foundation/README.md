@@ -1,0 +1,1 @@
+A migração SQL da mesma pasta foi inicialmente criada para a fundação inerte. O campo de vinculação `consentTokenId` foi acrescentado posteriormente no schema; uma migração complementar separada realiza essa adição. Não executar migrations em produção nesta branch.
