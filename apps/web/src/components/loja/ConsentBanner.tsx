@@ -7,6 +7,8 @@ import { CONSENT_KEY, hasConsent, setConsent } from "@/lib/analytics";
 // script de rastreamento é injetado (ver TrackingScripts).
 export function ConsentBanner() {
   const [visivel, setVisivel] = useState(false);
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
     try {
@@ -18,8 +20,6 @@ export function ConsentBanner() {
 
   if (!visivel) return <button className="fixed bottom-2 left-2 z-40 rounded bg-white px-3 py-2 text-xs shadow" onClick={()=>setVisivel(true)}>Preferências de cookies</button>;
 
-  const [erro, setErro] = useState("");
-  const [salvando, setSalvando] = useState(false);
   async function escolher(aceito: boolean) {
     if (salvando) return;
     setSalvando(true);
