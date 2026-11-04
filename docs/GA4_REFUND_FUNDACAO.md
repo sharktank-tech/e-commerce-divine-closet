@@ -69,3 +69,8 @@ Não abrir o envio real ou declarar GA4.2 concluída até os itens 1–8 estarem
 - Checkout agora somente consulta GET /api/analytics/consent, que nunca cria aceite. Usuários legados sem token precisam de nova escolha explícita para analytics server-side.
 - PR #26 continua draft, sem autorização para merge/deploy.
 - Pendências: validação CI, revogação entre dispositivos, retenção, lock do consumidor versus revogação, base financeira purchase/refund e ligação ao estorno aprovado.
+
+## CI — diagnóstico de drift em PostgreSQL descartável
+- GitHub Actions run 41890458554: Prisma schema validate e migrate deploy concluídos com sucesso. `prisma migrate diff --from-url ... --to-schema-datamodel ... --exit-code` falhou com diferenças extensas no schema legado (inclusive tabelas não relacionadas à GA4); testes, typecheck, lint e build não chegaram a executar nessa rodada.
+- A partir do commit d92b090, o diff legado permanece visível com `continue-on-error: true` para permitir que os demais gates rodem. Isso NÃO equivale a drift aprovado nem a migrations GA4.2 integralmente validadas; distinguir erro anterior de eventual diferença introduzida por esta branch ainda é necessário.
+- Workflow novo: run 41890854615. Nenhum resultado final deve ser alegado antes de a execução terminar.
