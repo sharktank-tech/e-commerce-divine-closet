@@ -29,6 +29,12 @@ export async function enqueueGa4RefundIfAuthorized(orderId: string): Promise<
     !/^\d+\.\d+$/.test(identity.clientId)
   ) return "SKIPPED";
 
+  const browserConsent = identity.consentTokenId
+    ? await prisma.analyticsBrowserConsent.findUnique({ where: { id: identity.consentTokenId } })
+    : null;
+  if (!browserConsent || browserConsent.state !== "GRANTED" || browserConsent.revokedAt ||
+      browserConsent.expiresAt <= new Date()) return "SKIPPED";
+
   // A política atual não autoriza envio até que exista sincronização
   // comprovada de revogação e verificação imediatamente antes da entrega.
   // Mesmo PENDING significa somente intenção, não consentimento permanente.
