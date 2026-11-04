@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { orderFind, eventCreate } = vi.hoisted(() => ({
+const { orderFind, eventCreate, browserConsentFind } = vi.hoisted(() => ({
   orderFind: vi.fn(),
   eventCreate: vi.fn(),
+  browserConsentFind: vi.fn(),
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     order: { findUnique: orderFind },
     analyticsEvent: { create: eventCreate },
+    analyticsBrowserConsent: { findUnique: browserConsentFind },
   },
 }));
 import { enqueueGa4RefundIfAuthorized } from "../ga4-refund-outbox";
@@ -21,6 +23,7 @@ const order = {
     consentProofAt: new Date("2026-11-04T12:00:00Z"),
     revokedAt: null,
     clientId: "123456.789012",
+    consentTokenId: "49a1be2b-983c-4d03-98ba-c25ac36c99fb",
   },
   subtotal: "100.00", discount: "0.00", shipping: "10.00", total: "110.00",
   items: [{ productId: "p1", productName: "Blusa", quantity: 1, unitPrice: "100.00" }],
@@ -30,6 +33,7 @@ describe("GA4 refund outbox: fail-closed", () => {
     vi.resetAllMocks();
     orderFind.mockResolvedValue(order);
     eventCreate.mockResolvedValue({ id: "persistido" });
+    browserConsentFind.mockResolvedValue({ state: "GRANTED", revokedAt: null, expiresAt: new Date("2030-01-01") });
   });
   it("não enfileira estorno pendente", async () => {
     orderFind.mockResolvedValue({ ...order, refund: { ...order.refund, status: "REQUESTED" } });
@@ -40,6 +44,11 @@ describe("GA4 refund outbox: fail-closed", () => {
     orderFind.mockResolvedValue({ ...order, analyticsIdentity: { ...order.analyticsIdentity, consentProofAt: null } });
     expect(await enqueueGa4RefundIfAuthorized(order.id)).toBe("SKIPPED");
     orderFind.mockResolvedValue({ ...order, analyticsIdentity: { ...order.analyticsIdentity, revokedAt: new Date() } });
+    expect(await enqueueGa4RefundIfAuthorized(order.id)).toBe("SKIPPED");
+    expect(eventCreate).not.toHaveBeenCalled();
+  });
+  it("não enfileira quando o consentimento do navegador foi revogado", async () => {
+    browserConsentFind.mockResolvedValue({ state: "REVOKED", revokedAt: new Date(), expiresAt: new Date("2030-01-01") });
     expect(await enqueueGa4RefundIfAuthorized(order.id)).toBe("SKIPPED");
     expect(eventCreate).not.toHaveBeenCalled();
   });
