@@ -695,9 +695,12 @@ model AnalyticsOrderIdentity {
   clientId       String?               @db.VarChar(128)
   consentState   AnalyticsConsentState @default(UNKNOWN)
   consentProofAt DateTime?
+  consentTokenId String? @db.Uuid
   revokedAt      DateTime?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
+
+  @@index([consentTokenId])
 }
 
 // Registro de intenção analítica. ACCEPTED significa apenas que o endpoint
