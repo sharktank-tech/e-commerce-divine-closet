@@ -62,3 +62,10 @@ Não abrir o envio real ou declarar GA4.2 concluída até os itens 1–8 estarem
 5. `purchase` existente usa valor da compra conforme recibo; é necessário reconciliar base econômica com `refund.value` (frete/desconto/itens) antes de autorizar contabilização.
 6. O Measurement Protocol pode devolver 2xx para eventos não processados; retry em resposta incerta pode gerar dupla contagem. Política e observabilidade precisam de aceite explícito.
 7. Não há sistema de limpeza/retention de tokens e eventos analíticos. Definir janela LGPD antes de produção.
+
+## Auditoria PR #26 — bloqueios de validação
+- Adicionado workflow GitHub Actions de testes, typecheck, lint, build e migrações em PostgreSQL descartável. Resultado ainda não confirmado.
+- Desativado retry automático de jobs PROCESSING com lease vencido; resposta potencialmente incerta exige revisão humana.
+- Checkout agora somente consulta GET /api/analytics/consent, que nunca cria aceite. Usuários legados sem token precisam de nova escolha explícita para analytics server-side.
+- PR #26 continua draft, sem autorização para merge/deploy.
+- Pendências: validação CI, revogação entre dispositivos, retenção, lock do consumidor versus revogação, base financeira purchase/refund e ligação ao estorno aprovado.
