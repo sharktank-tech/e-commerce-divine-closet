@@ -63,7 +63,12 @@ export async function processOneGa4Refund(): Promise<
 
   const payload = entry.payload as unknown as Ga4RefundEvent["params"];
   // A fila só aceita refund com o UUID do próprio pedido.
-  if (payload.transaction_id !== order.id || payload.currency !== "BRL") {
+  if (!payload || typeof payload !== "object" ||
+      payload.transaction_id !== order.id || payload.currency !== "BRL" ||
+      typeof payload.value !== "number" || !Number.isFinite(payload.value) ||
+      payload.value < 0 || typeof payload.shipping !== "number" ||
+      !Number.isFinite(payload.shipping) || payload.shipping < 0 ||
+      !Array.isArray(payload.items)) {
     await prisma.analyticsEvent.updateMany({
       where: { id: entry.id, status: "PROCESSING" },
       data: { status: "SKIPPED", leaseUntil: null, lastError: "invalid_payload" },
