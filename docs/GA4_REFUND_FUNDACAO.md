@@ -74,3 +74,9 @@ Não abrir o envio real ou declarar GA4.2 concluída até os itens 1–8 estarem
 - GitHub Actions run 41890458554: Prisma schema validate e migrate deploy concluídos com sucesso. `prisma migrate diff --from-url ... --to-schema-datamodel ... --exit-code` falhou com diferenças extensas no schema legado (inclusive tabelas não relacionadas à GA4); testes, typecheck, lint e build não chegaram a executar nessa rodada.
 - A partir do commit d92b090, o diff legado permanece visível com `continue-on-error: true` para permitir que os demais gates rodem. Isso NÃO equivale a drift aprovado nem a migrations GA4.2 integralmente validadas; distinguir erro anterior de eventual diferença introduzida por esta branch ainda é necessário.
 - Workflow novo: run 41890854615. Nenhum resultado final deve ser alegado antes de a execução terminar.
+
+## Integração pós-commit — FASE GA4.2
+- API de conversão envia `purchase.value` como `subtotal - discount` para novas compras (sem frete); o recibo financeiro e cobrança continuam baseados em `order.total`. Eventos históricos não são reemitidos.
+- `estorno.ts`: dois caminhos de confirmação aprovada chamam `prepararRefundAnalytics` **após** a transação financeira concluída e somente quando a transição PAID→REFUNDED vence. A função captura erros de enfileiramento sem alterar o resultado financeiro; o envio real permanece hard-off.
+- `ga4-refund-outbox.ts`: além da identidade analítica, exige token do navegador GRANTED, sem revogação e não expirado antes de criar a intenção. UNIQUE no banco impede intenção duplicada por refund.id.
+- Atenção: não há exatamente-uma-entrega GA4, o worker não é agendado e ainda faltam política cross-device, race entre revogação e transporte futuro, retenção LGPD e diagnóstico de drift histórico. Sem autorização para merge.
