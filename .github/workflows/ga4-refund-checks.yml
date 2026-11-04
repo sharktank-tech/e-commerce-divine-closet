@@ -17,6 +17,10 @@ jobs:
     timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/divine_ga4_test
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
       JWT_SECRET: test-ga4-foundation-only-never-use-in-production-123
       GA4_REFUND_TRANSPORT_ENABLED: "false"
     services:
