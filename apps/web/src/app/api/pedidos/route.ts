@@ -520,12 +520,22 @@ export const POST = comErro(async (req: NextRequest) => {
         if (!reservado) throw new CupomEsgotadoError();
       }
 
-      const consentRecord = browserConsent
-        ? await tx.analyticsBrowserConsent.findFirst({
-            where: { id: browserConsent.tokenId, state: "GRANTED",
-              expiresAt: { gt: new Date() }, revokedAt: null },
-          })
-        : null;
+      // Lock na mesma linha que a revogação atualiza: nenhuma criação
+      // de vínculo passa entre a leitura do aceite e uma revogação concorrente.
+      const consentRows = browserConsent
+        ? await tx.$queryRaw<Array<{
+            id: string; state: string; grantedAt: Date | null;
+            revokedAt: Date | null; expiresAt: Date;
+          }>>`
+            SELECT "id", "state", "grantedAt", "revokedAt", "expiresAt"
+            FROM "AnalyticsBrowserConsent"
+            WHERE "id" = ${browserConsent.tokenId}::uuid FOR UPDATE
+          `
+        : [];
+      const candidate = consentRows[0];
+      const consentRecord = candidate?.state === "GRANTED" &&
+        !candidate.revokedAt && candidate.expiresAt > new Date() &&
+        candidate.grantedAt ? candidate : null;
       const analyticsIdentity = consentRecord && parsed.data.analytics
         ? {
             create: {
