@@ -43,3 +43,22 @@ Não abrir o envio real ou declarar GA4.2 concluída até os itens 1–8 estarem
 - `ga4-consent-revoke.ts`: função interna transacional para apagar clientId, registrar estado REVOKED e cancelar intenções PENDING/FAILED. Não existe endpoint público chamador, nem execução automática; **a autorização de posse do pedido deverá ser garantida antes de chamar esta função**.
 - O processamento ainda NÃO está conectado ao estorno nem a cron; nenhum dado é enviado externamente. Os testes novos foram escritos, mas ainda não foram executados em ambiente local.
 - Bloqueios restantes: associação autenticada do consentimento no checkout (inclusive guest), propagação da revogação do navegador ao servidor, captura `gtag get` consentida, concorrência transacional entre revogação e consumidor (incluindo PROCESSING), política de retry incerto, execução de migration PostgreSQL local e testes/build.
+
+## Incremento GA4.2 — consentimento no checkout e consumidor inerte (2026-11-04)
+
+- `AnalyticsBrowserConsent`: status GRANTED/REVOKED persistido com token aleatório UUID assinado (JWT HMAC), cookie HttpOnly, SameSite=Strict, expiração 90 dias.
+- `POST /api/analytics/consent`: exige Origin de mesma origem; aceite gera/renova cookie, recusa apaga cookie, revoga todos os registros `AnalyticsOrderIdentity` com mesmo `consentTokenId` e cancela eventos PENDING/FAILED. Nenhuma chamada ao GA4.
+- `ConsentBanner`: somente ativa `setConsent(true)` após retorno 2xx do servidor. A recusa client-side é imediata. Erro de rede deixa mensagem visível para tentar sincronizar revogação novamente.
+- `checkoutGa4ClientId`: sincroniza aceite pré-existente no servidor, usa apenas `gtag('get', 'G-BKNS2XTSH2', 'client_id', cb)` e falha em modo null após 750 ms; não bloqueia compra.
+- `POST /api/pedidos`: aceita identidade opcional. Dentro da transação, bloqueia a linha do token com `FOR UPDATE` (serializando com revogação) e somente associa identidade a pedido se GRANTED, não expirado e não revogado. Visitantes usam o mesmo token de navegador, sem expor segredo de checkout. Compras sem consentimento não são bloqueadas.
+- `processOneGa4Refund`: worker **não agendado**. Flag `GA4_REFUND_TRANSPORT_ENABLED` ausente => nenhuma consulta ao banco. Mesmo com flag true, o transporte real continua **hard-off**. Claim CAS com lease, consulta estado atual do token e do pedido, rejeita payload malformado, não repete automaticamente resposta UNCERTAIN. Testes com mocks escritos.
+- Migrations novas: `20261104183000_ga4_consent_token`, `20261104190000_ga4_browser_consent` além da fundação original. **Não aplicadas em produção nem em PostgreSQL local.**
+
+### Bloqueios restantes antes de habilitar egress/merge
+1. **Executar e corrigir** Vitest completo, typecheck, lint, Next build, prisma generate + validate e upgrade de migrations em PostgreSQL local. Não há resultado de execução validado aqui.
+2. O worker não é invocado por cron e `enqueueGa4RefundIfAuthorized` ainda não está acoplado à confirmação de estorno. Isso é deliberado até revisão de falhas e compatibilidade com o fluxo financeiro.
+3. Revogação após **perda do cookie** ou em **outro dispositivo** não pode ser inferida da preferência local anterior; é necessária política de consentimento por conta/pedido ou mecanismo autenticado adicional. O hard-off previne envio durante a pendência.
+4. Antes do envio real, decidir e testar serialização entre revogação e tentativas PROCESSING. Endpoint atual cancela PENDING/FAILED, enquanto worker checa estado do token antes do transporte, mas não mantém lock compartilhado durante I/O externo. **Não existe garantia de ausência de corrida para envio real futuro.**
+5. `purchase` existente usa valor da compra conforme recibo; é necessário reconciliar base econômica com `refund.value` (frete/desconto/itens) antes de autorizar contabilização.
+6. O Measurement Protocol pode devolver 2xx para eventos não processados; retry em resposta incerta pode gerar dupla contagem. Política e observabilidade precisam de aceite explícito.
+7. Não há sistema de limpeza/retention de tokens e eventos analíticos. Definir janela LGPD antes de produção.
