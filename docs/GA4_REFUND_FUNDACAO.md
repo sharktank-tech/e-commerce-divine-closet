@@ -30,3 +30,10 @@ Esta branch contém apenas o **contrato financeiro e de elegibilidade** do event
 
 ## Critério de avanço
 Não abrir o envio real ou declarar GA4.2 concluída até os itens 1–8 estarem integrados e validados. Esta fundação foi intencionalmente desenhada para ser inerte: não afeta checkout, pagamentos, banco, cookies ou eventos de produção.
+
+## Incremento GA4.2 — esquema e fila inertes
+- Prisma: `AnalyticsOrderIdentity` tem consentimento UNKNOWN por padrão; `AnalyticsEvent` usa `dedupeKey UNIQUE` e status PENDING/PROCESSING/ACCEPTED/FAILED/SKIPPED.
+- Migração aditiva proposta: `20261104180000_ga4_refund_foundation`; não aplicada.
+- `enqueueGa4RefundIfAuthorized` só cria intenção PENDING para REFUNDED com Refund.APPROVED, identificação e prova de consentimento persistidas. Não envia para GA4 nem é chamada pelo fluxo financeiro.
+- Testes com mocks adicionados, ainda não executados.
+- Antes de qualquer ativação: captura consentida no checkout, revogação server-side, proteção de concorrência, worker com lease e política de entrega incerta. `ACCEPTED` não significa confirmação de processamento GA4.
