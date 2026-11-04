@@ -8,16 +8,20 @@ const GA4_ID = "G-BKNS2XTSH2";
 export async function checkoutGa4ClientId(): Promise<string | null> {
   if (!hasConsent() || !window.gtag || !window.dcTracking?.ga4.includes(GA4_ID))
     return null;
-  // Migra aceites existentes do localStorage para uma autorização assinada
-  // no servidor. Falha não bloqueia a compra nem envia identidade à API.
+  // Nunca concede consentimento automaticamente a partir do localStorage:
+  // ele pode estar desatualizado após revogação em outra aba/dispositivo.
+  // O servidor só confirma tokens previamente emitidos por ação explícita.
   try {
     const response = await fetch("/api/analytics/consent", {
-      method: "POST",
+      method: "GET",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ granted: true }),
+      cache: "no-store",
     });
     if (!response.ok || !hasConsent()) return null;
+    const status: unknown = await response.json();
+    if (!status || typeof status !== "object" ||
+        !("granted" in status) || (status as { granted?: unknown }).granted !== true)
+      return null;
   } catch { return null; }
   return new Promise((resolve) => {
     let done = false;
