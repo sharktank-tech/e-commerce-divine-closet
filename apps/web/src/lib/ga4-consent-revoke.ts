@@ -11,7 +11,22 @@ import { prisma } from "@/lib/prisma";
  */
 export async function revokeOrderAnalyticsConsent(
   orderId: string,
+  requesterId?: string | null,
 ): Promise<{ revoked: boolean; skipped: number }> {
+  // Verificação de posse: se requesterId for fornecido, verificar que o pedido
+  // pertence ao solicitante. Sem requesterId (chamada interna), a verificação
+  // deve ser feita pelo chamador.
+  if (requesterId) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true, guestEmail: true },
+    });
+    if (!order) throw new Error("order_not_found");
+    if (order.userId !== requesterId) {
+      throw new Error("unauthorized: requester does not own this order");
+    }
+  }
+
   return prisma.$transaction(async (tx) => {
     const changed = await tx.analyticsOrderIdentity.updateMany({
       where: { orderId, consentState: { not: "REVOKED" } },

@@ -45,6 +45,15 @@ export async function POST(req: NextRequest) {
       data: { id: fresh.tokenId, state: "GRANTED", grantedAt: new Date(),
         expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
     });
+    // Audit: registrar concessão (sem dados pessoais)
+    await prisma.auditLog.create({
+      data: {
+        action: "ga4_consent_granted",
+        entity: "AnalyticsBrowserConsent",
+        entityId: fresh.tokenId,
+        meta: { granted: true, source: "user_action" },
+      },
+    });
     const resp = NextResponse.json({ ok: true });
     resp.cookies.set(GA4_CONSENT_COOKIE, fresh.token, {
       httpOnly: true, secure: process.env.NODE_ENV === "production",
@@ -73,6 +82,15 @@ export async function POST(req: NextRequest) {
           data: { status: "SKIPPED", lastError: "consent_revoked" },
         });
       }
+      // Audit: registrar revogação (sem dados pessoais)
+      await tx.auditLog.create({
+        data: {
+          action: "ga4_consent_revoked",
+          entity: "AnalyticsBrowserConsent",
+          entityId: previous.tokenId,
+          meta: { revoked: true, affectedOrders: identities.length },
+        },
+      });
     });
   }
   const resp = NextResponse.json({ ok: true });
