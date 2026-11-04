@@ -733,3 +733,15 @@ model AnalyticsEvent {
   @@index([status, nextAttemptAt])
   @@index([orderId, eventType])
 }
+
+model AnalyticsBrowserConsent {
+  id        String                @id @db.Uuid
+  state     AnalyticsConsentState @default(UNKNOWN)
+  grantedAt DateTime?
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@index([state, expiresAt])
+}
