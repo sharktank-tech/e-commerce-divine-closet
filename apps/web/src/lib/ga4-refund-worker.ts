@@ -18,11 +18,12 @@ export async function processOneGa4Refund(): Promise<
   // Mesmo com flag definida, submitGa4Refund permanece hard-off:
   // a flag sozinha nunca habilita egress.
   const now = new Date();
-  const expired = { lte: now };
   const eligible = {
     OR: [
       { status: "PENDING" as const, nextAttemptAt: { lte: now } },
-      { status: "PROCESSING" as const, leaseUntil: expired },
+      // Lease expirado representa resultado externo incerto. NÃO reenvie automaticamente.
+      // Um processo de reconciliação/manual deverá resolver esses casos.
+
     ],
   };
   const candidate = await prisma.analyticsEvent.findFirst({
