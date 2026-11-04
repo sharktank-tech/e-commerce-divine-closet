@@ -26,6 +26,7 @@ import { EnderecoInvalidoError, resolverEnderecoPedido } from "@/lib/pedidos/end
 import { comErro } from "@/lib/erros";
 import { enderecoSchema, validarEmail, validarNome } from "@/lib/validacao";
 import { cookies } from "next/headers";
+import { readBrowserConsent } from "@/lib/ga4-browser-consent";
 
 /** Cupom sem vaga restante: 400 claro, antes de qualquer cobrança. */
 class CupomEsgotadoError extends Error {
@@ -81,6 +82,7 @@ const checkoutSchema = z.object({
   // compra e a repete em todo retry. Aceita também no header `Idempotency-Key`
   // (padrão de APIs) — o header tem prioridade sobre o corpo.
   idempotencyKey: z.string().min(8).max(128).nullish(),
+  analytics: z.object({ clientId: z.string().regex(/^\d+\.\d+$/).max(128) }).optional(),
 });
 
 /**
@@ -491,6 +493,10 @@ export const POST = comErro(async (req: NextRequest) => {
       calcularTotalCentavos(subtotalCentavos, descontoCentavos, freteCentavos)
     );
 
+    // Identidade GA4 opcional, dependente de aceite assinado e persistido.
+    // A ausência de consentimento NÃO bloqueia o pagamento.
+    const browserConsent = parsed.data.analytics ? await readBrowserConsent(req) : null;
+
     // Criação atômica: endereço + pedido + itens nascem juntos ou nada nasce.
     let eventoCriadoId: string | null = null;
     let order;
@@ -514,6 +520,23 @@ export const POST = comErro(async (req: NextRequest) => {
         if (!reservado) throw new CupomEsgotadoError();
       }
 
+      const consentRecord = browserConsent
+        ? await tx.analyticsBrowserConsent.findFirst({
+            where: { id: browserConsent.tokenId, state: "GRANTED",
+              expiresAt: { gt: new Date() }, revokedAt: null },
+          })
+        : null;
+      const analyticsIdentity = consentRecord && parsed.data.analytics
+        ? {
+            create: {
+              clientId: parsed.data.analytics.clientId,
+              consentState: "GRANTED" as const,
+              consentTokenId: consentRecord.id,
+              consentProofAt: consentRecord.grantedAt,
+            },
+          }
+        : undefined;
+
       const order = await tx.order.create({
         data: {
           number: orderNumber(),
@@ -529,6 +552,7 @@ export const POST = comErro(async (req: NextRequest) => {
         // cobrança. null = requisições sem o recurso de idempotência.
         ...(idempotencyKey ? { idempotencyKey } : {}),
         paymentRequestHash,
+        ...(analyticsIdentity ? { analyticsIdentity } : {}),
         couponCode: appliedCouponCode,
         couponReserved: Boolean(appliedCouponCode),
         subtotal: centavosParaReais(subtotalCentavos),
