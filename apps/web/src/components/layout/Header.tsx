@@ -88,14 +88,14 @@ export function Header() {
     <header
       className="sticky top-0 z-40 border-b border-ink/10 bg-primary-50/90 backdrop-blur"
     >
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2.5">
+      <div className="mx-auto flex max-w-7xl flex-col items-center gap-2 px-3 py-2 sm:flex-row sm:justify-between sm:gap-4 sm:px-6 sm:py-4">
+        <Link href="/" className="flex min-w-0 items-center justify-center gap-2 sm:justify-start sm:gap-2.5">
           <img
             src="/logo.png"
             alt="Divine Closet"
-            className="h-10 w-10 rounded-full object-cover ring-2 ring-primary-200"
+            className="h-9 w-9 shrink-0 rounded-full object-cover ring-2 ring-primary-200 sm:h-10 sm:w-10"
           />
-          <span className="font-display text-xl font-bold tracking-tight text-ink">
+          <span className="whitespace-nowrap font-display text-lg font-bold tracking-tight text-ink sm:text-xl">
             Divine<span className="text-primary-700">Closet</span>
           </span>
         </Link>
@@ -121,7 +121,7 @@ export function Header() {
         </nav>
 
         {/* --- Grupo superior direito: mobile + desktop --- */}
-        <div className="flex items-center gap-2 sm:gap-3 relative">
+        <div className="relative flex w-full items-center justify-between gap-2 border-t border-ink/10 pt-1 sm:w-auto sm:justify-end sm:gap-3 sm:border-t-0 sm:pt-0">
           {/* Botão de busca - visível apenas em mobile */}
           <button
             aria-label="Buscar"
