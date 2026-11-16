@@ -48,7 +48,7 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
     <div className="relative aspect-[5/4] w-full overflow-hidden bg-primary-100 sm:aspect-[16/6]">
       <img src={b.imageUrl} alt={b.title} className="h-full w-full object-cover" />
       <div className="pointer-events-none absolute inset-x-4 bottom-4 sm:inset-x-10 sm:bottom-10">
-        <div className="flex max-w-[calc(100%-1rem)] flex-col gap-1.5 sm:max-w-lg">
+        <div className="flex max-w-full flex-col gap-1.5 sm:max-w-lg">
           <h2 className="font-display text-xl font-bold leading-snug text-white sm:text-3xl" style={{ textShadow: bannerTextShadow }}>
             {b.title}
           </h2>
