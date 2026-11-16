@@ -101,10 +101,11 @@ export default async function Home() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-      {/* Hero / banners */}
+    <>
+      {/* Banners ocupam toda a largura da viewport, fora do container limitado da loja. */}
       {banners.length > 0 && <BannerCarousel banners={banners} />}
 
+      <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
       {/* Compre por categoria - carrossel horizontal */}
       {catsWithProducts.length > 0 && (
         <section
@@ -258,6 +259,7 @@ export default async function Home() {
           )}
         </div>
       </section>
-    </div>
+      </div>
+    </>
   );
 }
