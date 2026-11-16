@@ -10,6 +10,8 @@ type Banner = {
   linkUrl?: string | null;
 };
 
+const bannerTextShadow = "0 2px 8px rgba(0, 0, 0, 0.95), 1px 1px 2px rgba(0, 0, 0, 0.95), -1px -1px 2px rgba(0, 0, 0, 0.95)";
+
 export function BannerCarousel({ banners }: { banners: Banner[] }) {
   const [index, setIndex] = useState(0);
   const touchStartX = useRef<number | null>(null);
@@ -43,14 +45,14 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
   }
 
   const content = (
-    <div className="relative aspect-[5/4] w-full overflow-hidden rounded-2xl bg-primary-100 sm:aspect-[16/6]">
+    <div className="relative aspect-[5/4] w-full overflow-hidden bg-primary-100 sm:aspect-[16/6]">
       <img src={b.imageUrl} alt={b.title} className="h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-x-3 bottom-3 sm:inset-x-8 sm:bottom-8">
-        <div className="inline-flex max-w-full flex-col gap-1.5 rounded-xl border border-white/60 bg-white/90 px-3 py-2.5 text-ink shadow-lg backdrop-blur-sm sm:max-w-lg sm:px-5 sm:py-4">
-          <h2 className="font-display text-lg font-bold leading-snug text-ink sm:text-3xl">
+      <div className="pointer-events-none absolute inset-x-4 bottom-4 sm:inset-x-10 sm:bottom-10">
+        <div className="flex max-w-full flex-col gap-1.5 sm:max-w-lg">
+          <h2 className="font-display text-xl font-bold leading-snug text-white sm:text-3xl" style={{ textShadow: bannerTextShadow }}>
             {b.title}
           </h2>
-          {b.subtitle && <p className="text-xs font-medium leading-relaxed text-ink-soft sm:text-sm">{b.subtitle}</p>}
+          {b.subtitle && <p className="text-sm font-medium leading-relaxed text-white" style={{ textShadow: bannerTextShadow }}>{b.subtitle}</p>}
         </div>
       </div>
     </div>
@@ -60,7 +62,7 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
     "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink/10 bg-white text-ink shadow-sm transition-colors hover:bg-primary-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-700";
 
   return (
-    <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 sm:pt-14" aria-label="Banners promocionais">
+    <section className="w-full pt-4 sm:pt-8" aria-label="Banners promocionais">
       <div
         className="relative touch-pan-y"
         onTouchStart={onTouchStart}
