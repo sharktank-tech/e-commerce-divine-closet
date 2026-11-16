@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Banner = {
   id: string;
@@ -10,11 +10,10 @@ type Banner = {
   linkUrl?: string | null;
 };
 
-const bannerTextShadow =
-  "0 2px 8px rgba(0, 0, 0, 0.9), 1px 1px 1px rgba(0, 0, 0, 0.95), -1px -1px 1px rgba(0, 0, 0, 0.95)";
-
 export function BannerCarousel({ banners }: { banners: Banner[] }) {
   const [index, setIndex] = useState(0);
+  const touchStartX = useRef<number | null>(null);
+  const swiped = useRef(false);
 
   useEffect(() => {
     if (banners.length <= 1) return;
@@ -23,39 +22,66 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
   }, [banners.length]);
 
   if (banners.length === 0) return null;
-  const b = banners[index % banners.length];
+  const current = index % banners.length;
+  const b = banners[current];
+  const multiple = banners.length > 1;
+  const previous = () => setIndex((i) => (i - 1 + banners.length) % banners.length);
+  const next = () => setIndex((i) => (i + 1) % banners.length);
+
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0]?.clientX ?? null;
+    swiped.current = false;
+  }
+
+  function onTouchEnd(e: React.TouchEvent) {
+    if (!multiple || touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (Math.abs(dx) < 45) return;
+    swiped.current = true;
+    setIndex((i) => (i + (dx < 0 ? 1 : banners.length - 1)) % banners.length);
+  }
 
   const content = (
-    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-primary-100 sm:aspect-[16/6]">
+    <div className="relative aspect-[5/4] w-full overflow-hidden rounded-2xl bg-primary-100 sm:aspect-[16/6]">
       <img src={b.imageUrl} alt={b.title} className="h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex max-w-lg flex-col gap-2 p-5 sm:p-8">
-        <h2
-          className="font-display text-xl font-bold leading-tight text-white sm:text-3xl"
-          style={{ textShadow: bannerTextShadow }}
-        >
-          {b.title}
-        </h2>
-        {b.subtitle && (
-          <p className="text-sm font-medium text-white" style={{ textShadow: bannerTextShadow }}>
-            {b.subtitle}
-          </p>
-        )}
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 sm:inset-x-8 sm:bottom-8">
+        <div className="inline-flex max-w-full flex-col gap-1.5 rounded-xl border border-white/60 bg-white/90 px-3 py-2.5 text-ink shadow-lg backdrop-blur-sm sm:max-w-lg sm:px-5 sm:py-4">
+          <h2 className="font-display text-lg font-bold leading-snug text-ink sm:text-3xl">
+            {b.title}
+          </h2>
+          {b.subtitle && <p className="text-xs font-medium leading-relaxed text-ink-soft sm:text-sm">{b.subtitle}</p>}
+        </div>
       </div>
     </div>
   );
 
+  const arrowBase =
+    "flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink/10 bg-white text-ink shadow-sm transition-colors hover:bg-primary-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-700";
+
   return (
-    <section className="mx-auto max-w-7xl px-4 pt-14 sm:px-6" aria-label="Banners promocionais">
-      <div className="relative">
+    <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 sm:pt-14" aria-label="Banners promocionais">
+      <div
+        className="relative touch-pan-y"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onClickCapture={(e) => {
+          if (swiped.current) {
+            e.preventDefault();
+            e.stopPropagation();
+            swiped.current = false;
+          }
+        }}
+      >
         {b.linkUrl ? <a href={b.linkUrl} className="block">{content}</a> : content}
 
-        {banners.length > 1 && (
+        {multiple && (
           <>
             <button
               type="button"
-              onClick={() => setIndex((i) => (i - 1 + banners.length) % banners.length)}
+              onClick={previous}
               aria-label="Banner anterior"
-              className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-ink shadow-md transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink sm:left-4"
+              className={`absolute left-4 top-1/2 hidden -translate-y-1/2 sm:flex ${arrowBase}`}
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                 <path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -63,9 +89,9 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
             </button>
             <button
               type="button"
-              onClick={() => setIndex((i) => (i + 1) % banners.length)}
+              onClick={next}
               aria-label="Próximo banner"
-              className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-ink shadow-md transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink sm:right-4"
+              className={`absolute right-4 top-1/2 hidden -translate-y-1/2 sm:flex ${arrowBase}`}
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                 <path d="m9 18 6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -75,20 +101,32 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
         )}
       </div>
 
-      {banners.length > 1 && (
-        <div className="mt-3 flex justify-center gap-2">
-          {banners.map((x, i) => (
-            <button
-              key={x.id}
-              type="button"
-              onClick={() => setIndex(i)}
-              aria-label={`Ir para o banner ${i + 1}`}
-              aria-current={i === index % banners.length ? "true" : undefined}
-              className={`h-2 rounded-full transition-all ${
-                i === index % banners.length ? "w-6 bg-ink" : "w-2 bg-ink/25"
-              }`}
-            />
-          ))}
+      {multiple && (
+        <div className="mt-3 flex items-center justify-between gap-2 sm:justify-center">
+          <button type="button" onClick={previous} aria-label="Banner anterior" className={`sm:hidden ${arrowBase}`}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+              <path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className="flex min-w-0 items-center justify-center gap-1" aria-label="Selecionar banner">
+            {banners.map((x, i) => (
+              <button
+                key={x.id}
+                type="button"
+                onClick={() => setIndex(i)}
+                aria-label={`Ir para o banner ${i + 1}`}
+                aria-current={i === current ? "true" : undefined}
+                className="flex h-11 min-w-6 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-700"
+              >
+                <span className={`block h-2 rounded-full transition-all ${i === current ? "w-5 bg-ink" : "w-2 bg-ink/30"}`} />
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={next} aria-label="Próximo banner" className={`sm:hidden ${arrowBase}`}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+              <path d="m9 18 6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
       )}
     </section>
