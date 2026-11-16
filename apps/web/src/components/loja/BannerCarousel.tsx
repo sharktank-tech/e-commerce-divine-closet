@@ -25,7 +25,6 @@ export function BannerCarousel({ banners }: { banners: Banner[] }) {
   const content = (
     <div className="relative aspect-[16/6] w-full overflow-hidden rounded-2xl bg-primary-100">
       <img src={b.imageUrl} alt={b.title} className="h-full w-full object-cover" />
-      <div className="absolute inset-0 bg-gradient-to-r from-ink/60 via-ink/20 to-transparent" />
       <div className="absolute inset-y-0 left-0 flex max-w-md flex-col justify-center gap-2 p-8">
         <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">{b.title}</h2>
         {b.subtitle && <p className="text-sm text-white/90">{b.subtitle}</p>}
