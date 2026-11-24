@@ -158,10 +158,10 @@ model Product {
   custo_peca_centavos Int       @default(0)
   custo_embalagem_centavos Int      @default(0)
   custos_extras_centavos Int       @default(0)
-  custos_extras_descricao    String?
+  custos_extras_descricao    String?   @default("")
   markup_percentual        Int?
   preco_sugerido_centavos  Int?
-  precificacao_calculada_em DateTime?
+  precificacao_calculada_em DateTime? @db.Timestamptz(6)
 
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
