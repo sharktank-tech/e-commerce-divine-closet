@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import { Prisma } from "@prisma/client";
 import {
   GA4_CONSENT_COOKIE,
   newConsentToken,
@@ -92,6 +93,15 @@ export async function POST(req: NextRequest) {
         });
       }
       if (orderIds.length) {
+        // Bloqueia as linhas da outbox até finalizar a revogação, evitando
+        // interleaving entre PENDING/PROCESSING e finalização do worker.
+        // Não impede egress que já tenha começado: transporte continua hard-off.
+        await tx.$queryRaw`
+          SELECT "id" FROM "AnalyticsEvent"
+          WHERE "orderId" IN (${Prisma.join(orderIds.map((id) => Prisma.sql`${id}::uuid`))})
+            AND "status" IN ('PENDING', 'FAILED', 'PROCESSING')
+          ORDER BY "id" FOR UPDATE
+        `;
         await tx.analyticsOrderIdentity.updateMany({
           where: { orderId: { in: orderIds } },
           data: { consentState: "REVOKED", clientId: null, revokedAt },
@@ -99,7 +109,13 @@ export async function POST(req: NextRequest) {
         // PROCESSING não é presumido não entregue; transporte continua hard-off.
         await tx.analyticsEvent.updateMany({
           where: { orderId: { in: orderIds }, status: { in: ["PENDING", "FAILED"] } },
-          data: { status: "SKIPPED", lastError: "consent_revoked" },
+          data: { status: "SKIPPED", leaseUntil: null, lastError: "consent_revoked" },
+        });
+        // PROCESSING pode já ter sido enviado: quarentena FAILED, sem retry.
+        // Não declarar SKIPPED para um resultado externo incerto.
+        await tx.analyticsEvent.updateMany({
+          where: { orderId: { in: orderIds }, status: "PROCESSING" },
+          data: { status: "FAILED", leaseUntil: null, lastError: "consent_revoked_inflight_uncertain" },
         });
       }
       await tx.auditLog.create({
