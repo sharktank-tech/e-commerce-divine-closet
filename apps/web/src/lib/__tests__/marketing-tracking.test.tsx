@@ -98,3 +98,21 @@ it("aba em foco revalida consentimento sem reenviar PageView", async () => {
   const pageViewsAfter = vi.mocked(window.gtag!).mock.calls.filter(c => c[0] === "event" && c[1] === "page_view").length;
   expect(pageViewsAfter).toBe(pageViewsBefore);
 });
+
+
+it("resposta GRANTED antiga não reativa SDKs depois da recusa de outra aba", async () => {
+  let resolve!: (value: unknown) => void;
+  const pending = new Promise((r) => { resolve = r; });
+  vi.stubGlobal("fetch", vi.fn().mockReturnValue(pending));
+  render(<TrackingScripts meta="" gtag={["G-TEST"]} />);
+  expect(window.dcTracking).toBeUndefined();
+  localStorage.setItem("dc-consent", "0");
+  act(() => window.dispatchEvent(new StorageEvent("storage", { key: "dc-consent", newValue: "0" })));
+  await act(async () => {
+    resolve({ ok: true, json: async () => ({ granted: true }) });
+    await pending;
+  });
+  expect(window.dcTracking).toBeUndefined();
+  expect(localStorage.getItem("dc-consent")).toBe("0");
+  expect(vi.mocked(window.gtag!).mock.calls.filter((c) => c[0] === "event" && c[1] === "page_view")).toHaveLength(0);
+});
