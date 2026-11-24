@@ -25,7 +25,9 @@ export async function enqueueGa4RefundIfAuthorized(orderId: string): Promise<
         order.refund?.status !== "APPROVED") return "SKIPPED";
 
     const initial = order.analyticsIdentity;
-    if (!initial?.consentTokenId) return "SKIPPED";
+    if (!initial?.consentTokenId || initial.consentState !== "GRANTED" ||
+        !initial.consentProofAt || initial.revokedAt || !initial.clientId ||
+        !/^\d+\.\d+$/.test(initial.clientId)) return "SKIPPED";
 
     // Mesma ordem de locks da revogação do endpoint: token, identidade.
     // Se revogação vencer primeiro, a verificação posterior nega o enqueue.
