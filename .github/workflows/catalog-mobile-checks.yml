@@ -1,0 +1,60 @@
+name: Catalog mobile UI checks
+on:
+  push:
+    branches:
+      - fix/catalog-mobile-filter-state-a11y
+  pull_request:
+    paths:
+      - "apps/web/src/components/loja/CatalogoFiltros.tsx"
+      - "apps/web/src/lib/__tests__/catalogo-filtros-ui.test.tsx"
+      - ".github/workflows/catalog-mobile-checks.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/divine_catalog_test
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      JWT_SECRET: catalog-ui-ci-only-secret-never-use-in-prod-123
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: divine_catalog_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema packages/database/prisma/schema.prisma
+      - name: Migrate disposable PostgreSQL
+        run: npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+      - name: Full test suite
+        run: npm test
+      - name: Typecheck
+        if: always()
+        run: npm run typecheck
+      - name: Lint
+        if: always()
+        run: npm run lint
+      - name: Next build
+        if: always()
+        run: npm run build
