@@ -2,36 +2,59 @@ import { prisma } from "@/lib/prisma";
 import { enqueueGa4RefundIfAuthorized } from "@/lib/ga4-refund-outbox";
 
 /**
- * Reconciliação independente de intenções analíticas ausentes.
+ * Reconcilia intenções analíticas de pedidos com refund confirmado.
  *
- * Busca pedidos REFUNDED com estorno APPROVED que não possuem
- * AnalyticsEvent correspondente, e enfileira a intenção.
+ * Não envia eventos ao GA4 e não altera estado financeiro.
+ * O chamador controla a paginação por ID e deve continuar com nextCursor
+ * até receber null. Sem isso, um lote fixo pode deixar pedidos posteriores
+ * sem análise. Recomeçar sem cursor permite nova rodada periódica completa.
  *
- * NÃO depende de uma nova transição PAID→REFUNDED.
- * Idempotente: usa dedupeKey UNIQUE para evitar duplicação.
- * Não altera estado financeiro.
- * Não reenvia eventos já aceitos ou de entrega incerta.
+ * Mesmo pedidos sem consentimento são contabilizados como SKIPPED; isso
+ * evita ocultar lacunas ao varrer a população de pedidos.
+ * A unicidade dedupeKey garante idempotência do enqueue.
  */
-export async function reconcileGa4RefundIntents(limit: number = 10): Promise<{
+export async function reconcileGa4RefundIntents(
+  limit: number = 10,
+  afterOrderId?: string,
+): Promise<{
   checked: number;
   created: number;
   alreadyExists: number;
   skipped: number;
   errors: number;
+  nextCursor: string | null;
 }> {
-  const result = { checked: 0, created: 0, alreadyExists: 0, skipped: 0, errors: 0 };
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+    throw new Error("invalid_reconciliation_limit");
+  if (afterOrderId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(afterOrderId))
+    throw new Error("invalid_reconciliation_cursor");
 
-  // Find refunded orders with approved refunds that don't have an analytics event
+  const result = {
+    checked: 0,
+    created: 0,
+    alreadyExists: 0,
+    skipped: 0,
+    errors: 0,
+    nextCursor: null as string | null,
+  };
+
+  // Keyset pagination: id > cursor não depende da existência posterior
+  // da linha do cursor. limit + 1 sinaliza se há outra página.
   const refundedOrders = await prisma.order.findMany({
     where: {
       paymentStatus: "REFUNDED",
       refund: { status: "APPROVED" },
+      ...(afterOrderId ? { id: { gt: afterOrderId } } : {}),
     },
+    orderBy: { id: "asc" },
     select: { id: true },
-    take: limit,
+    take: limit + 1,
   });
+  const page = refundedOrders.slice(0, limit);
+  if (refundedOrders.length > limit)
+    result.nextCursor = page[page.length - 1].id;
 
-  for (const order of refundedOrders) {
+  for (const order of page) {
     result.checked++;
     try {
       const enqueueResult = await enqueueGa4RefundIfAuthorized(order.id);
