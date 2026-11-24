@@ -1,8 +1,8 @@
 {
-  "explanation": "Remaining drift after schema-only alignment of AuditLog.id and the TIMESTAMPTZ(6)/updated_at defaults in config_precificacao and materiais_embalagem. Four legacy tables and 22 change entries on disposable PostgreSQL only. Not a production schema inspection. No SQL migration was applied.",
+  "explanation": "Remaining drift after schema-only alignment of AuditLog.id and TIMESTAMPTZ(6)/updated_at defaults in config_precificacao and materiais_embalagem. Five legacy tables / 23 change entries on disposable PostgreSQL. The materiais_embalagem UNIQUE(nome) discrepancy remains; no production database was inspected, no DDL applied.",
   "originalCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704",
   "workflowHead": "8244a178e49c4a9ee8a0ece0dde489ee6a8771e0",
-  "tables": 4,
+  "tables": 5,
   "entries": [
     "[*] Changed the `MarketingMessage` table",
     "[-] Removed foreign key on columns (campaignId)",
@@ -25,6 +25,7 @@
     "[*] Altered column `created_at` (type changed)",
     "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)",
     "[+] Added unique index on columns (nome)",
+    "[*] Changed the `materiais_embalagem` table",
     "[+] Added unique index on columns (nome)"
   ],
   "resolvedBySchemaOnly": {
@@ -51,6 +52,7 @@
       "[*] Changed the `materiais_embalagem` table",
       "[*] Altered column `created_at` (type changed)",
       "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)"
-    ]
+    ],
+    "observation": "CI proved that materiais_embalagem still differs by UNIQUE(nome); its table header is retained with that index in the baseline. This PR does not create the UNIQUE index."
   }
 }
