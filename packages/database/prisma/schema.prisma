@@ -483,8 +483,10 @@ model Banner {
   deletedAt DateTime?
 }
 
+// Migrações legadas preservam AuditLog.id como TEXT com gen_random_uuid()::text.
+// Alinhamento apenas do modelo Prisma: não faz ALTER TYPE, backfill ou DDL.
 model AuditLog {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
   userId    String?
   action    String
   entity    String

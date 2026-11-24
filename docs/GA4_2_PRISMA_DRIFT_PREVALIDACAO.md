@@ -1,6 +1,6 @@
 # GA4.2 — Diagnóstico do drift legado Prisma e gate de regressão
 
-**Base do trabalho:** PR #34 (concorrência GA4). **Sem alteração no schema, sem novas migrations, sem acesso ao banco de produção.**
+**Histórico:** este documento foi criado no PR #35. O PR dependente #36 alinhou **somente o modelo Prisma de `AuditLog.id` como TEXT**, sem DDL/migrations nem acesso ao banco de produção. Todos os itens restantes exigem pré-validação antes de migração.
 
 ## 1. Evidência observada
 
@@ -19,11 +19,11 @@ Evidência: [run 45437598704](https://github.com/sharktank-tech/e-commerce-divin
 
 ### Assinatura do drift
 
-O arquivo `scripts/ga4-prisma-legacy-drift.baseline.json` fixa exatamente **32 entradas** distribuídas por **7 tabelas**. A assinatura foi extraída do output daquela execução, preservando ordem e conteúdo do Prisma.
+O diagnóstico original do PR #35 apresentou **32 entradas em 7 tabelas**. Com o alinhamento sem DDL de `AuditLog.id` no PR #36, o baseline do arquivo `scripts/ga4-prisma-legacy-drift.baseline.json` passou a registrar **28 entradas em 6 tabelas**. A execução original permanece como evidência histórica. A nova assinatura precisa ser confirmada pelo CI da HEAD do #36.
 
 | Tabela | Diferença | Risco de aplicar DDL automaticamente |
 | --- | --- | --- |
-| `AuditLog` | PK `id` TEXT no histórico; `@db.Uuid` no schema. | **Alto:** cast ou recriação da PK pode perder dados, quebrar FKs, falhar para IDs legados não UUID. A migration `20260928181000_rebuild_legacy_uuid` excluiu `AuditLog` deliberadamente. |
+| `AuditLog` | **Alinhamento somente no modelo** no PR #36: `id` agora é `String` sem `@db.Uuid`, preservando TEXT no histórico. | Nenhuma conversão de dados/PK foi feita. Confirmar o tipo no clone autorizado antes de integrar a mudança; se o ambiente real diferir, bloquear merge. |
 | `MarketingMessage` | Ações das FKs `campaignId` e `subscriberId` divergem. | **Médio:** troca de `ON DELETE` altera invariantes e comportamento do marketing. |
 | `Product` | `lote_id` FK; dois custos declarados `NOT NULL` no Prisma mas criados nullable no SQL; default de texto; tipo de timestamp de precificação. | **Alto:** NULLs históricos e timezone precisam de auditoria; possível impacto no cadastro e precificação. |
 | `Review` | O banco contém índice único legado `userId, productId` ausente no modelo atual. | **Médio:** removê-lo amplia a possibilidade de avaliações e pode mudar a regra antifraude. |
@@ -41,11 +41,11 @@ Agora o workflow:
 1. Aplica migrations **somente** ao PostgreSQL descartável designado `divine_ga4_test`.
 2. Executa testes Node do guard (`node --test scripts/ga4-prisma-drift-guard.test.mjs`).
 3. Captura saída e **exit code real** de `prisma migrate diff` após o migrate.
-4. Exige assinatura **exatamente igual** às 32 diferenças documentadas (7 tabelas), incluindo a mesma ordem.
+4. Exige assinatura **exatamente igual** ao baseline vigente (28 diferenças em 6 tabelas após PR #36), incluindo a mesma ordem.
 5. Bloqueia quando houver nova diferença, alteração/redução não revisada, stdout incompreensível ou erro do Prisma (exit diferente de 0 ou 2).
 6. Em caso conhecido, passa o gate com aviso explícito: **drift legado continua pendente**, não está resolvido.
 
-O gate é uma **proteção contra regressão**. Não altera o banco, não transforma drift conhecido em aprovado e **não verifica schema real de produção**. Qualquer atualização futura do baseline exige comparar output, justificar cada alteração e revisar explicitamente o PR.
+O baseline original era 7/32 antes da alteração de modelo do #36. O gate é uma **proteção contra regressão**. Não altera o banco, não transforma drift conhecido em aprovado e **não verifica schema real de produção**. Qualquer atualização futura do baseline exige comparar output, justificar cada alteração e revisar explicitamente o PR.
 
 ## 3. Pré-validação segura de dados
 
@@ -83,3 +83,14 @@ A divergência de schema **precede a fundação GA4.2**; não atribuir automatic
 Permanecem bloqueados: ativação do transporte externo de refund (hard-off), consentimento guest sem cookie, revogação e entrega em dispositivos/instâncias distintas, política de retenção LGPD e reconciliação histórica de `purchase.value` e `refund.value`.
 
 **Nenhuma alteração destrutiva, DDL em produção, backfill, merge, envio GA4 ou estorno financeiro é autorizada por este documento.**
+
+
+## 6. Registro da correção não destrutiva do AuditLog (PR #36)
+
+A migração `20260928181000_rebuild_legacy_uuid` preserva `AuditLog.id` em TEXT intencionalmente. O schema Prisma anterior declarava `@db.Uuid`, e o diff sugeria derrubar/recriar a PK, operação inadequada sem verificar os IDs legados. A proposta do #36 **remove apenas `@db.Uuid` do modelo Prisma**, mantendo `@default(dbgenerated("gen_random_uuid()"))`. Não altera migrations nem registros. O CI checa:
+
+- Tipo físico de `AuditLog.id` = TEXT e default `gen_random_uuid()` após replay vazio das migrations.
+- Inserção, consulta e remoção de um registro fictício em banco descartável via Prisma Client.
+- Remoção das quatro linhas associadas a `AuditLog` no diff, diminuindo o baseline de 7/32 para 6/28.
+
+**Importante:** não havia branch/clone Supabase de desenvolvimento disponível quando este incremento começou. Portanto, não foi verificado se o banco de produção tem o mesmo tipo físico. **Não integrar na main nem aplicar em produção sem pré-validação em clone autorizado**, especialmente porque diferenças reais podem existir fora das migrations versionadas. O transporte externo GA4 permanece hard-off.
