@@ -1,8 +1,8 @@
 {
-  "explanation": "Remaining drift after schema-only alignment of AuditLog.id TEXT in dependent PR: six legacy tables with 28 change entries. This baseline only describes PostgreSQL disposable reconstructed from migrations, not production. Never auto-apply Prisma diff as SQL.",
+  "explanation": "Remaining drift after schema-only alignment of AuditLog.id and TIMESTAMPTZ(6)/updated_at defaults in config_precificacao and materiais_embalagem. Five legacy tables / 23 change entries on disposable PostgreSQL. The materiais_embalagem UNIQUE(nome) discrepancy remains; no production database was inspected, no DDL applied.",
   "originalCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704",
   "workflowHead": "8244a178e49c4a9ee8a0ece0dde489ee6a8771e0",
-  "tables": 6,
+  "tables": 5,
   "entries": [
     "[*] Changed the `MarketingMessage` table",
     "[-] Removed foreign key on columns (campaignId)",
@@ -17,9 +17,6 @@
     "[*] Altered column `precificacao_calculada_em` (type changed)",
     "[*] Changed the `Review` table",
     "[-] Removed unique index on columns (userId, productId)",
-    "[*] Changed the `config_precificacao` table",
-    "[*] Altered column `created_at` (type changed)",
-    "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)",
     "[*] Changed the `lotes_compra` table",
     "[-] Removed foreign key on columns (categoria_id)",
     "[-] Removed index on columns (categoria_id)",
@@ -29,8 +26,6 @@
     "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)",
     "[+] Added unique index on columns (nome)",
     "[*] Changed the `materiais_embalagem` table",
-    "[*] Altered column `created_at` (type changed)",
-    "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)",
     "[+] Added unique index on columns (nome)"
   ],
   "resolvedBySchemaOnly": {
@@ -43,5 +38,21 @@
       "[+] Added primary key on columns (id)"
     ],
     "previousCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704"
+  },
+  "resolvedPricingTimestamps": {
+    "models": [
+      "ConfigPrecificacao",
+      "MateriaisEmbalagem"
+    ],
+    "change": "Declare created_at/updated_at as @db.Timestamptz(6), preserve @updatedAt while adding @default(now()) to updated_at to reflect SQL history; no DDL",
+    "previousBaselineEntries": [
+      "[*] Changed the `config_precificacao` table",
+      "[*] Altered column `created_at` (type changed)",
+      "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)",
+      "[*] Changed the `materiais_embalagem` table",
+      "[*] Altered column `created_at` (type changed)",
+      "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)"
+    ],
+    "observation": "CI proved that materiais_embalagem still differs by UNIQUE(nome); its table header is retained with that index in the baseline. This PR does not create the UNIQUE index."
   }
 }

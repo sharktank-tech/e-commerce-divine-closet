@@ -541,8 +541,8 @@ model ConfigPrecificacao {
   embalagem_entra_no_markup   Boolean   @default(true)
   margem_minima_percentual    Int?
   taxa_pagamento_percentual   Int?
-  created_at                 DateTime  @default(now())
-  updated_at                 DateTime  @updatedAt
+  created_at                 DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
   @@map("config_precificacao")
 }
@@ -553,8 +553,8 @@ model MateriaisEmbalagem {
   custo_unitario_centavos Int       @default(0)
   ativo       Boolean    @default(true)
   ordem       Int        @default(0)
-  created_at  DateTime   @default(now())
-  updated_at  DateTime   @updatedAt
+  created_at  DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime   @default(now()) @updatedAt @db.Timestamptz(6)
 
   @@map("materiais_embalagem")
 }
