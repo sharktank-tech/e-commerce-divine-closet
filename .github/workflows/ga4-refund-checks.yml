@@ -11,6 +11,8 @@ on:
       - "apps/web/src/app/api/analytics/**"
       - "packages/database/prisma/**"
       - ".github/workflows/ga4-refund-checks.yml"
+      - "scripts/ga4-prisma-drift-guard*"
+      - "scripts/ga4-prisma-legacy-drift.baseline.json"
 permissions:
   contents: read
 jobs:
@@ -52,10 +54,21 @@ jobs:
         run: npx prisma validate --schema packages/database/prisma/schema.prisma
       - name: Migrate disposable PostgreSQL
         run: npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
-      - name: Prisma drift diagnostic (legacy baseline, nonblocking)
-        continue-on-error: true
+      - name: Test legacy drift guard logic
+        run: node --test scripts/ga4-prisma-drift-guard.test.mjs
+      - name: Guard legacy Prisma drift (block new differences)
         run: |
-          npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel packages/database/prisma/schema.prisma --exit-code
+          # Permite execução APENAS no PostgreSQL descartável deste workflow.
+          if [ "$DATABASE_URL" != "postgresql://postgres:postgres@localhost:5432/divine_ga4_test" ]; then
+            echo "::error::Refusing drift check outside dedicated disposable database"
+            exit 1
+          fi
+          set +e
+          npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel packages/database/prisma/schema.prisma --exit-code > "$RUNNER_TEMP/ga4-prisma-drift.txt" 2>&1
+          drift_exit=$?
+          set -e
+          cat "$RUNNER_TEMP/ga4-prisma-drift.txt"
+          node scripts/ga4-prisma-drift-guard.mjs "$RUNNER_TEMP/ga4-prisma-drift.txt" "$drift_exit"
       - name: Tests
         run: npm test -- --reporter=default
       - name: Typecheck
