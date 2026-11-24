@@ -63,4 +63,59 @@ describe("GA4 reconciliação de intenções ausentes", () => {
     expect(result.checked).toBe(0);
     expect(result.created).toBe(0);
   });
+  it("limita a rodada e retorna cursor quando há mais pedidos", async () => {
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    orderFindMany.mockResolvedValue(ids.map((id) => ({ id })));
+    enqueueMock.mockResolvedValue("SKIPPED");
+    const result = await reconcileGa4RefundIntents(2);
+    expect(result.checked).toBe(2);
+    expect(result.skipped).toBe(2);
+    expect(result.nextCursor).toBe(ids[1]);
+    expect(enqueueMock).toHaveBeenCalledTimes(2);
+    expect(enqueueMock).not.toHaveBeenCalledWith(ids[2]);
+    expect(orderFindMany).toHaveBeenCalledWith({
+      where: { paymentStatus: "REFUNDED", refund: { status: "APPROVED" } },
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: 3,
+    });
+  });
+
+  it("busca lote seguinte com id maior que cursor, sem pular pedidos", async () => {
+    const cursor = "22222222-2222-4222-8222-222222222222";
+    const id = "33333333-3333-4333-8333-333333333333";
+    orderFindMany.mockResolvedValue([{ id }]);
+    enqueueMock.mockResolvedValue("CREATED");
+    const result = await reconcileGa4RefundIntents(2, cursor);
+    expect(result.created).toBe(1);
+    expect(result.checked).toBe(1);
+    expect(result.nextCursor).toBeNull();
+    expect(orderFindMany).toHaveBeenCalledWith({
+      where: {
+        paymentStatus: "REFUNDED",
+        refund: { status: "APPROVED" },
+        id: { gt: cursor },
+      },
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: 3,
+    });
+  });
+
+  it("rejeita limites inválidos antes de consultar o banco", async () => {
+    for (const limit of [0, -1, 1.2, 101, NaN, Infinity]) {
+      await expect(reconcileGa4RefundIntents(limit)).rejects.toThrow("invalid_reconciliation_limit");
+    }
+    expect(orderFindMany).not.toHaveBeenCalled();
+  });
+
+  it("rejeita cursor inválido, sem fazer consultas", async () => {
+    await expect(reconcileGa4RefundIntents(10, "not-a-uuid")).rejects.toThrow("invalid_reconciliation_cursor");
+    expect(orderFindMany).not.toHaveBeenCalled();
+  });
+
 });
