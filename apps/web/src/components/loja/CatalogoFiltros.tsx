@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useId } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 
 type Props = {
   basePath: string;
@@ -33,58 +32,65 @@ export function CatalogoFiltros({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Fechar com Escape + focus trap
+  const priceMinId = useId();
+  const priceMaxId = useId();
+
+  // O foco só é movido quando o drawer abre: nunca roubar foco no mount.
+  // Restaurar o overflow anterior preserva overlays que controlam o scroll.
   useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
+    if (!open || !drawerRef.current) return;
+    const panel = drawerRef.current;
+    const opener = triggerRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusables = () =>
+      Array.from(panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter((node) => {
+        const style = window.getComputedStyle(node);
+        return !node.hidden && !node.closest("[inert]") &&
+          style.display !== "none" && style.visibility !== "hidden";
+      });
+
+    focusables()[0]?.focus();
+
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
         setOpen(false);
         return;
       }
-      if (e.key === "Tab" && drawerRef.current) {
-        const focusable = drawerRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length === 0) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
+      if (event.key !== "Tab") return;
+      const elements = focusables();
+      if (elements.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
       }
     }
+
+    function onFocusIn(event: FocusEvent) {
+      if (!panel.contains(event.target as Node)) focusables()[0]?.focus();
+    }
+
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  // Bloquear scroll do body quando aberto
-  useEffect(() => {
-    if (open) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
+    document.addEventListener("focusin", onFocusIn);
     return () => {
-      document.body.style.overflow = "";
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
+      document.body.style.overflow = previousOverflow;
+      if (opener?.isConnected) opener.focus();
     };
-  }, [open]);
-
-  // Gerenciar foco ao abrir
-  useEffect(() => {
-    if (open && drawerRef.current) {
-      const first = drawerRef.current.querySelector<HTMLElement>("input, select, button, [tabindex]");
-      first?.focus();
-    } else if (!open && triggerRef.current) {
-      triggerRef.current.focus();
-    }
   }, [open]);
 
   const buildUrl = useCallback(
@@ -101,6 +107,24 @@ export function CatalogoFiltros({
     },
     [basePath, searchParams]
   );
+
+  const handleApply = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const minimum = String(values.get("preco_min") ?? "").trim();
+    const maximum = String(values.get("preco_max") ?? "").trim();
+    // Navegação client-side explícita: mantemos filtros e parâmetros da rota
+    // (inclusive oferta=1) e geramos URL reproduzível antes de atualizar chips.
+    router.push(buildUrl({
+      q: q || null,
+      ...(lockedCategoria ? {} : { categoria: categoria || null }),
+      sort: sort === "recent" ? null : sort,
+      preco_min: minimum || null,
+      preco_max: maximum || null,
+      estoque: values.has("estoque") ? "1" : null,
+    }));
+    setOpen(false);
+  };
 
   const handleClear = useCallback(() => {
     router.push(basePath);
@@ -128,12 +152,13 @@ export function CatalogoFiltros({
   return (
     <>
       {/* Barra compacta de filtros */}
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex w-full flex-col gap-2 sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2">
         <button
           ref={triggerRef}
           type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-medium min-h-[40px]"
+          className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-medium min-h-[44px]"
           aria-expanded={open}
           aria-controls="filter-drawer"
         >
@@ -149,7 +174,8 @@ export function CatalogoFiltros({
         </button>
 
         <select
-          defaultValue={sort}
+          aria-label="Ordenar produtos"
+          value={sort}
           onChange={(e) => router.push(buildUrl({ sort: e.target.value === "recent" ? null : e.target.value }))}
           className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none min-h-[40px]"
         >
@@ -160,14 +186,17 @@ export function CatalogoFiltros({
           <option value="price_desc">Maior preço</option>
         </select>
 
-        {/* Chips de filtros ativos */}
+        </div>
+
+        {/* Chips de filtros ativos, separados da linha de controles para não comprimir o mobile */}
         {chips.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 w-full mt-1">
+          <div className="flex flex-wrap gap-1.5" aria-label="Filtros ativos">
             {chips.map((chip, i) => (
               <button
                 key={i}
                 type="button"
                 onClick={chip.remove}
+                aria-label={`Remover ${chip.label}`}
                 className="inline-flex items-center gap-1 rounded-full bg-ink/5 border border-ink/10 px-3 py-1 text-xs font-medium text-ink-soft hover:bg-ink/10"
               >
                 {chip.label}
@@ -198,6 +227,7 @@ export function CatalogoFiltros({
           <div
             ref={drawerRef}
             id="filter-drawer"
+            tabIndex={-1}
             className="relative w-full max-h-[85vh] sm:max-w-md sm:max-h-[80vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white p-5 shadow-xl"
           >
             <div className="flex items-center justify-between mb-4">
@@ -219,17 +249,20 @@ export function CatalogoFiltros({
             <form
               action={basePath}
               className="flex flex-col gap-4"
-              onSubmit={() => setOpen(false)}
+              onSubmit={handleApply}
+              key={`${q}|${categoria}|${sort}|${precoMin}|${precoMax}|${soEstoque}`}
             >
               {categoria && !lockedCategoria && (
                 <input type="hidden" name="categoria" value={categoria} />
               )}
               <input type="hidden" name="q" value={q} />
               <input type="hidden" name="sort" value={sort} />
+              {searchParams.get("oferta") === "1" && <input type="hidden" name="oferta" value="1" />}
 
               <div>
-                <label className="block text-sm font-medium text-ink mb-1">Preço mínimo (R$)</label>
+                <label htmlFor={priceMinId} className="block text-sm font-medium text-ink mb-1">Preço mínimo (R$)</label>
                 <input
+                  id={priceMinId}
                   name="preco_min"
                   defaultValue={precoMin > 0 ? String(precoMin) : ""}
                   placeholder="Mín."
@@ -239,8 +272,9 @@ export function CatalogoFiltros({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-ink mb-1">Preço máximo (R$)</label>
+                <label htmlFor={priceMaxId} className="block text-sm font-medium text-ink mb-1">Preço máximo (R$)</label>
                 <input
+                  id={priceMaxId}
                   name="preco_max"
                   defaultValue={precoMax > 0 ? String(precoMax) : ""}
                   placeholder="Máx."
