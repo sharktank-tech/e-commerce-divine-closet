@@ -26,7 +26,7 @@ export function TrackingScripts({
     const run = async (emitView: boolean) => {
       const current = ++generation;
       pauseTracking();
-      if (!hasConsent() || /^\\/(acompanhar|newsletter|admin|conta)(\\/|$)/.test(path))
+      if (!hasConsent() || /^\/(acompanhar|newsletter|admin|conta)(\/|$)/.test(path))
         return;
       let authorized = false;
       try {
