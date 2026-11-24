@@ -108,11 +108,32 @@ describe.skipIf(!localDisposable)("GA4 concorrência: revogação vs worker em P
     const { token, tokenId } = await newConsentToken();
     const testId = randomUUID();
     let orderId: string | undefined;
+    let productId: string | undefined;
+    let categoryId: string | undefined;
     try {
       const order = await prisma.order.create({
         data: { number: "GA4-RACE-" + testId, status: "REFUNDED", paymentStatus: "REFUNDED", subtotal: 100, total: 100 },
       });
       orderId = order.id;
+      // Snapshot real mínimo para o builder financeiro (sem catálogo de produção).
+      const category = await prisma.category.create({
+        data: { name: "GA4 category " + testId, slug: "ga4-category-" + testId },
+      });
+      categoryId = category.id;
+      const product = await prisma.product.create({
+        data: {
+          categoryId, name: "GA4 test product", slug: "ga4-product-" + testId,
+          description: "Produto fictício, apenas PostgreSQL descartável",
+          price: 100, images: [], sizes: [], colors: [],
+        },
+      });
+      productId = product.id;
+      await prisma.orderItem.create({
+        data: {
+          orderId, productId, productName: product.name, productSlug: product.slug,
+          quantity: 1, unitPrice: 100, total: 100,
+        },
+      });
       await prisma.refund.create({
         data: { orderId, paymentId: "ga4-local-test", idempotencyKey: "ga4-race-" + testId, amount: 100, status: "APPROVED" },
       });
@@ -147,6 +168,8 @@ describe.skipIf(!localDisposable)("GA4 concorrência: revogação vs worker em P
       expect(await enqueueGa4RefundIfAuthorized(orderId)).toBe("SKIPPED");
     } finally {
       if (orderId) await prisma.order.deleteMany({ where: { id: orderId } });
+      if (productId) await prisma.product.deleteMany({ where: { id: productId } });
+      if (categoryId) await prisma.category.deleteMany({ where: { id: categoryId } });
       await prisma.auditLog.deleteMany({ where: { entityId: tokenId, action: "ga4_consent_revoked" } });
       await prisma.analyticsBrowserConsent.deleteMany({ where: { id: tokenId } });
     }
