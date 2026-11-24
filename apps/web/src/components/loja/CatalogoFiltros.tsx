@@ -154,37 +154,37 @@ export function CatalogoFiltros({
       {/* Barra compacta de filtros */}
       <div className="mt-3 flex w-full flex-col gap-2 sm:w-auto">
         <div className="flex flex-wrap items-center gap-2">
-        <button
-          ref={triggerRef}
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-medium min-h-[44px]"
-          aria-expanded={open}
-          aria-controls="filter-drawer"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filtros
-          {filtrosAtivos > 0 && (
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-ink text-[10px] font-bold text-primary-50">
-              {filtrosAtivos}
-            </span>
-          )}
-        </button>
+          <button
+            ref={triggerRef}
+            type="button"
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm font-medium min-h-[44px]"
+            aria-expanded={open}
+            aria-controls="filter-drawer"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            Filtros
+            {filtrosAtivos > 0 && (
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-ink text-[10px] font-bold text-primary-50">
+                {filtrosAtivos}
+              </span>
+            )}
+          </button>
 
-        <select
-          aria-label="Ordenar produtos"
-          value={sort}
-          onChange={(e) => router.push(buildUrl({ sort: e.target.value === "recent" ? null : e.target.value }))}
-          className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none min-h-[40px]"
-        >
-          <option value="recent">Lançamentos</option>
-          <option value="desconto">Maior desconto</option>
-          <option value="sales">Mais vendidos</option>
-          <option value="price_asc">Menor preço</option>
-          <option value="price_desc">Maior preço</option>
-        </select>
+          <select
+            aria-label="Ordenar produtos"
+            value={sort}
+            onChange={(e) => router.push(buildUrl({ sort: e.target.value === "recent" ? null : e.target.value }))}
+            className="rounded-full border border-ink/15 bg-white px-3 py-2 text-sm outline-none min-h-[44px]"
+          >
+            <option value="recent">Lançamentos</option>
+            <option value="desconto">Maior desconto</option>
+            <option value="sales">Mais vendidos</option>
+            <option value="price_asc">Menor preço</option>
+            <option value="price_desc">Maior preço</option>
+          </select>
 
         </div>
 
