@@ -526,8 +526,8 @@ model LoteCompra {
   quantidade_pecas    Int       @default(1)
   categoria_id      String?    @db.Uuid
   observacoes       String?
-  created_at        DateTime   @default(now())
-  updated_at        DateTime   @updatedAt
+  created_at        DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime   @default(now()) @updatedAt @db.Timestamptz(6)
 
   @@map("lotes_compra")
 }
