@@ -1,5 +1,5 @@
 {
-  "explanation": "Remaining drift after schema-only alignment of AuditLog.id and TIMESTAMPTZ(6)/updated_at defaults in config_precificacao and materiais_embalagem. Five legacy tables / 23 change entries on disposable PostgreSQL. The materiais_embalagem UNIQUE(nome) discrepancy remains; no production database was inspected, no DDL applied.",
+  "explanation": "Remaining drift after schema-only alignment of AuditLog.id, pricing timestamps and Product pricing fields. Five legacy tables / 21 entries on disposable PostgreSQL. Production parity is unverified.",
   "originalCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704",
   "workflowHead": "8244a178e49c4a9ee8a0ece0dde489ee6a8771e0",
   "tables": 5,
@@ -13,8 +13,6 @@
     "[-] Removed foreign key on columns (lote_id)",
     "[*] Altered column `custo_peca_centavos` (changed from Nullable to Required)",
     "[*] Altered column `custo_embalagem_centavos` (changed from Nullable to Required)",
-    "[*] Altered column `custos_extras_descricao` (default changed from `Some(Value(String(\"\")))` to `None`)",
-    "[*] Altered column `precificacao_calculada_em` (type changed)",
     "[*] Changed the `Review` table",
     "[-] Removed unique index on columns (userId, productId)",
     "[*] Changed the `lotes_compra` table",
@@ -54,5 +52,12 @@
       "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)"
     ],
     "observation": "CI proved that materiais_embalagem still differs by UNIQUE(nome); its table header is retained with that index in the baseline. This PR does not create the UNIQUE index."
+  },
+  "resolvedProductPricing": {
+    "change": "Declare the existing empty-string default and native TIMESTAMPTZ(6) type in the Prisma model.",
+    "previousBaselineEntries": [
+      "[*] Altered column `custos_extras_descricao` (default changed from `Some(Value(String(\"\")))` to `None`)",
+      "[*] Altered column `precificacao_calculada_em` (type changed)"
+    ]
   }
 }
