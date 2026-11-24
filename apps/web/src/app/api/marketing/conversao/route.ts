@@ -88,7 +88,10 @@ export async function POST(req: NextRequest) {
     {
       paid: true,
       id: o.id,
-      total: Number(o.total),
+      // GA4 value exclui frete; descontos reduzem valor dos produtos.
+      // Reembolso usa a mesma base economica para compras novas.
+      total: Math.round((Number(o.subtotal) - Number(o.discount)) * 100) / 100,
+      shipping: Number(o.shipping),
       items: o.items.map((i) => ({
         id: i.productId,
         name: i.productName,

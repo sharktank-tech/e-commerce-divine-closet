@@ -148,6 +148,22 @@ function tentarEnvioEmailRefund(emailId: string | null): void {
 }
 
 /**
+ * Analytics é efeito posterior ao commit financeiro: falhas da outbox
+ * nunca bloqueiam a confirmação do estorno nem alteram o Mercado Pago.
+ * A intenção só é gravada para pedidos com autorização persistida válida.
+ * Não há envio HTTP ao GA4.
+ */
+async function prepararRefundAnalytics(orderId: string): Promise<void> {
+  try {
+    const { enqueueGa4RefundIfAuthorized } = await import("@/lib/ga4-refund-outbox");
+    await enqueueGa4RefundIfAuthorized(orderId);
+  } catch (err) {
+    // Não incluir payload, dados pessoais ou client_id no log.
+    console.error("[estorno:ga4:outbox]", err instanceof Error ? err.name : "unknown_error");
+  }
+}
+
+/**
  * Quando o provedor confirma o pagamento como refunded (webhook/manual):
  * registra/aprova o estorno (1:1) e marca o pedido REFUNDED.
  * Idempotente — notificações repetidas não alteram nada.
@@ -199,6 +215,8 @@ export async function confirmarEstornoNotificado(
   if (mudou) {
     entregarEventoEstorno(eventoId);
     tentarEnvioEmailRefund(emailId);
+    // A transição financeira já foi COMMITada.
+    await prepararRefundAnalytics(orderId);
   }
 }
 
@@ -240,6 +258,7 @@ async function aplicarResultado(
         if (mudou) {
           entregarEventoEstorno(eventoId);
           tentarEnvioEmailRefund(emailId);
+          await prepararRefundAnalytics(orderId);
         }
       }
     }

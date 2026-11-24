@@ -1,0 +1,66 @@
+name: GA4 refund foundation checks
+on:
+  push:
+    branches:
+      - feature/ga4-refund-safe-foundation
+  pull_request:
+    paths:
+      - "apps/web/src/lib/ga4-*"
+      - "apps/web/src/app/api/analytics/**"
+      - "packages/database/prisma/**"
+      - ".github/workflows/ga4-refund-checks.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/divine_ga4_test
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      JWT_SECRET: test-ga4-foundation-only-never-use-in-production-123
+      GA4_REFUND_TRANSPORT_ENABLED: "false"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: divine_ga4_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Prisma schema validation
+        run: npx prisma validate --schema packages/database/prisma/schema.prisma
+      - name: Migrate disposable PostgreSQL
+        run: npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+      - name: Prisma drift diagnostic (legacy baseline, nonblocking)
+        continue-on-error: true
+        run: |
+          npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel packages/database/prisma/schema.prisma --exit-code
+      - name: Tests
+        run: npm test -- --reporter=default
+      - name: Typecheck
+        if: always()
+        run: npm run typecheck
+      - name: Lint
+        if: always()
+        run: npm run lint
+      - name: Build
+        if: always()
+        run: npm run build

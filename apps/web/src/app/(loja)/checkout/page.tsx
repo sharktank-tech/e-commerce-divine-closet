@@ -10,6 +10,7 @@ import { formatBRL } from "@/lib/utils";
 import type { AvisoItem } from "@/lib/carrinho-revalidacao";
 import { shipping as shippingConfig } from "@/config/defaults";
 import { analytics, checkoutUtm, hasConsent } from "@/lib/analytics";
+import { checkoutGa4ClientId } from "@/lib/ga4-checkout-client";
 import { PurchaseTracker } from "@/components/loja/PurchaseTracker";
 import { useAutofillCep } from "@/hooks/useAutofillCep";
 import {
@@ -652,6 +653,7 @@ export default function CheckoutPage() {
           return;
         }
       }
+      const ga4ClientId = await checkoutGa4ClientId();
       const res = await fetch("/api/pedidos", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": tentativaRef.current.key },
@@ -676,6 +678,7 @@ export default function CheckoutPage() {
             ...pagamentoExtra,
           },
           utm: checkoutUtm(),
+          ...(ga4ClientId ? { analytics: { clientId: ga4ClientId } } : {}),
           couponCode: coupon?.code || null,
           notes: form.notes || null,
           ...(me ? {} : { guest: { email: guest.email, name: guest.name || undefined } }),
