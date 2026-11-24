@@ -29,6 +29,7 @@ export function TrackingScripts({
       if (!hasConsent() || /^\/(acompanhar|newsletter|admin|conta)(\/|$)/.test(path))
         return;
       let authorized = false;
+      let serverConfirmed = false;
       try {
         const response = await fetch("/api/analytics/consent", {
           method: "GET",
@@ -37,17 +38,20 @@ export function TrackingScripts({
         });
         if (response.ok) {
           const body: unknown = await response.json();
-          authorized = Boolean(body && typeof body === "object" &&
-            "granted" in body && (body as { granted?: unknown }).granted === true);
+          if (body && typeof body === "object" && "granted" in body &&
+              typeof (body as { granted?: unknown }).granted === "boolean") {
+            serverConfirmed = true;
+            authorized = (body as { granted: boolean }).granted;
+          }
         }
       } catch {
-        // Falha de rede/servidor: não iniciar rastreamento.
+        // Falha de rede/servidor: não iniciar rastreamento nem apagar preferência.
       }
       if (disposed || current !== generation) return;
       if (!authorized) {
-        // Token perdido, expirado ou revogado em outro dispositivo:
-        // interrompe rastreamento nesta aba e sincroniza outras abas via storage.
-        setConsent(false);
+        // Só persistir recusa local quando o servidor confirmar explicitamente
+        // expiração, perda ou revogação. Erro de rede permanece fail-closed.
+        if (serverConfirmed) setConsent(false);
         return;
       }
       // A escolha pode ter mudado enquanto o GET estava pendente.
