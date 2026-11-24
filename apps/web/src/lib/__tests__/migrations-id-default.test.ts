@@ -22,9 +22,9 @@ const MIGRATIONS_DIR = join(PRISMA_DIR, "migrations");
 // anteriores ao padrão UUID+DEFAULT). A conversão id TEXT→uuid das demais
 // tabelas legadas é versionada por 20260928181000_rebuild_legacy_uuid
 // (simulada abaixo a partir do ARRAY de tabelas da própria migração).
-// AuditLog permanece TEXT+default (funciona porque o DEFAULT gera uuid; o
-// tipo diverge do schema @db.Uuid — divergência conhecida, documentada e
-// coberta pelo teste de integração). Qualquer NOVA tabela deve seguir o
+// AuditLog permanece TEXT+default (funciona porque o DEFAULT gera uuid) e
+// agora o schema Prisma espelha explicitamente o tipo TEXT sem @db.Uuid.
+// Teste PostgreSQL descartável cobre criação e leitura pela aplicação. Qualquer NOVA tabela deve seguir o
 // padrão atual e não entrar aqui.
 const LEGADO_TEXT_OK = new Set(["AuditLog"]);
 
@@ -116,10 +116,18 @@ describe("migrations: id das tabelas com dbgenerated no schema", () => {
         expect(
           LEGADO_TEXT_OK.has(model),
           `${model}: migration cria id como TEXT ${estado.temDefault ? "com" : "SEM"} DEFAULT, ` +
-            `mas o schema declara @db.Uuid @default(dbgenerated). Novas tabelas precisam de ` +
+            `mas requer exceção legada declarada no modelo. Novas tabelas precisam de ` +
             `UUID NOT NULL DEFAULT gen_random_uuid() — sem o default o Prisma omite o id no ` +
             `INSERT e viola NOT NULL (ex.: refund.create do estorno).`
         ).toBe(true);
+        expect(estado.temDefault, `${model}: default gen_random_uuid ausente`).toBe(true);
+        if (model === "AuditLog") {
+          const prismaSchema = readFileSync(join(PRISMA_DIR, "schema.prisma"), "utf8");
+          const auditLogModel = prismaSchema.split("model AuditLog {")[1]?.split("}")[0] ?? "";
+          const idLine = auditLogModel.split("\n").find((line) => /^\s*id\s+String\s+@id\b/.test(line)) ?? "";
+          expect(idLine).toContain('dbgenerated("gen_random_uuid()")');
+          expect(idLine).not.toContain("@db.Uuid");
+        }
         return;
       }
 
