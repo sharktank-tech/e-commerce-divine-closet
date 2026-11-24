@@ -11,16 +11,16 @@ const example = [
   "",
 ].join("\n");
 
-test("baseline contains 7 explicitly reviewed legacy tables and 32 change entries", () => {
-  assert.equal(baseline.tables, 7);
-  assert.equal(baseline.entries.length, 32);
-  assert.equal(extractDriftEntries(example).length, 32);
-  assert.deepEqual(verifyKnownDrift(example, 2, baseline), { tables: 7, entries: 32, driftKnown: true });
+test("baseline contains 6 remaining legacy tables and 28 change entries", () => {
+  assert.equal(baseline.tables, 6);
+  assert.equal(baseline.entries.length, 28);
+  assert.equal(extractDriftEntries(example).length, 28);
+  assert.deepEqual(verifyKnownDrift(example, 2, baseline), { tables: 6, entries: 28, driftKnown: true });
 });
 
 test("Prisma v6 ANSI coloring does not alter the comparison", () => {
   const colored = example.replace("[*] Changed", "\x1b[33m[*] Changed");
-  assert.deepEqual(verifyKnownDrift(colored, 2, baseline), { tables: 7, entries: 32, driftKnown: true });
+  assert.deepEqual(verifyKnownDrift(colored, 2, baseline), { tables: 6, entries: 28, driftKnown: true });
 });
 
 test("new or reordered drift is blocked rather than silently allowed", () => {
