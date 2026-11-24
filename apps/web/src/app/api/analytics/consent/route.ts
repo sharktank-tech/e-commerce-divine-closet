@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/auth";
 import {
   GA4_CONSENT_COOKIE,
   newConsentToken,
@@ -62,33 +63,51 @@ export async function POST(req: NextRequest) {
     return resp;
   }
 
-  if (previous) {
+  // Recusa não exige cookie de GA4: com sessão CLIENT válida, a revogação
+  // alcança também os pedidos já associados à conta em outros dispositivos.
+  // Não revoga pedidos de convidados sem prova de posse.
+  const session = await getSession(req);
+  const accountId = session?.role === "CLIENT" ? session.sub : null;
+  if (previous || accountId) {
     await prisma.$transaction(async (tx) => {
-      await tx.analyticsBrowserConsent.updateMany({
-        where: { id: previous.tokenId },
-        data: { state: "REVOKED", revokedAt: new Date() },
-      });
       const identities = await tx.analyticsOrderIdentity.findMany({
-        where: { consentTokenId: previous.tokenId },
-        select: { orderId: true },
+        where: {
+          OR: [
+            ...(previous ? [{ consentTokenId: previous.tokenId }] : []),
+            ...(accountId ? [{ order: { userId: accountId } }] : []),
+          ],
+        },
+        select: { orderId: true, consentTokenId: true },
       });
-      await tx.analyticsOrderIdentity.updateMany({
-        where: { consentTokenId: previous.tokenId },
-        data: { consentState: "REVOKED", clientId: null, revokedAt: new Date() },
-      });
-      if (identities.length) {
+      const orderIds = [...new Set(identities.map((entry) => entry.orderId))];
+      const tokenIds = [...new Set([
+        ...(previous ? [previous.tokenId] : []),
+        ...identities.map((entry) => entry.consentTokenId).filter((id): id is string => Boolean(id)),
+      ])];
+      const revokedAt = new Date();
+      if (tokenIds.length) {
+        await tx.analyticsBrowserConsent.updateMany({
+          where: { id: { in: tokenIds }, state: { not: "REVOKED" } },
+          data: { state: "REVOKED", revokedAt },
+        });
+      }
+      if (orderIds.length) {
+        await tx.analyticsOrderIdentity.updateMany({
+          where: { orderId: { in: orderIds } },
+          data: { consentState: "REVOKED", clientId: null, revokedAt },
+        });
+        // PROCESSING não é presumido não entregue; transporte continua hard-off.
         await tx.analyticsEvent.updateMany({
-          where: { orderId: { in: identities.map((i) => i.orderId) }, status: { in: ["PENDING", "FAILED"] } },
+          where: { orderId: { in: orderIds }, status: { in: ["PENDING", "FAILED"] } },
           data: { status: "SKIPPED", lastError: "consent_revoked" },
         });
       }
-      // Audit: registrar revogação (sem dados pessoais)
       await tx.auditLog.create({
         data: {
           action: "ga4_consent_revoked",
-          entity: "AnalyticsBrowserConsent",
-          entityId: previous.tokenId,
-          meta: { revoked: true, affectedOrders: identities.length },
+          entity: accountId ? "AccountAnalyticsConsent" : "AnalyticsBrowserConsent",
+          entityId: accountId ?? previous?.tokenId,
+          meta: { revoked: true, affectedOrders: orderIds.length, source: accountId ? "account_and_browser" : "browser" },
         },
       });
     });

@@ -11,11 +11,20 @@ export function ConsentBanner() {
   const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
-    try {
-      if (localStorage.getItem(CONSENT_KEY) === null) setVisivel(true);
-    } catch {
-      // storage indisponível: não exibe, não rastreia
-    }
+    const syncFromStorage = () => {
+      try {
+        setVisivel(localStorage.getItem(CONSENT_KEY) === null);
+      } catch {
+        // Sem storage não há consentimento confiável: tracking segue negado.
+        setVisivel(true);
+      }
+    };
+    syncFromStorage();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === CONSENT_KEY || event.key === null) syncFromStorage();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   if (!visivel) return <button className="fixed bottom-2 left-2 z-40 rounded bg-white px-3 py-2 text-xs shadow" onClick={()=>setVisivel(true)}>Preferências de cookies</button>;
