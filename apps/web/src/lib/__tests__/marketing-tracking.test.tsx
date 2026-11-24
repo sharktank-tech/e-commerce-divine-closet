@@ -70,11 +70,13 @@ it("token perdido ou revogado no servidor interrompe tracking e sincroniza recus
   expect(window.gtag).toHaveBeenCalledWith("consent", "update", expect.objectContaining({ analytics_storage: "denied" }));
 });
 
-it("falha do GET mantém rastreamento desligado", async () => {
+it("falha do GET desliga tracking sem apagar preferência local", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
   render(<TrackingScripts meta="123" gtag={["G-TEST"]} />);
-  await waitFor(() => expect(localStorage.getItem("dc-consent")).toBe("0"));
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  expect(localStorage.getItem("dc-consent")).toBe("1");
   expect(window.dcTracking).toBeUndefined();
+  expect(window.gtag).toHaveBeenCalledWith("consent", "update", expect.objectContaining({ analytics_storage: "denied" }));
 });
 
 it("revogação em outra aba interrompe SDKs imediatamente", async () => {
