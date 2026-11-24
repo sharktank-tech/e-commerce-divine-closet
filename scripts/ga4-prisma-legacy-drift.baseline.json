@@ -1,13 +1,9 @@
 {
-  "explanation": "Observed legacy Prisma difference after migrate deploy on disposable PostgreSQL 16; not a production schema inspection. Do not amend this baseline without review.",
+  "explanation": "Remaining drift after schema-only alignment of AuditLog.id TEXT in dependent PR: six legacy tables with 28 change entries. This baseline only describes PostgreSQL disposable reconstructed from migrations, not production. Never auto-apply Prisma diff as SQL.",
   "originalCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704",
   "workflowHead": "8244a178e49c4a9ee8a0ece0dde489ee6a8771e0",
-  "tables": 7,
+  "tables": 6,
   "entries": [
-    "[*] Changed the `AuditLog` table",
-    "[-] Dropped the primary key on columns (id)",
-    "[*] Column `id` would be dropped and recreated (type changed)",
-    "[+] Added primary key on columns (id)",
     "[*] Changed the `MarketingMessage` table",
     "[-] Removed foreign key on columns (campaignId)",
     "[-] Removed foreign key on columns (subscriberId)",
@@ -36,5 +32,16 @@
     "[*] Altered column `created_at` (type changed)",
     "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)",
     "[+] Added unique index on columns (nome)"
-  ]
+  ],
+  "resolvedBySchemaOnly": {
+    "table": "AuditLog",
+    "change": "Removed @db.Uuid; kept TEXT as documented in migrations; no DDL or data conversion",
+    "previousBaselineEntries": [
+      "[*] Changed the `AuditLog` table",
+      "[-] Dropped the primary key on columns (id)",
+      "[*] Column `id` would be dropped and recreated (type changed)",
+      "[+] Added primary key on columns (id)"
+    ],
+    "previousCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704"
+  }
 }
