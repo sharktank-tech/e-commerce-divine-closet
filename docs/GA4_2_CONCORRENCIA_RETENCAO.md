@@ -13,10 +13,13 @@ A revogação pelo endpoint de consentimento e a revogação interna por pedido:
 - Transicionam `PENDING` e `FAILED` para `SKIPPED`, limpando leases.
 - Transicionam `PROCESSING` para `FAILED` com `lastError=consent_revoked_inflight_uncertain` e limpam o lease. **Não afirmar que foi SKIPPED**, pois a entrega poderia já ter ocorrido no futuro.
 - Preservam `ACCEPTED` (evento previamente aceito); revogar não desfaz uma entrega externa passada.
+- O enfileiramento também passou a ocorrer em uma transação: bloqueia **token de consentimento → identidade analítica** nessa ordem, relê consentimento e estado financeiro e só então cria o evento. Se a revogação vencer, não cria `PENDING`; se o enqueue vencer, a revogação vê e cancela a intenção. A colisão UNIQUE é tratada **após rollback** da transação, preservando a idempotência.
 - O worker finaliza por atualização condicional `status=PROCESSING`. Se uma revogação vence a disputa, a atualização encontra `count=0` e retorna `CONFLICT`, nunca convertendo o evento de volta a `PENDING` ou assumindo `ACCEPTED`. Esses conflitos exigem observabilidade/revisão futura, sem reenvio automático.
 - Não modificam o estado financeiro do pedido/reembolso, não chamam o Mercado Pago.
 
-**Limite fundamental:** a transação protege estados *no banco*, **não** bloqueia nem revoga uma requisição HTTP externa já iniciada. A prova de serialização de envio para quando o transporte for implementado exige protocolo de egress próprio (fencing/lease compartilhado, revalidação e decisão sobre in-flight). Não usar estes testes como autorização para ligar o transporte. O arquivo `ga4-transport.ts` continua hard-off incondicionalmente.
+**Limite fundamental:** a transação não cria automaticamente uma preferência de revogação para futuros pedidos/dispositivos e não consegue impedir um INSERT de um código legado que ignore os locks e a nova rotina. Todas as vias de criação de intenções devem passar pelo boundary auditado.
+
+**Limite de egress:** a transação protege estados *no banco*, **não** bloqueia nem revoga uma requisição HTTP externa já iniciada. A prova de serialização de envio para quando o transporte for implementado exige protocolo de egress próprio (fencing/lease compartilhado, revalidação e decisão sobre in-flight). Não usar estes testes como autorização para ligar o transporte. O arquivo `ga4-transport.ts` continua hard-off incondicionalmente.
 
 ### Matriz de interleaving
 
@@ -34,7 +37,7 @@ A revogação pelo endpoint de consentimento e a revogação interna por pedido:
 1. `GA4_CONCURRENCY_TEST_DB=true` explícito.
 2. `DATABASE_URL` local, banco `divine_ga4_test` e porta 5432.
 
-O CI prepara PostgreSQL descartável via serviço, migra o schema nele e habilita essa flag. O teste cria um pedido e reembolso **fictícios nesse banco isolado**, um evento `PENDING` e consentimento assinado de teste. Mocka `submitGa4Refund` com um bloqueio controlado, inicia o worker, revoga o cookie no endpoint enquanto o evento está `PROCESSING`, libera a conclusão simulada e prova que o CAS não reabre o evento. Não chama serviços externos, não cria um pedido na loja real e remove os registros do banco de teste ao terminar.
+O CI prepara PostgreSQL descartável via serviço, migra o schema nele e habilita essa flag. O teste cria um pedido e reembolso **fictícios nesse banco isolado**, um evento `PENDING` e consentimento assinado de teste. Mocka `submitGa4Refund` com um bloqueio controlado, inicia o worker, revoga o cookie no endpoint enquanto o evento está `PROCESSING`, libera a conclusão simulada e prova que o CAS não reabre o evento. Outro teste disputa `enqueueGa4RefundIfAuthorized` com a revogação e prova que nenhum `PENDING` persiste depois da confirmação de recusa. Não chama serviços externos, não cria um pedido na loja real e remove os registros do banco de teste ao terminar.
 
 ## 4. Inventário de retenção — dry-run, sem deleção
 
