@@ -26,7 +26,7 @@ export async function reconcileGa4RefundIntents(
 }> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
     throw new Error("invalid_reconciliation_limit");
-  if (afterOrderId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(afterOrderId))
+  if (afterOrderId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(afterOrderId))
     throw new Error("invalid_reconciliation_cursor");
 
   const result = {
