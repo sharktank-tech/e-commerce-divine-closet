@@ -15,7 +15,8 @@ import {
 export async function enqueueGa4RefundIfAuthorized(orderId: string): Promise<
   "CREATED" | "ALREADY_EXISTS" | "SKIPPED"
 > {
-  return prisma.$transaction(async (tx) => {
+  try {
+    return await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
       include: { items: true, refund: true, analyticsIdentity: true },
@@ -77,8 +78,7 @@ export async function enqueueGa4RefundIfAuthorized(orderId: string): Promise<
       })),
     });
 
-    try {
-      await tx.analyticsEvent.create({
+    await tx.analyticsEvent.create({
         data: {
           orderId: order.id,
           dedupeKey: refundDedupeKey(order.refund.id),
@@ -88,10 +88,12 @@ export async function enqueueGa4RefundIfAuthorized(orderId: string): Promise<
           status: "PENDING",
         },
       });
-      return "CREATED";
-    } catch (error) {
-      if ((error as { code?: string })?.code === "P2002") return "ALREADY_EXISTS";
-      throw error;
-    }
-  });
+    return "CREATED";
+    });
+  } catch (error) {
+    // PostgreSQL aborta a transação após uma violação UNIQUE. Capturar P2002
+    // fora do $transaction preserva idempotência sem reutilizar transação inválida.
+    if ((error as { code?: string })?.code === "P2002") return "ALREADY_EXISTS";
+    throw error;
+  }
 }
