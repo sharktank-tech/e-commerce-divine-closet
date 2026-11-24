@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { newConsentToken, GA4_CONSENT_COOKIE } from "@/lib/ga4-browser-consent";
 import { POST } from "@/app/api/analytics/consent/route";
 import { processOneGa4Refund } from "@/lib/ga4-refund-worker";
+import { enqueueGa4RefundIfAuthorized } from "@/lib/ga4-refund-outbox";
 
 const originalFlag = process.env.GA4_REFUND_TRANSPORT_ENABLED;
 afterEach(() => {
@@ -102,4 +103,53 @@ describe.skipIf(!localDisposable)("GA4 concorrência: revogação vs worker em P
       await prisma.analyticsBrowserConsent.deleteMany({ where: { id: tokenId } });
     }
   }, 20_000);
+
+  it("enqueue concorrente com revogação não deixa PENDING após commit", async () => {
+    const { token, tokenId } = await newConsentToken();
+    const testId = randomUUID();
+    let orderId: string | undefined;
+    try {
+      const order = await prisma.order.create({
+        data: { number: "GA4-RACE-" + testId, status: "REFUNDED", paymentStatus: "REFUNDED", subtotal: 100, total: 100 },
+      });
+      orderId = order.id;
+      await prisma.refund.create({
+        data: { orderId, paymentId: "ga4-local-test", idempotencyKey: "ga4-race-" + testId, amount: 100, status: "APPROVED" },
+      });
+      await prisma.analyticsBrowserConsent.create({
+        data: { id: tokenId, state: "GRANTED", grantedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000) },
+      });
+      await prisma.analyticsOrderIdentity.create({
+        data: { orderId, consentTokenId: tokenId, clientId: "123456.789012", consentState: "GRANTED", consentProofAt: new Date() },
+      });
+      const request = new NextRequest("http://localhost:3000/api/analytics/consent", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000", host: "localhost:3000",
+          cookie: GA4_CONSENT_COOKIE + "=" + token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ granted: false }),
+      });
+      const [enqueued, revoked] = await Promise.all([
+        enqueueGa4RefundIfAuthorized(orderId),
+        POST(request),
+      ]);
+      expect(["CREATED", "SKIPPED"]).toContain(enqueued);
+      expect(revoked.status).toBe(200);
+      const remaining = await prisma.analyticsEvent.findMany({ where: { orderId } });
+      expect(remaining.every((event) => event.status === "SKIPPED")).toBe(true);
+      expect(remaining.some((event) => event.status === "PENDING")).toBe(false);
+      const identity = await prisma.analyticsOrderIdentity.findUniqueOrThrow({ where: { orderId } });
+      expect(identity.consentState).toBe("REVOKED");
+      expect((await prisma.analyticsBrowserConsent.findUniqueOrThrow({ where: { id: tokenId } })).state).toBe("REVOKED");
+      // Após a revogação, nenhuma nova intenção pode ser criada.
+      expect(await enqueueGa4RefundIfAuthorized(orderId)).toBe("SKIPPED");
+    } finally {
+      if (orderId) await prisma.order.deleteMany({ where: { id: orderId } });
+      await prisma.auditLog.deleteMany({ where: { entityId: tokenId, action: "ga4_consent_revoked" } });
+      await prisma.analyticsBrowserConsent.deleteMany({ where: { id: tokenId } });
+    }
+  }, 20_000);
+
 });
