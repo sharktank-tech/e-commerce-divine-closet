@@ -10,7 +10,7 @@ import type { Ga4RefundEvent } from "@/lib/ga4-refund";
  * não promete dedupe externa se a resposta do MP se perde.
  */
 export async function processOneGa4Refund(): Promise<
-  "EMPTY" | "DISABLED" | "SKIPPED" | "ACCEPTED_UNVERIFIED" | "UNCERTAIN" | "RETRY"
+  "EMPTY" | "DISABLED" | "SKIPPED" | "ACCEPTED_UNVERIFIED" | "UNCERTAIN" | "RETRY" | "CONFLICT"
 > {
   // Hard-off deliberado e incondicional antes de qualquer claim.
   // Ativação futura exige outra revisão e sincronização completa de revogações.
@@ -87,32 +87,34 @@ export async function processOneGa4Refund(): Promise<
   }
 
   if (result.kind === "DISABLED") {
-    await prisma.analyticsEvent.updateMany({
+    const restored = await prisma.analyticsEvent.updateMany({
       where: { id: entry.id, status: "PROCESSING" },
       data: { status: "PENDING", leaseUntil: null },
     });
-    return "DISABLED";
+    // Revogação concorrente pode ter convertido PROCESSING em FAILED.
+    // Nunca assumir que restauramos a intenção nem a reabrir em retry.
+    return restored.count === 1 ? "DISABLED" : "CONFLICT";
   }
   if (result.kind === "ACCEPTED_UNVERIFIED") {
-    await prisma.analyticsEvent.updateMany({
+    const saved = await prisma.analyticsEvent.updateMany({
       where: { id: entry.id, status: "PROCESSING" },
       data: { status: "ACCEPTED", leaseUntil: null, acceptedAt: new Date() },
     });
-    return "ACCEPTED_UNVERIFIED";
+    return saved.count === 1 ? "ACCEPTED_UNVERIFIED" : "CONFLICT";
   }
   if (result.kind === "UNCERTAIN") {
     // Resposta perdida: retry cego poderia duplicar refund no GA4.
     // Fica FAILED para revisão operacional, sem envio automático.
-    await prisma.analyticsEvent.updateMany({
+    const saved = await prisma.analyticsEvent.updateMany({
       where: { id: entry.id, status: "PROCESSING" },
       data: { status: "FAILED", leaseUntil: null, lastError: "delivery_uncertain" },
     });
-    return "UNCERTAIN";
+    return saved.count === 1 ? "UNCERTAIN" : "CONFLICT";
   }
-  await prisma.analyticsEvent.updateMany({
+  const saved = await prisma.analyticsEvent.updateMany({
     where: { id: entry.id, status: "PROCESSING" },
     data: { status: "PENDING", leaseUntil: null,
       nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000), lastError: "transport_rejected" },
   });
-  return "RETRY";
+  return saved.count === 1 ? "RETRY" : "CONFLICT";
 }

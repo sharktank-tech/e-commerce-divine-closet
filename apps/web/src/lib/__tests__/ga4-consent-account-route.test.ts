@@ -6,18 +6,20 @@ const mocks = vi.hoisted(() => {
   const identitiesUpdate = vi.fn();
   const browserUpdate = vi.fn();
   const eventsUpdate = vi.fn();
+  const lockEvents = vi.fn();
   const audit = vi.fn();
   const getSession = vi.fn();
   const readConsent = vi.fn();
   const originAllowed = vi.fn();
   const tx = {
+    $queryRaw: lockEvents,
     analyticsOrderIdentity: { findMany: identities, updateMany: identitiesUpdate },
     analyticsBrowserConsent: { updateMany: browserUpdate },
     analyticsEvent: { updateMany: eventsUpdate },
     auditLog: { create: audit },
   };
   const transaction = vi.fn(async (fn: (db: typeof tx) => Promise<unknown>) => fn(tx));
-  return { identities, identitiesUpdate, browserUpdate, eventsUpdate, audit, getSession, readConsent, originAllowed, transaction };
+  return { identities, identitiesUpdate, browserUpdate, eventsUpdate, lockEvents, audit, getSession, readConsent, originAllowed, transaction };
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: { $transaction: mocks.transaction },
@@ -52,6 +54,7 @@ beforeEach(() => {
   mocks.identitiesUpdate.mockResolvedValue({ count: 0 });
   mocks.browserUpdate.mockResolvedValue({ count: 0 });
   mocks.eventsUpdate.mockResolvedValue({ count: 0 });
+  mocks.lockEvents.mockResolvedValue([]);
   mocks.audit.mockResolvedValue({ id: "audit" });
 });
 
@@ -77,9 +80,14 @@ describe("GA4 consent: recusa transacional e cross-device dos pedidos", () => {
       where: { orderId: { in: [one, two] } },
       data: { consentState: "REVOKED", clientId: null, revokedAt: expect.any(Date) },
     });
+    expect(mocks.lockEvents).toHaveBeenCalledTimes(1);
     expect(mocks.eventsUpdate).toHaveBeenCalledWith({
       where: { orderId: { in: [one, two] }, status: { in: ["PENDING", "FAILED"] } },
-      data: { status: "SKIPPED", lastError: "consent_revoked" },
+      data: { status: "SKIPPED", leaseUntil: null, lastError: "consent_revoked" },
+    });
+    expect(mocks.eventsUpdate).toHaveBeenCalledWith({
+      where: { orderId: { in: [one, two] }, status: "PROCESSING" },
+      data: { status: "FAILED", leaseUntil: null, lastError: "consent_revoked_inflight_uncertain" },
     });
     expect(mocks.audit).toHaveBeenCalledWith({
       data: {
@@ -95,6 +103,7 @@ describe("GA4 consent: recusa transacional e cross-device dos pedidos", () => {
     const response = await POST(req());
     expect(response.status).toBe(200);
     expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.lockEvents).not.toHaveBeenCalled();
     expect(mocks.audit).not.toHaveBeenCalled();
   });
 
@@ -114,7 +123,7 @@ describe("GA4 consent: recusa transacional e cross-device dos pedidos", () => {
       where: { OR: [{ consentTokenId: tokenA }] },
       select: { orderId: true, consentTokenId: true },
     });
-    expect(mocks.eventsUpdate).toHaveBeenCalledTimes(1);
+    expect(mocks.eventsUpdate).toHaveBeenCalledTimes(2);
     expect(mocks.audit).toHaveBeenCalledWith({
       data: {
         action: "ga4_consent_revoked",

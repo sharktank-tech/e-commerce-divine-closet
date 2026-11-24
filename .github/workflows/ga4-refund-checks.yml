@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - "apps/web/src/lib/ga4-*"
+      - "apps/web/src/lib/__tests__/ga4-*"
+      - "apps/web/src/components/loja/TrackingScripts.tsx"
       - "apps/web/src/app/api/analytics/**"
       - "packages/database/prisma/**"
       - ".github/workflows/ga4-refund-checks.yml"
@@ -23,6 +25,7 @@ jobs:
       PGPASSWORD: postgres
       JWT_SECRET: test-ga4-foundation-only-never-use-in-production-123
       GA4_REFUND_TRANSPORT_ENABLED: "false"
+      GA4_CONCURRENCY_TEST_DB: "true"
     services:
       postgres:
         image: postgres:16

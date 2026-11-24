@@ -79,4 +79,29 @@ describe("GA4 refund worker: hard-off, concorrência e revogação", () => {
     send.mockResolvedValueOnce({ kind: "ACCEPTED_UNVERIFIED" });
     expect(await processOneGa4Refund()).toBe("ACCEPTED_UNVERIFIED");
   });
+
+  it("não reabre PROCESSING se revogação concorrente venceu o CAS", async () => {
+    // Claim inicial obtido, depois revogação alterou PROCESSING -> FAILED.
+    updateEvent.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    expect(await processOneGa4Refund()).toBe("CONFLICT");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(updateEvent).toHaveBeenLastCalledWith({
+      where: { id: "event", status: "PROCESSING" },
+      data: { status: "PENDING", leaseUntil: null },
+    });
+  });
+
+  it("não informa ACCEPTED quando a revogação venceu o CAS após resposta de transporte simulada", async () => {
+    send.mockResolvedValueOnce({ kind: "ACCEPTED_UNVERIFIED" });
+    updateEvent.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    expect(await processOneGa4Refund()).toBe("CONFLICT");
+    // Nenhum assert de egress real: transporte de produção permanece hard-off.
+  });
+
+  it("não agenda retry em resposta REJECTED se a revogação venceu o CAS", async () => {
+    send.mockResolvedValueOnce({ kind: "REJECTED" });
+    updateEvent.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    expect(await processOneGa4Refund()).toBe("CONFLICT");
+  });
+
 });

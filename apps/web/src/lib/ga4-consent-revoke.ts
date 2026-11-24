@@ -6,13 +6,14 @@ import { prisma } from "@/lib/prisma";
  * Não é uma API pública. Marca identidade revogada e cancela intenções
  * ainda não aceitas, numa única transação.
  *
- * Limitação: a futura entrega externa exigirá lock/lease compartilhado com
- * esta operação para evitar corridas entre revogação e envio em progresso.
+ * Esta transação bloqueia as linhas da outbox durante a revogação e isola
+ * tentativas PROCESSING incertas. Transporte externo continua hard-off;
+ * uma futura entrega exigirá serialização de egress sob política própria.
  */
 export async function revokeOrderAnalyticsConsent(
   orderId: string,
   requesterId?: string | null,
-): Promise<{ revoked: boolean; skipped: number }> {
+): Promise<{ revoked: boolean; skipped: number; inFlightQuarantined: number }> {
   // Verificação de posse: se requesterId for fornecido, verificar que o pedido
   // pertence ao solicitante. Sem requesterId (chamada interna), a verificação
   // deve ser feita pelo chamador.
@@ -28,6 +29,14 @@ export async function revokeOrderAnalyticsConsent(
   }
 
   return prisma.$transaction(async (tx) => {
+    // Lock das linhas elegíveis antes de ler/escrever estados; o worker só
+    // pode finalizar por CAS status=PROCESSING, sem reabrir uma revogação.
+    await tx.$queryRaw`
+      SELECT "id" FROM "AnalyticsEvent"
+      WHERE "orderId" = ${orderId}::uuid
+        AND "status" IN ('PENDING', 'FAILED', 'PROCESSING')
+      ORDER BY "id" FOR UPDATE
+    `;
     const changed = await tx.analyticsOrderIdentity.updateMany({
       where: { orderId, consentState: { not: "REVOKED" } },
       data: {
@@ -40,9 +49,14 @@ export async function revokeOrderAnalyticsConsent(
       where: { orderId, status: { in: ["PENDING", "FAILED"] } },
       data: {
         status: "SKIPPED",
+        leaseUntil: null,
         lastError: "consent_revoked",
       },
     });
-    return { revoked: changed.count > 0, skipped: pending.count };
+    const inFlight = await tx.analyticsEvent.updateMany({
+      where: { orderId, status: "PROCESSING" },
+      data: { status: "FAILED", leaseUntil: null, lastError: "consent_revoked_inflight_uncertain" },
+    });
+    return { revoked: changed.count > 0, skipped: pending.count, inFlightQuarantined: inFlight.count };
   });
 }
