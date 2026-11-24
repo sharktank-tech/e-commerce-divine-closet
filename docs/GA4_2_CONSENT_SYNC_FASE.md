@@ -10,9 +10,9 @@ A cada montagem/navegação, evento de consentimento e atualização do storage 
 1. Coloca os SDKs em modo negado e desativa `window.dcTracking` imediatamente.
 2. Faz `GET /api/analytics/consent` com `cache: no-store`, sem criar aceite.
 3. Só ativa os SDKs após `{ granted: true }` explícito do servidor e confirmação de que a preferência local segue aceita.
-4. Em token expirado, perdido, revogado, resposta inválida ou falha de rede, mantém o tracking **desligado**, marca a preferência local como recusada e sincroniza a recusa por `storage`.
+4. Em token expirado, perdido ou revogado com resposta explícita `{ granted: false }`, desativa tracking, registra recusa local e sincroniza outras abas via `storage`. Em falha de rede, status não-2xx ou resposta inválida, desativa tracking **sem apagar a preferência local**, permitindo nova tentativa ao retomar foco.
 5. Ao voltar o foco para a aba, revalida consentimento; não registra um novo `page_view` apenas por retornar ao foco.
-6. Respostas antigas de uma verificação pendente não podem ativar tracking após revogação ou unmount (controle por geração).
+6. Respostas antigas de uma verificação pendente não podem ativar tracking após revogação ou unmount (controle por geração).\n7. O banner de preferências acompanha alterações do `localStorage` entre abas; não concede consentimento automaticamente.
 
 **Limite:** não é um bloqueio síncrono de todos os eventos do navegador no mesmo milissegundo de uma revogação em outro dispositivo. A aba distante descobre isso na próxima revalidação (navegação, foco, evento local), e requisições/eventos já transmitidos não são apagados retroativamente.
 
