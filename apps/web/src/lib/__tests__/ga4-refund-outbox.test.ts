@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { orderFind, eventCreate, browserConsentFind } = vi.hoisted(() => ({
+const { orderFind, eventCreate, browserConsentFind, identityFind, lockEvents, transaction } = vi.hoisted(() => ({
   orderFind: vi.fn(),
   eventCreate: vi.fn(),
   browserConsentFind: vi.fn(),
+  identityFind: vi.fn(),
+  lockEvents: vi.fn(),
+  transaction: vi.fn(),
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    order: { findUnique: orderFind },
-    analyticsEvent: { create: eventCreate },
-    analyticsBrowserConsent: { findUnique: browserConsentFind },
+    $transaction: transaction,
   },
 }));
 import { enqueueGa4RefundIfAuthorized } from "../ga4-refund-outbox";
@@ -32,6 +33,15 @@ describe("GA4 refund outbox: fail-closed", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     orderFind.mockResolvedValue(order);
+    identityFind.mockResolvedValue(order.analyticsIdentity);
+    lockEvents.mockResolvedValue([]);
+    transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      $queryRaw: lockEvents,
+      order: { findUnique: orderFind },
+      analyticsOrderIdentity: { findUnique: identityFind },
+      analyticsBrowserConsent: { findUnique: browserConsentFind },
+      analyticsEvent: { create: eventCreate },
+    }));
     eventCreate.mockResolvedValue({ id: "persistido" });
     browserConsentFind.mockResolvedValue({ state: "GRANTED", revokedAt: null, expiresAt: new Date("2030-01-01") });
   });
@@ -72,4 +82,25 @@ describe("GA4 refund outbox: fail-closed", () => {
     eventCreate.mockRejectedValue(new Error("database unavailable"));
     await expect(enqueueGa4RefundIfAuthorized(order.id)).rejects.toThrow("database unavailable");
   });
+
+  it("revogação durante leitura inicial impede criar PENDING ao revalidar sob lock", async () => {
+    identityFind.mockResolvedValueOnce({
+      ...order.analyticsIdentity, consentState: "REVOKED", revokedAt: new Date(), clientId: null,
+    });
+    expect(await enqueueGa4RefundIfAuthorized(order.id)).toBe("SKIPPED");
+    expect(eventCreate).not.toHaveBeenCalled();
+    expect(lockEvents).toHaveBeenCalledTimes(2);
+  });
+  it("bloqueia intenção se token expirou enquanto o enqueue aguardava lock", async () => {
+    browserConsentFind.mockResolvedValueOnce({
+      state: "GRANTED", revokedAt: null, expiresAt: new Date("2020-01-01"),
+    });
+    expect(await enqueueGa4RefundIfAuthorized(order.id)).toBe("SKIPPED");
+    expect(eventCreate).not.toHaveBeenCalled();
+  });
+  it("dedupe UNIQUE não deixa transação abortada vazar como erro", async () => {
+    eventCreate.mockRejectedValueOnce({ code: "P2002" });
+    expect(await enqueueGa4RefundIfAuthorized(order.id)).toBe("ALREADY_EXISTS");
+  });
+
 });
