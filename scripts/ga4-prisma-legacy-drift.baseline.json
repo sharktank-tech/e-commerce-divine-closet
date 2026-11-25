@@ -1,5 +1,5 @@
 {
-  "explanation": "Remaining drift after schema-only alignment of AuditLog.id, pricing timestamps and Product pricing fields and LoteCompra timestamps. Five legacy tables / 19 entries on disposable PostgreSQL. Production parity is unverified.",
+  "explanation": "Remaining drift after schema-only alignment of AuditLog.id, pricing timestamps and Product pricing fields and LoteCompra timestamps and quantity default. Five legacy tables / 18 entries on disposable PostgreSQL. Production parity is unverified.",
   "originalCiRun": "https://github.com/sharktank-tech/e-commerce-divine-closet/actions/runs/45437598704",
   "workflowHead": "8244a178e49c4a9ee8a0ece0dde489ee6a8771e0",
   "tables": 5,
@@ -19,7 +19,6 @@
     "[-] Removed foreign key on columns (categoria_id)",
     "[-] Removed index on columns (categoria_id)",
     "[-] Removed index on columns (data_compra)",
-    "[*] Altered column `quantidade_pecas` (default changed from `None` to `Some(Value(Int(1)))`)",
     "[+] Added unique index on columns (nome)",
     "[*] Changed the `materiais_embalagem` table",
     "[+] Added unique index on columns (nome)"
@@ -62,6 +61,11 @@
     "previousBaselineEntries": [
       "[*] Altered column `created_at` (type changed)",
       "[*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)"
+    ]
+  },
+  "resolvedLoteCompraQuantityDefault": {
+    "previousBaselineEntries": [
+      "[*] Altered column `quantidade_pecas` (default changed from `None` to `Some(Value(Int(1)))`)"
     ]
   }
 }

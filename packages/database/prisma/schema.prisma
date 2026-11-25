@@ -523,7 +523,7 @@ model LoteCompra {
   data_compra      DateTime   @db.Date
   valor_mercadoria_centavos Int       @default(0)
   valor_frete_centavos      Int       @default(0)
-  quantidade_pecas    Int       @default(1)
+  quantidade_pecas    Int
   categoria_id      String?    @db.Uuid
   observacoes       String?
   created_at        DateTime   @default(now()) @db.Timestamptz(6)
