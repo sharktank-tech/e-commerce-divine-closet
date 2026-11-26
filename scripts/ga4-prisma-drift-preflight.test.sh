@@ -8,9 +8,10 @@ fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Session-local tables model legacy data even when replayed FKs reject orphans.
-# Both SQL files run in one session so the preflight resolves those tables first.
+# All SQL files share a session so the preflight and rehearsal see the same fixtures.
 actual="$(psql -X -qAt -v ON_ERROR_STOP=1 "$DATABASE_URL" -f - \
-  -f "$script_dir/ga4-prisma-drift-preflight.sql" <<'SQL'
+  -f "$script_dir/ga4-prisma-drift-preflight.sql" \
+  -f "$script_dir/ga4-prisma-drift-preflight.rehearsal.sql" <<'SQL'
 CREATE TEMP TABLE "Category" (id integer PRIMARY KEY);
 CREATE TEMP TABLE "lotes_compra" (id integer PRIMARY KEY, nome text, categoria_id integer);
 CREATE TEMP TABLE "materiais_embalagem" (nome text);
