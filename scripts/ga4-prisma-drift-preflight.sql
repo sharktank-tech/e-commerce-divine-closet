@@ -48,11 +48,26 @@ SELECT 'legacy_review_user_product_unique_indexes' AS check_name,
    AND indexdef LIKE '%"userId"%'
    AND indexdef LIKE '%"productId"%';
 
-SELECT 'marketing_message_fk_constraints' AS check_name,
-       COUNT(*)::bigint AS total
+SELECT 'marketing_message_fk_action' AS check_name,
+       a.attname AS column_name,
+       pg_get_constraintdef(c.oid) AS definition,
+       c.convalidated AS validated
   FROM pg_constraint c
+  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
  WHERE c.conrelid = '"MarketingMessage"'::regclass
-   AND c.contype = 'f';
+   AND c.contype = 'f'
+   AND cardinality(c.conkey) = 1
+   AND a.attname IN ('campaignId', 'subscriberId')
+ ORDER BY a.attname, c.conname;
+
+SELECT 'review_duplicate_user_product_groups' AS check_name,
+       COUNT(*)::bigint AS total
+  FROM (
+    SELECT "userId", "productId"
+      FROM "Review"
+     GROUP BY "userId", "productId"
+    HAVING COUNT(*) > 1
+  ) duplicate_reviews;
 
 SELECT 'lotes_timestamp_rows' AS check_name, COUNT(*)::bigint AS total
   FROM "lotes_compra";
