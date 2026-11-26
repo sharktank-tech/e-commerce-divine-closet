@@ -29,6 +29,16 @@ SELECT 'lotes_nonnull_categoria_rows' AS check_name, COUNT(*)::bigint AS total
 SELECT 'product_nonnull_lote_rows' AS check_name, COUNT(*)::bigint AS total
   FROM "Product" WHERE lote_id IS NOT NULL;
 
+SELECT 'lotes_orphan_categoria_rows' AS check_name, COUNT(*)::bigint AS total
+  FROM "lotes_compra" l
+ WHERE l.categoria_id IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM "Category" c WHERE c.id = l.categoria_id);
+
+SELECT 'product_orphan_lote_rows' AS check_name, COUNT(*)::bigint AS total
+  FROM "Product" p
+ WHERE p.lote_id IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM "lotes_compra" l WHERE l.id = p.lote_id);
+
 SELECT 'legacy_review_user_product_unique_indexes' AS check_name,
        COUNT(*)::bigint AS total
   FROM pg_indexes
