@@ -76,7 +76,7 @@ jobs:
             echo "::error::Refusing preflight outside disposable database"
             exit 1
           fi
-          npx prisma db execute --file scripts/ga4-prisma-drift-preflight.sql --schema packages/database/prisma/schema.prisma
+          psql -X -v ON_ERROR_STOP=1 "$DATABASE_URL" -f scripts/ga4-prisma-drift-preflight.sql
       - name: Verify preflight detects synthetic anomalies
         run: bash scripts/ga4-prisma-drift-preflight.test.sh
       - name: Tests
